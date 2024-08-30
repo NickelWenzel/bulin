@@ -13,4 +13,3 @@ os=Linux
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
-tools.cmake.cmake_layout:build_folder_vars=['settings.os', 'const.ninja', 'settings.compiler']
