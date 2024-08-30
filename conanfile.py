@@ -6,7 +6,7 @@ class Recipe(ConanFile):
     generators = "CMakeToolchain", "CMakeDeps", "VirtualRunEnv"
 
     def layout(self):
-        self.folders.generators = f"build/conan/{self.settings.build_type}"
+        self.folders.generators = "build/conan"
 
     def requirements(self):
         self.requires("fmt/11.0.2")
