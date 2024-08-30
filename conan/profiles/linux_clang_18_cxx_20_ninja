@@ -1,0 +1,16 @@
+[buildenv]
+CC=/usr/bin/clang-18
+CXX=/usr/bin/clang++-18
+
+[settings]
+arch=x86_64
+build_type=Release
+compiler=clang
+compiler.cppstd=20
+compiler.libcxx=libstdc++
+compiler.version=18
+os=Linux
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+tools.cmake.cmake_layout:build_folder_vars=['settings.os', 'const.ninja', 'settings.compiler']

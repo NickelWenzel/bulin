@@ -6,10 +6,11 @@ class Recipe(ConanFile):
     generators = "CMakeToolchain", "CMakeDeps", "VirtualRunEnv"
 
     def layout(self):
-        self.folders.generators = "conan"
+        self.folders.generators = "build/conan"
 
     def requirements(self):
-        self.requires("fmt/10.2.1")
+        self.requires("fmt/11.0.2")
+        self.requires("lager/0.1.1")
 
     def build_requirements(self):
-        self.test_requires("catch2/3.6.0")
+        self.test_requires("catch2/3.7.0")
