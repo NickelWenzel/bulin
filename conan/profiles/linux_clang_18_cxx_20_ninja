@@ -9,3 +9,4 @@ os=Linux
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
+tools.build:compiler_executables={"cpp": "clang++", "c": "clang"}
