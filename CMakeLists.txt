@@ -29,6 +29,11 @@ target_include_directories(
 target_compile_features(bulin_lib PUBLIC cxx_std_20)
 
 find_package(fmt REQUIRED)
+
+set_target_properties(fmt::fmt PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:fmt::fmt,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
 target_link_libraries(bulin_lib PRIVATE fmt::fmt)
 
 # ---- Declare executable ----

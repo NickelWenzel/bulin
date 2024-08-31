@@ -12,6 +12,11 @@ include(Catch)
 # ---- Tests ----
 
 add_executable(bulin_test source/bulin_test.cpp)
+
+set_target_properties(Catch2::Catch2WithMain PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:Catch2::Catch2WithMain,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
 target_link_libraries(
     bulin_test PRIVATE
     bulin_lib
