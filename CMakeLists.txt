@@ -17,7 +17,10 @@ include(cmake/variables.cmake)
 
 add_library(
     bulin_lib OBJECT
-    source/lib.cpp
+    source/model.hpp
+    source/model.cpp
+    source/item.hpp
+    source/item.cpp
 )
 
 target_include_directories(
@@ -28,24 +31,62 @@ target_include_directories(
 
 target_compile_features(bulin_lib PUBLIC cxx_std_20)
 
-find_package(fmt REQUIRED)
+find_package(cereal REQUIRED)
+find_package(immer REQUIRED)
+find_package(lager REQUIRED)
 
-set_target_properties(fmt::fmt PROPERTIES
-    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:fmt::fmt,INTERFACE_INCLUDE_DIRECTORIES>"
+set_target_properties(cereal::cereal PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:immer::immer,INTERFACE_INCLUDE_DIRECTORIES>"
 )
 
-target_link_libraries(bulin_lib PRIVATE fmt::fmt)
+set_target_properties(immer::immer PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:immer::immer,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
+set_target_properties(lager::lager PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:lager::lager,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
+target_link_libraries(bulin_lib
+    PUBLIC 
+    lager::lager
+    immer::immer
+    cereal::cereal
+)
 
 # ---- Declare executable ----
 
-add_executable(bulin_exe source/main.cpp)
+find_package(imgui REQUIRED)
+find_package(SDL2 REQUIRED)
+
+set_target_properties(imgui::imgui PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:imgui::imgui,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
+set_target_properties(SDL2::SDL2 PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:SDL2::SDL2,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
+add_executable(bulin_exe
+    source/main.cpp
+    bindings/imgui_impl_opengl3.h
+    bindings/imgui_impl_opengl3.cpp
+    bindings/imgui_impl_sdl2.h
+    bindings/imgui_impl_sdl2.cpp
+)
+
 add_executable(bulin::exe ALIAS bulin_exe)
 
 set_property(TARGET bulin_exe PROPERTY OUTPUT_NAME bulin)
 
 target_compile_features(bulin_exe PRIVATE cxx_std_20)
 
-target_link_libraries(bulin_exe PRIVATE bulin_lib)
+target_link_libraries(bulin_exe
+    PRIVATE
+    bulin_lib
+    imgui::imgui
+    SDL2::SDL2
+)
 
 # ---- Install rules ----
 
