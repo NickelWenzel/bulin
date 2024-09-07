@@ -12,27 +12,30 @@
 
 #pragma once
 
-#include <lager/extra/struct.hpp>
-
 #include <string>
 #include <variant>
 
-namespace todo {
+#include <lager/extra/struct.hpp>
+
+namespace todo
+{
 
 struct item
 {
-    bool done = false;
-    std::string text;
+  bool done = false;
+  std::string text;
 };
 
 struct toggle_item_action
-{};
+{
+};
 struct remove_item_action
-{};
+{
+};
 using item_action = std::variant<toggle_item_action, remove_item_action>;
 
 item update(item m, item_action a);
 
-} // namespace todo
+}  // namespace todo
 
 LAGER_STRUCT(todo, item, done, text);

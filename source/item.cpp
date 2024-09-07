@@ -14,16 +14,18 @@
 
 #include <lager/util.hpp>
 
-namespace todo {
+namespace todo
+{
 
 item update(item s, item_action a)
 {
-    return lager::match(std::move(a))(
-        [&](toggle_item_action&& a) {
-            s.done = !s.done;
-            return std::move(s);
-        },
-        [&](remove_item_action&& a) { return std::move(s); });
+  return lager::match(std::move(a))(
+      [&](toggle_item_action&& a)
+      {
+        s.done = !s.done;
+        return std::move(s);
+      },
+      [&](remove_item_action&& a) { return std::move(s); });
 }
 
-} // namespace todo
+}  // namespace todo

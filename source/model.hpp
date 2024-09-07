@@ -12,30 +12,40 @@
 
 #pragma once
 
-#include "item.hpp"
-
+#include <array>
 #include <filesystem>
+
 #include <immer/flex_vector.hpp>
 
-namespace todo {
+#include "item.hpp"
 
+namespace todo
+{
 struct model
 {
-    immer::flex_vector<item> todos;
+  immer::flex_vector<item> todos;
+  std::string new_todo_input;
 };
 
 struct add_todo_action
 {
-    std::string text;
+  std::string text;
 };
-using model_action =
-    std::variant<add_todo_action, std::pair<std::size_t, item_action>>;
+
+struct changed_new_todo_input
+{
+  std::string text;
+};
+
+using model_action = std::variant<add_todo_action,
+                                  changed_new_todo_input,
+                                  std::pair<std::size_t, item_action>>;
 
 model update(model m, model_action a);
 
 void save(const std::string& fname, model todos);
 model load(const std::string& fname);
 
-} // namespace todo
+}  // namespace todo
 
-LAGER_STRUCT(todo, model, todos);
+LAGER_STRUCT(todo, model, todos, new_todo_input);
