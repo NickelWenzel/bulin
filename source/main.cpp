@@ -11,7 +11,6 @@
 #include "../bindings/imgui_impl_sdl2.h"
 #include "model.hpp"
 
-constexpr int window_padding = 48;
 constexpr int window_width = 800;
 constexpr int window_height = 600;
 
@@ -22,79 +21,24 @@ static constexpr std::size_t buffer_size = 1 << 10;
 using buffer = std::array<char, buffer_size>;
 }  // namespace text_input
 
-void draw(lager::context<todo::item_action> ctx, const todo::item& i)
+void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
-  auto checked = i.done;
-  if (ImGui::Checkbox("", &checked)) {
-    ctx.dispatch(todo::toggle_item_action {});
-  }
-
-  ImGui::SameLine();
-  ImGui::Text("%s", i.text.c_str());
-
-  ImGui::SameLine();
-  if (ImGui::Button("Delete")) {
-    ctx.dispatch(todo::remove_item_action {});
-  }
-}
-
-void draw(lager::context<todo::model_action> ctx, const todo::model& m)
-{
-  ImGui::SetNextWindowPos({window_padding, window_padding}, ImGuiCond_Once);
-  ImGui::SetNextWindowSize(
-      {window_width - 2 * window_padding, window_height - 2 * window_padding},
-      ImGuiCond_Once);
-  ImGui::Begin("Todo app");
-
-  if (ImGui::BeginPopup("not-implemented")) {
-    ImGui::Text("Saving and loading have not been implemented!");
-    ImGui::EndPopup();
-  }
-
-  if (ImGui::Button("Save"))
-    ImGui::OpenPopup("not-implemented");
-  ImGui::SameLine();
-  if (ImGui::Button("Load"))
-    ImGui::OpenPopup("not-implemented");
-
-  ImGui::Separator();
-  if (ImGui::IsWindowAppearing())
-    ImGui::SetKeyboardFocusHere();
-  ImGui::PushItemWidth(-0.1f);
+  ImGui::SetNextWindowPos(ImVec2 {}, ImGuiCond_Once);
+  ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);
+  ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration);
 
   text_input::buffer buffer {};
-  std::copy(m.new_todo_input.begin(), m.new_todo_input.end(), buffer.data());
-
-  if (ImGui::InputTextWithHint("##",
-                               "What do you want to do today?",
-                               buffer.data(),
-                               text_input::buffer_size))
-  {
-    ctx.dispatch(todo::changed_new_todo_input {buffer.data()});
-  }
-  if (ImGui::IsItemFocused()
-      && (ImGui::IsKeyPressed(ImGuiKey_Enter)
-          || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))
-  {
-    ctx.dispatch(todo::add_todo_action {buffer.data()});
-    ImGui::SetKeyboardFocusHere(-1);
+  if (!m.new_shader_input.empty()) {
+    std::ranges::copy(m.new_shader_input, buffer.data());
   }
 
-  ImGui::PopItemWidth();
-  ImGui::Separator();
-
-  ImGui::BeginChild("##");
+  if (ImGui::InputTextMultiline("##",
+                                buffer.data(),
+                                text_input::buffer_size,
+                                ImGui::GetContentRegionAvail()))
   {
-    auto idx = std::size_t {};
-    for (auto item : m.todos) {
-      ImGui::PushID(idx);
-      auto with_idx = [idx](auto&& a) { return std::make_pair(idx, a); };
-      draw({ctx, with_idx}, item);
-      ImGui::PopID();
-      ++idx;
-    }
+    ctx.dispatch(bulin::changed_shader_input {buffer.data()});
   }
-  ImGui::EndChild();
 
   ImGui::End();
 }
@@ -118,21 +62,21 @@ int main()
 
   auto current = SDL_DisplayMode {};
   SDL_GetCurrentDisplayMode(0, &current);
-  auto window =
-      SDL_CreateWindow("Todo Imgui",
+  auto* window =
+      SDL_CreateWindow("Bulin",
                        SDL_WINDOWPOS_CENTERED,
                        SDL_WINDOWPOS_CENTERED,
                        window_width,
                        window_height,
                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
                            | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN);
-  if (!window) {
+  if (window == nullptr) {
     std::cerr << "Error creating SDL window: " << SDL_GetError() << std::endl;
     return -1;
   }
 
   auto gl_context = SDL_GL_CreateContext(window);
-  if (!gl_context) {
+  if (gl_context == nullptr) {
     std::cerr << "Error creating GL context: " << SDL_GetError() << std::endl;
     return -1;
   }
@@ -149,8 +93,8 @@ int main()
   ImGui_ImplOpenGL3_Init(glsl_version);
 
   auto loop = lager::sdl_event_loop {};
-  auto store = lager::make_store<todo::model_action>(
-      todo::model {}, lager::with_sdl_event_loop {loop});
+  auto store = lager::make_store<bulin::model_action>(
+      bulin::model {}, lager::with_sdl_event_loop {loop});
 
   loop.run(
       [&](const SDL_Event& ev)
@@ -158,7 +102,7 @@ int main()
         ImGui_ImplSDL2_ProcessEvent(&ev);
         return ev.type != SDL_QUIT;
       },
-      [&](auto dt)
+      [&](auto)
       {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
@@ -169,7 +113,7 @@ int main()
         ImGui::Render();
         SDL_GL_MakeCurrent(window, gl_context);
         auto size = ImGui::GetIO().DisplaySize;
-        glViewport(0, 0, (int)size.x, (int)size.y);
+        glViewport(0, 0, static_cast<int>(size.x), static_cast<int>(size.y));
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

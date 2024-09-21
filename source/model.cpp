@@ -21,46 +21,28 @@
 #include <lager/extra/cereal/struct.hpp>
 #include <lager/util.hpp>
 
-namespace todo
+namespace bulin
 {
 
 model update(model s, model_action a)
 {
   return lager::match(std::move(a))(
-      [&](add_todo_action&& a)
+      [&](changed_shader_input&& a)
       {
-        if (!a.text.empty()) {
-          s.todos = std::move(s.todos).push_front({false, a.text});
-          s.new_todo_input = {};
-        }
-        return std::move(s);
-      },
-      [&](changed_new_todo_input&& a)
-      {
-        s.new_todo_input = std::move(a.text);
-        return std::move(s);
-      },
-      [&](std::pair<std::size_t, item_action>&& a)
-      {
-        if (a.first >= s.todos.size()) {
-          std::cerr << "Invalid todo::item_action index!" << std::endl;
-        } else {
-          s.todos = std::holds_alternative<remove_item_action>(a.second)
-              ? std::move(s.todos).erase(a.first)
-              : std::move(s.todos).update(
-                  a.first, [&](auto&& t) { return update(t, a.second); });
+        if (a.text != s.new_shader_input) {
+          s.new_shader_input = std::move(a.text);
         }
         return std::move(s);
       });
 }
 
-void save(const std::string& fname, model todos)
+void save(const std::string& fname, model shader_input)
 {
   auto s = std::ofstream {fname};
   s.exceptions(std::fstream::badbit | std::fstream::failbit);
   {
     auto a = cereal::JSONOutputArchive {s};
-    save_inline(a, todos);
+    save_inline(a, shader_input);
   }
 }
 
@@ -76,4 +58,4 @@ model load(const std::string& fname)
   return r;
 }
 
-}  // namespace todo
+}  // namespace bulin

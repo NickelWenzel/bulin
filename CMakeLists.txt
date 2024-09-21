@@ -19,8 +19,6 @@ add_library(
     bulin_lib OBJECT
     source/model.hpp
     source/model.cpp
-    source/item.hpp
-    source/item.cpp
 )
 
 target_include_directories(
