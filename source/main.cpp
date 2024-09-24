@@ -13,6 +13,7 @@
 
 constexpr int window_width = 800;
 constexpr int window_height = 600;
+constexpr float editor_window_ratio = 1.F / 3.F;
 
 namespace text_input
 {
@@ -23,8 +24,8 @@ using buffer = std::array<char, buffer_size>;
 
 void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
-  ImGui::SetNextWindowPos(ImVec2 {}, ImGuiCond_Once);
-  ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);
+  // ImGui::SetNextWindowPos(ImVec2 {}, ImGuiCond_Once);
+  // ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);
   ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration);
 
   text_input::buffer buffer {};
@@ -39,6 +40,13 @@ void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
   {
     ctx.dispatch(bulin::changed_shader_input {buffer.data()});
   }
+
+  ImGui::End();
+}
+
+void draw_shader_output()
+{
+  ImGui::Begin("Shader output");
 
   ImGui::End();
 }
@@ -85,9 +93,16 @@ int main()
   ImGui::CreateContext();
   auto& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // Enable Docking
+  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;  // Enable Viewports
 
   ImGui::StyleColorsDark();
+
+  ImGuiStyle& style = ImGui::GetStyle();
+  if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
+    style.WindowRounding = 0.0F;
+    style.Colors[ImGuiCol_WindowBg].w = 1.0F;
+  }
 
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init(glsl_version);
@@ -107,9 +122,47 @@ int main()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
-        {
-          draw(store, store.get());
+
+        // Docking space
+        ImGuiID dockspace_id = ImGui::GetID("main_dockspace");
+        ImGui::DockSpaceOverViewport(dockspace_id, ImGui::GetMainViewport());
+
+        // Check if the dockspace is empty or uninitialized (this only happens
+        // once)
+        static bool first = true;
+        if (first) {
+          first = false;
+
+          // Start building the dockspace layout
+          ImGui::DockBuilderRemoveNode(
+              dockspace_id);  // Clear any previous layout
+          ImGui::DockBuilderAddNode(
+              dockspace_id, ImGuiDockNodeFlags_DockSpace);  // Create a new node
+          ImGui::DockBuilderSetNodeSize(
+              dockspace_id,
+              ImGui::GetMainViewport()
+                  ->Size);  // Set size to match the viewport
+
+          // Split the central node into two (left and right)
+          ImGuiID left_node, right_node;
+          ImGui::DockBuilderSplitNode(dockspace_id,
+                                      ImGuiDir_Left,
+                                      editor_window_ratio,
+                                      &left_node,
+                                      &right_node);
+
+          // Dock "Window 1" in the left node
+          ImGui::DockBuilderDockWindow("Main shader input", left_node);
+          // Dock "Window 2" in the right node
+          ImGui::DockBuilderDockWindow("Shader output", right_node);
+          // Commit the layout
+          ImGui::DockBuilderFinish(dockspace_id);
         }
+
+        draw(store, store.get());
+        draw_shader_output();
+
+        // Rendering
         ImGui::Render();
         SDL_GL_MakeCurrent(window, gl_context);
         auto size = ImGui::GetIO().DisplaySize;
@@ -117,6 +170,20 @@ int main()
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // Update and Render additional Platform Windows
+        // (Platform functions may change the current OpenGL context, so we
+        // save/restore it to make it easier to paste this code elsewhere.
+        //  For this specific demo app we could also call
+        //  SDL_GL_MakeCurrent(window, gl_context) directly)
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+          SDL_Window* backup_current_window = SDL_GL_GetCurrentWindow();
+          SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
+          ImGui::UpdatePlatformWindows();
+          ImGui::RenderPlatformWindowsDefault();
+          SDL_GL_MakeCurrent(backup_current_window, backup_current_context);
+        }
+
         SDL_GL_SwapWindow(window);
         return true;
       });
