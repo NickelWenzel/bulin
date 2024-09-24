@@ -107,6 +107,8 @@ int main()
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
+  ImGuiDockNodeFlags const dockspace_flags = ImGuiDockNodeFlags_NoUndocking;
+
   auto loop = lager::sdl_event_loop {};
   auto store = lager::make_store<bulin::model_action>(
       bulin::model {}, lager::with_sdl_event_loop {loop});
@@ -125,7 +127,8 @@ int main()
 
         // Docking space
         ImGuiID dockspace_id = ImGui::GetID("main_dockspace");
-        ImGui::DockSpaceOverViewport(dockspace_id, ImGui::GetMainViewport());
+        ImGui::DockSpaceOverViewport(
+            dockspace_id, ImGui::GetMainViewport(), dockspace_flags);
 
         // Check if the dockspace is empty or uninitialized (this only happens
         // once)
@@ -137,7 +140,9 @@ int main()
           ImGui::DockBuilderRemoveNode(
               dockspace_id);  // Clear any previous layout
           ImGui::DockBuilderAddNode(
-              dockspace_id, ImGuiDockNodeFlags_DockSpace);  // Create a new node
+              dockspace_id,
+              dockspace_flags
+                  | ImGuiDockNodeFlags_DockSpace);  // Create a new node
           ImGui::DockBuilderSetNodeSize(
               dockspace_id,
               ImGui::GetMainViewport()
