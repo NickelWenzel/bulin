@@ -24,8 +24,6 @@ using buffer = std::array<char, buffer_size>;
 
 void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
-  // ImGui::SetNextWindowPos(ImVec2 {}, ImGuiCond_Once);
-  // ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize, ImGuiCond_Always);
   ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration);
 
   text_input::buffer buffer {};
@@ -130,12 +128,7 @@ int main()
         ImGui::DockSpaceOverViewport(
             dockspace_id, ImGui::GetMainViewport(), dockspace_flags);
 
-        // Check if the dockspace is empty or uninitialized (this only happens
-        // once)
-        static bool first = true;
-        if (first) {
-          first = false;
-
+        for (static bool first = true; first; first = false) {
           // Start building the dockspace layout
           ImGui::DockBuilderRemoveNode(
               dockspace_id);  // Clear any previous layout
