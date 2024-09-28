@@ -1,29 +1,21 @@
 {
-  "name": "recipe",
-  "version": "1.0",
+  "name": "bulin",
+  "version-semver": "0.1.0",
   "dependencies": [
+    "cereal",
+    "sdl",
+    "immer",
+    "lager",
     {
-      "name": "cereal"
+      "name": "imgui",
+      "features": ["opengl3-binding", "sdl2-binding", "docking-experimental"]
     },
-    {
-      "name": "sdl"
-    },
-    {
-      "name": "immer"
-    },
-    {
-      "name": "lager"
-    },
-    {
-      "name": "imgui"
-    },
-    {
-      "name": "magnum"
-    }
+    "magnum"
   ],
   "test-dependencies": [
     {
       "name": "catch2"
     }
-  ]
+  ],
+  "bultin-baselin": "5f5da308dd1dd3cc49641c60eafff176e248a9dd"
 }
