@@ -41,7 +41,7 @@ the project:
     {
       "name": "dev",
       "binaryDir": "${sourceDir}/build/dev",
-      "inherits": ["dev-mode", "conan", "ci-<os>"],
+      "inherits": ["dev-mode", "vcpkg", "ci-<os>"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -89,21 +89,14 @@ in the terminal.
 
 ### Dependency manager
 
-The above preset will make use of the [conan][conan] dependency manager. After
-installing it, make sure you have a [Conan profile][profile] setup, then
-download the dependencies and generate the necessary CMake files by running
-this command in the project root:
+The above preset will make use of the [vcpkg][vcpkg] dependency manager. After
+installing it, make sure the `VCPKG_ROOT` environment variable is pointing at
+the directory where the vcpkg executable is. On Windows, you might also want
+to inherit from the `vcpkg-win64-static` preset, which will make vcpkg install
+the dependencies as static libraries. This is only necessary if you don't want
+to setup `PATH` to run tests.
 
-```sh
-conan install . -s build_type=Debug -b missing
-```
-
-Note that if your conan profile does not specify the same compiler, standard
-level, build type and runtime library as CMake, then that could potentially
-cause issues. See the link above for profiles documentation.
-
-[conan]: https://conan.io/
-[profile]: https://docs.conan.io/2/reference/config_files/profiles.html
+[vcpkg]: https://github.com/microsoft/vcpkg
 
 ### Configure, build and test
 
