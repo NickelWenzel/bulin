@@ -1,0 +1,29 @@
+{
+  "name": "recipe",
+  "version": "1.0",
+  "dependencies": [
+    {
+      "name": "cereal"
+    },
+    {
+      "name": "sdl"
+    },
+    {
+      "name": "immer"
+    },
+    {
+      "name": "lager"
+    },
+    {
+      "name": "imgui"
+    },
+    {
+      "name": "magnum"
+    }
+  ],
+  "test-dependencies": [
+    {
+      "name": "catch2"
+    }
+  ]
+}
