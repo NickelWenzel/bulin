@@ -26,7 +26,7 @@ void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
   ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration);
 
-  text_input::buffer buffer {};
+  static text_input::buffer buffer {};
   if (!m.new_shader_input.empty()) {
     std::ranges::copy(m.new_shader_input, buffer.data());
   }
