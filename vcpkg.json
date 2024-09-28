@@ -3,19 +3,15 @@
   "version-semver": "0.1.0",
   "dependencies": [
     "cereal",
-    "sdl",
+    "sdl2",
     "immer",
     "lager",
     {
       "name": "imgui",
       "features": ["opengl3-binding", "sdl2-binding", "docking-experimental"]
     },
-    "magnum"
-  ],
-  "test-dependencies": [
-    {
-      "name": "catch2"
-    }
+    "magnum",
+    "catch2"
   ],
   "builtin-baseline": "76d153790caf0592fce8fc4484aa6db18c7d00d4"
 }
