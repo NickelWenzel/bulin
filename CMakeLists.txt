@@ -89,7 +89,8 @@ target_link_libraries(bulin_exe
     PRIVATE
     OpenGL::GL
     imgui::imgui
-    SDL2::SDL2
+    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
     bulin_lib
 )
 
