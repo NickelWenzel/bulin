@@ -3,6 +3,7 @@
 #include <iostream>
 
 #include <SDL.h>
+#include <SDL_main.h>
 #include <SDL_opengl.h>
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
