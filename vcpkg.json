@@ -4,6 +4,7 @@
   "dependencies": [
     "cereal",
     "sdl2",
+    "boost-intrusive",
     "immer",
     "lager",
     {
