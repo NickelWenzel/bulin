@@ -3,7 +3,6 @@
 #include <iostream>
 
 #include <SDL.h>
-#include <SDL_main.h>
 #include <SDL_opengl.h>
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
@@ -52,7 +51,7 @@ void draw_shader_output()
   ImGui::End();
 }
 
-int main()
+int main(int argc, char* argv[])
 {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
     std::cerr << "Error initializing SDL: " << SDL_GetError() << std::endl;
