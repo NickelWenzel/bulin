@@ -38,7 +38,7 @@
       "name": "vcpkg-osx64",
       "hidden": true,
       "cacheVariables": {
-        "VCPKG_TARGET_TRIPLET": "x64-osx-dynamic"
+        "VCPKG_TARGET_TRIPLET": "arm64-osx-dynamic"
       }
     },
     {
