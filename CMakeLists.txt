@@ -96,6 +96,7 @@ target_link_libraries(bulin_exe
 if(NOT ${bulin_DEVELOPER_MODE})
   target_precompile_headers(bulin_exe
       PRIVATE
+      <array>
       <iostream>
       <SDL.h>
       <SDL_opengl.h>
