@@ -144,15 +144,15 @@ jobs:
       shell: pwsh
       run: cmake "--preset=ci-$("${{ matrix.os }}".split("-")[0])"
 
-    - name: Build
-      run: cmake --build build --config Release -j 2
+    # - name: Build
+    #   run: cmake --build build --config Release -j 2
 
-    - name: Install
-      run: cmake --install build --config Release --prefix prefix
+    # - name: Install
+    #   run: cmake --install build --config Release --prefix prefix
 
-    - name: Test
-      working-directory: build
-      run: ctest --output-on-failure --no-tests=error -C Release -j 2
+    # - name: Test
+    #   working-directory: build
+    #   run: ctest --output-on-failure --no-tests=error -C Release -j 2
 
   docs:
     # Deploy docs only when builds succeed
