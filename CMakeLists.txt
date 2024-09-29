@@ -52,12 +52,14 @@ target_link_libraries(bulin_lib
     cereal::cereal
 )
 
-target_precompile_headers(bulin_lib
-    PRIVATE
-    <string>
-    <variant>
-    <lager/extra/struct.hpp>
-)
+if(NOT ${bulin_DEVELOPER_MODE})
+  target_precompile_headers(bulin_lib
+      PRIVATE
+      <string>
+      <variant>
+      <lager/extra/struct.hpp>
+  )
+endif()
 
 find_package(OpenGL REQUIRED)
 find_package(imgui REQUIRED)
@@ -91,17 +93,19 @@ target_link_libraries(bulin_exe
     bulin_lib
 )
 
-target_precompile_headers(bulin_exe
-    PRIVATE
-    <iostream>
-    <SDL.h>
-    <SDL_opengl.h>
-    <imgui.h>
-    <imgui_internal.h>
-    <cstdint>
-    <lager/event_loop/sdl.hpp>
-    <lager/store.hpp>
-)
+if(NOT ${bulin_DEVELOPER_MODE})
+  target_precompile_headers(bulin_exe
+      PRIVATE
+      <iostream>
+      <SDL.h>
+      <SDL_opengl.h>
+      <imgui.h>
+      <imgui_internal.h>
+      <cstdint>
+      <lager/event_loop/sdl.hpp>
+      <lager/store.hpp>
+  )
+endif()
 
 # ---- Install rules ----
 
