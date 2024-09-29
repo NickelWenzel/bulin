@@ -1,3 +1,5 @@
+#include <array>
+#include <cstdint>
 #include <iostream>
 
 #include <SDL.h>

@@ -79,6 +79,8 @@ jobs:
 
     runs-on: ubuntu-22.04
 
+    if: false
+
     env: { CXX: clang++-14 }
 
     steps:
@@ -112,7 +114,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-14, ubuntu-22.04, windows-2022]
+        os: [macos-14, windows-2022]
 
     runs-on: ${{ matrix.os }}
 

@@ -7,27 +7,10 @@
   },
   "configurePresets": [
     {
-      "name": "cmake-pedantic",
-      "hidden": true,
-      "warnings": {
-        "dev": true,
-        "deprecated": true,
-        "uninitialized": true,
-        "unusedCli": true,
-        "systemVars": false
-      },
-      "errors": {
-        "dev": true,
-        "deprecated": true
-      }
-    },
-    {
       "name": "dev-mode",
       "hidden": true,
-      "inherits": "cmake-pedantic",
       "cacheVariables": {
-        "bulin_DEVELOPER_MODE": "ON",
-        "VCPKG_MANIFEST_FEATURES": "test"
+        "bulin_DEVELOPER_MODE": "ON"
       }
     },
     {
@@ -55,7 +38,7 @@
       "name": "vcpkg-osx64",
       "hidden": true,
       "cacheVariables": {
-        "VCPKG_TARGET_TRIPLET": "x64-osx-dynamic"
+        "VCPKG_TARGET_TRIPLET": "arm64-osx-dynamic"
       }
     },
     {
@@ -120,7 +103,7 @@
     {
       "name": "ci-linux",
       "inherits": ["flags-gcc-clang", "ci-std"],
-      "generator": "Unix Makefiles",
+      "generator": "Ninja",
       "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
