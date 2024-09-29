@@ -9,6 +9,9 @@ on:
     branches:
     - master
 
+env:
+  VCPKG_COMMIT: "76d153790caf0592fce8fc4484aa6db18c7d00d4"
+
 jobs:
   lint:
     runs-on: ubuntu-22.04
@@ -48,18 +51,9 @@ jobs:
       run: sudo apt-get update -q
         && sudo apt-get install lcov -q -y
 
-    - name: Install Python
-      uses: actions/setup-python@v5
-      with: { python-version: "3.12" }
-
-    - name: Conan cache
-      uses: actions/cache@v4
-      with:
-        path: conan_cache_save.tgz
-        key: conan-coverage-${{ hashFiles('conan*.[pl][yo]*') }}
-
-    - name: Install dependencies
-      run: bash < .github/scripts/conan-ci-setup.sh
+    - name: Install vcpkg
+      uses: friendlyanon/setup-vcpkg@v1
+      with: { committish: "${{ env.VCPKG_COMMIT }}" }
 
     - name: Configure
       run: cmake --preset=ci-coverage
@@ -90,18 +84,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Python
-      uses: actions/setup-python@v5
-      with: { python-version: "3.12" }
-
-    - name: Conan cache
-      uses: actions/cache@v4
-      with:
-        path: conan_cache_save.tgz
-        key: conan-sanitize-${{ hashFiles('conan*.[pl][yo]*') }}
-
-    - name: Install dependencies
-      run: bash < .github/scripts/conan-ci-setup.sh
+    - name: Install vcpkg
+      uses: friendlyanon/setup-vcpkg@v1
+      with: { committish: "${{ env.VCPKG_COMMIT }}" }
 
     - name: Configure
       run: cmake --preset=ci-sanitize
@@ -143,19 +128,9 @@ jobs:
         /usr/bin/clang-tidy clang-tidy
         /usr/bin/clang-tidy-14 140
 
-    - name: Install Python
-      uses: actions/setup-python@v5
-      with: { python-version: "3.12" }
-
-    - name: Conan cache
-      uses: actions/cache@v4
-      with:
-        path: conan_cache_save.tgz
-        key: conan-${{ matrix.os }}-${{ hashFiles('conan*.[pl][yo]*') }}
-
-    - name: Install dependencies
-      shell: bash
-      run: bash < .github/scripts/conan-ci-setup.sh
+    - name: Install vcpkg
+      uses: friendlyanon/setup-vcpkg@v1
+      with: { committish: "${{ env.VCPKG_COMMIT }}" }
 
     - name: Setup MultiToolTask
       if: matrix.os == 'windows-2022'

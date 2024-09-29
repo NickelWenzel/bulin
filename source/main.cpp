@@ -3,12 +3,12 @@
 #include <SDL.h>
 #include <SDL_opengl.h>
 #include <imgui.h>
+#include <imgui_impl_opengl3.h>
+#include <imgui_impl_sdl2.h>
 #include <imgui_internal.h>
 #include <lager/event_loop/sdl.hpp>
 #include <lager/store.hpp>
 
-#include "../bindings/imgui_impl_opengl3.h"
-#include "../bindings/imgui_impl_sdl2.h"
 #include "model.hpp"
 
 constexpr int window_width = 800;

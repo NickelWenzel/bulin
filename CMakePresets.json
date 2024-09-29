@@ -26,15 +26,36 @@
       "hidden": true,
       "inherits": "cmake-pedantic",
       "cacheVariables": {
-        "bulin_DEVELOPER_MODE": "ON"
+        "bulin_DEVELOPER_MODE": "ON",
+        "VCPKG_MANIFEST_FEATURES": "test"
       }
     },
     {
-      "name": "conan",
+      "name": "vcpkg",
       "hidden": true,
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/conan/conan_toolchain.cmake",
-        "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "vcpkg-win64",
+      "hidden": true,
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    },
+    {
+      "name": "vcpkg-linux64",
+      "hidden": true,
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux-dynamic"
+      }
+    },
+    {
+      "name": "vcpkg-osx64",
+      "hidden": true,
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-osx-dynamic"
       }
     },
     {
@@ -109,7 +130,10 @@
       "name": "ci-darwin",
       "inherits": ["flags-appleclang", "ci-std"],
       "generator": "Xcode",
-      "hidden": true
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_CATCH_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST"
+      }
     },
     {
       "name": "ci-win64",
@@ -134,7 +158,7 @@
     },
     {
       "name": "ci-coverage",
-      "inherits": ["coverage-linux", "dev-mode", "conan"],
+      "inherits": ["coverage-linux", "dev-mode", "vcpkg"],
       "cacheVariables": {
         "COVERAGE_HTML_COMMAND": ""
       }
@@ -142,7 +166,7 @@
     {
       "name": "ci-sanitize",
       "binaryDir": "${sourceDir}/build/sanitize",
-      "inherits": ["ci-linux", "dev-mode", "conan"],
+      "inherits": ["ci-linux", "dev-mode", "vcpkg"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Sanitize",
         "CMAKE_CXX_FLAGS_SANITIZE": "-U_FORTIFY_SOURCE -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-common",
@@ -164,15 +188,15 @@
     },
     {
       "name": "ci-macos",
-      "inherits": ["ci-build", "ci-darwin", "dev-mode", "ci-multi-config", "conan"]
+      "inherits": ["ci-build", "ci-darwin", "dev-mode", "ci-multi-config", "vcpkg", "vcpkg-osx64"]
     },
     {
       "name": "ci-ubuntu",
-      "inherits": ["ci-build", "ci-linux", "clang-tidy", "conan", "cppcheck", "dev-mode"]
+      "inherits": ["ci-build", "ci-linux", "clang-tidy", "vcpkg", "vcpkg-linux64", "cppcheck", "dev-mode"]
     },
     {
       "name": "ci-windows",
-      "inherits": ["ci-build", "ci-win64", "dev-mode", "ci-multi-config", "conan"]
+      "inherits": ["ci-build", "ci-win64", "dev-mode", "ci-multi-config", "vcpkg", "vcpkg-win64"]
     }
   ]
 }
