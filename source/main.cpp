@@ -51,7 +51,7 @@ void draw_shader_output()
   ImGui::End();
 }
 
-int main(int argc, char* argv[])
+int main()
 {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
     std::cerr << "Error initializing SDL: " << SDL_GetError() << std::endl;

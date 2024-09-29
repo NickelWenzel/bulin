@@ -75,6 +75,9 @@ add_executable(bulin::exe ALIAS bulin_exe)
 set_property(TARGET bulin_exe PROPERTY OUTPUT_NAME bulin)
 
 target_compile_features(bulin_exe PRIVATE cxx_std_20)
+if(WIN32)
+    target_compile_definitions(bulin_exe PRIVATE SDL_MAIN_HANDLED)
+endif()
 
 target_link_libraries(bulin_exe
     PRIVATE
