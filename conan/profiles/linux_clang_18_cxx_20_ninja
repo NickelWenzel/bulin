@@ -1,0 +1,13 @@
+[settings]
+arch=x86_64
+build_type=Release
+compiler=clang
+compiler.cppstd=20
+compiler.libcxx=libstdc++
+compiler.version=18
+os=Linux
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+tools.build:compiler_executables={"cpp": "clang++", "c": "clang"}
+tools.system.package_manager:mode=install
