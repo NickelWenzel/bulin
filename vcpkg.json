@@ -11,7 +11,10 @@
       "name": "imgui",
       "features": ["opengl3-binding", "sdl2-binding", "docking-experimental"]
     },
-    "magnum",
+    {
+      "name": "magnum",
+      "features": ["glxcontext"]
+    },
     "catch2"
   ],
   "builtin-baseline": "76d153790caf0592fce8fc4484aa6db18c7d00d4"
