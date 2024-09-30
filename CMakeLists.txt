@@ -95,14 +95,6 @@ target_precompile_headers(bulin_exe
     PRIVATE
     <array>
     <iostream>
-    <SDL.h>
-    <SDL_opengl.h>
-    <imgui.h>
-    <imgui_impl_opengl3.h>
-    <imgui_impl_sdl2.h>
-    <imgui_internal.h>
-    <cstdint>
-    <lager/event_loop/sdl.hpp>
     <lager/store.hpp>
 )
 
