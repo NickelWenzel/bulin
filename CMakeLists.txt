@@ -62,9 +62,14 @@ target_precompile_headers(bulin_lib
 find_package(OpenGL REQUIRED)
 find_package(imgui REQUIRED)
 find_package(SDL2 REQUIRED)
+find_package(Magnum REQUIRED MeshTools Primitives Shaders GlxContext)
 
 set_target_properties(imgui::imgui PROPERTIES
     INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:imgui::imgui,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
+set_target_properties(Magnum::Magnum PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:Magnum::Magnum,INTERFACE_INCLUDE_DIRECTORIES>"
 )
 
 # ---- Declare executable ----
@@ -88,6 +93,11 @@ target_link_libraries(bulin_exe
     imgui::imgui
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+    Magnum::Magnum
+    Magnum::MeshTools
+    Magnum::Primitives
+    Magnum::Shaders
+    Magnum::GLContext
     bulin_lib
 )
 
