@@ -21,6 +21,7 @@
 #include <Magnum/Tags.h>
 #include <MagnumExternal/OpenGL/GL/flextGL.h>
 #include <Magnum/Trade/MeshData.h>
+#include <Corrade/Containers/Reference.h>
 
 #include <SDL.h>
 #include <SDL_opengl.h>
@@ -47,50 +48,20 @@ using buffer = std::array<char, buffer_size>;
 namespace shader
 {
 using namespace Magnum;
-struct FlatShader : GL::AbstractShaderProgram
+struct flat_shader : GL::AbstractShaderProgram
 {
-  typedef GL::Attribute<0, Vector2> Position;
-
-  FlatShader()
-  {
-    GL::Shader vert {GL::Version::GLES300, GL::Shader::Type::Vertex};
-    vert.addSource(R"GLSL(
-uniform mat3 matrix;
-layout(location = 0) in vec4 position;
-
-void main() {
-    gl_Position = vec4(matrix*position.xyw, 0.0).xywz;
-}
-)GLSL")
-        .compile();
-
-    GL::Shader frag {GL::Version::GLES300, GL::Shader::Type::Fragment};
-    frag.addSource(R"GLSL(
-precision mediump float;
-
-out vec4 fragmentColor;
-
-void main() {
-    fragmentColor = vec4(1.0, 0.0, 0.0, 1.0); // Red color
-}
-)GLSL")
-        .compile();
-
-    attachShader(vert);
-    attachShader(frag);
-    link();
-  }
-
-  FlatShader& setTransformationProjectionMatrix(const Matrix3& matrix)
+  auto set_transformation_projection_matrix(const Matrix3& matrix)
+      -> flat_shader&
   {
     setUniform(0, matrix);
     return *this;
   }
 
-  FlatShader& setColor(const Color4& color)
+  bool attach_and_link_shaders(
+      std::initializer_list<Containers::Reference<GL::Shader>> shaders)
   {
-    setUniform(1, color);
-    return *this;
+    attachShaders(std::move(shaders));
+    return link();
   }
 };
 }  // namespace shader
@@ -137,33 +108,56 @@ auto create_framebuffer(Magnum::Vector2i framebuffer_size)
   return std::make_pair(std::move(framebuffer), std::move(color_texture));
 }
 
-void draw_shader_output(Magnum::GL::Mesh& mesh)
+auto create_vertex_shader()
+{
+  using namespace Magnum;
+
+  GL::Shader vertex_shader {GL::Version::GLES300, GL::Shader::Type::Vertex};
+  vertex_shader.addSource(R"GLSL(
+uniform mat3 matrix;
+layout(location = 0) in vec4 position;
+
+void main() {
+    gl_Position = vec4(matrix*position.xyw, 0.0).xywz;
+}
+)GLSL");
+  return vertex_shader;
+}
+
+void bind_framebuffer(Magnum::GL::Framebuffer& framebuffer)
+{
+  framebuffer.bind();
+  framebuffer.clearColor(0, Magnum::Math::Color4 {0.0f, 1.0f, 0.0f, 0.0f});
+  framebuffer.clear(Magnum::GL::FramebufferClear::Color
+                    | Magnum::GL::FramebufferClear::Depth);
+}
+
+void render_shader_output(Magnum::GL::Mesh& mesh,
+                          Magnum::GL::Shader& vertex_shader,
+                          std::string_view shader_input)
 {
   using namespace Magnum;
   using namespace Magnum::Math::Literals;
 
+  shader::flat_shader shader {};
+
+  GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
+  fragment_shader.addSource(shader_input.data());
+  if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
+      && shader.attach_and_link_shaders({vertex_shader, fragment_shader}))
+  {
+    shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
+    shader.draw(mesh);
+  }
+}
+
+void draw_shader_output(GLuint texture_id)
+{
   ImGui::Begin("Shader output");
 
-  ImGuiViewport* viewport = ImGui::GetWindowViewport();
-  ImVec2 size = viewport->WorkSize;
-  auto [framebuffer, color_texture] =
-      create_framebuffer({static_cast<int>(size.x), static_cast<int>(size.y)});
-  framebuffer.bind();
-
-  shader::FlatShader shader {};
-  shader.setTransformationProjectionMatrix(Matrix3::scaling({0.2f, 0.3f}))
-      .setColor(0xff0000_rgbf)
-      .draw(mesh);
-
   // Display the framebuffer texture in ImGui
-  GLuint texture_id = color_texture.id();
-  ImGui::Image(reinterpret_cast<void*>(texture_id), size);
-
-  /* Switch back to the default framebuffer */
-  Magnum::GL::defaultFramebuffer
-      .clear(Magnum::GL::FramebufferClear::Color
-             | Magnum::GL::FramebufferClear::Depth)
-      .bind();
+  ImGui::Image(reinterpret_cast<void*>(texture_id),
+               ImGui::GetContentRegionAvail());
 
   ImGui::End();
 }
@@ -224,10 +218,19 @@ int main()
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
-  Magnum::Platform::GLContext context {Magnum::NoCreate};
+  Magnum::Platform::GLContext context {};
 
   auto const mesh_data = Magnum::Primitives::squareSolid();
   auto mesh = Magnum::MeshTools::compile(mesh_data);
+
+  auto [framebuffer, color_texture] = create_framebuffer({400, 400});
+  GLuint texture_id = color_texture.id();
+
+  auto vertex_shader = create_vertex_shader();
+  if (!vertex_shader.compile()) {
+    std::cerr << "Error compiling vertex shader." << std::endl;
+    return -1;
+  }
 
   ImGuiDockNodeFlags const dockspace_flags = ImGuiDockNodeFlags_NoUndocking;
 
@@ -282,10 +285,20 @@ int main()
         }
 
         draw(store, store.get());
-        draw_shader_output(mesh);
+        draw_shader_output(texture_id);
 
         // Rendering
         ImGui::Render();
+
+        bind_framebuffer(framebuffer);
+
+        render_shader_output(mesh, vertex_shader, store.get().new_shader_input);
+        /* Switch back to the default framebuffer */
+        Magnum::GL::defaultFramebuffer
+            .clear(Magnum::GL::FramebufferClear::Color
+                   | Magnum::GL::FramebufferClear::Depth)
+            .bind();
+
         SDL_GL_MakeCurrent(window, gl_context);
         auto size = ImGui::GetIO().DisplaySize;
         glViewport(0, 0, static_cast<int>(size.x), static_cast<int>(size.y));
