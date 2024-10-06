@@ -38,9 +38,13 @@ constexpr int window_width = 800;
 constexpr int window_height = 600;
 constexpr float editor_window_ratio = 1.F / 3.F;
 
+constexpr size_t buffer_resolution_x = 1000;
+constexpr size_t buffer_resolution_y = 1000;
+constexpr Magnum::Vector2i framebuffer_resolution {buffer_resolution_x,
+                                                   buffer_resolution_y};
 namespace text_input
 {
-static constexpr std::size_t buffer_size = 1 << 10;
+static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
 
 using buffer = std::array<char, buffer_size>;
 }  // namespace text_input
@@ -68,14 +72,16 @@ struct flat_shader : GL::AbstractShaderProgram
 
 void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
-  ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration);
+  ImGui::Begin("Main shader input",
+               nullptr,
+               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
   static text_input::buffer buffer {};
   if (!m.new_shader_input.empty()) {
     std::ranges::copy(m.new_shader_input, buffer.data());
   }
 
-  if (ImGui::InputTextMultiline("##",
+  if (ImGui::InputTextMultiline("##shader_input",
                                 buffer.data(),
                                 text_input::buffer_size,
                                 ImGui::GetContentRegionAvail()))
@@ -151,7 +157,7 @@ void render_shader_output(Magnum::GL::Mesh& mesh,
   }
 }
 
-void draw_shader_output(GLuint texture_id)
+void draw_texture(GLuint texture_id)
 {
   ImGui::Begin("Shader output");
 
@@ -223,7 +229,8 @@ int main()
   auto const mesh_data = Magnum::Primitives::squareSolid();
   auto mesh = Magnum::MeshTools::compile(mesh_data);
 
-  auto [framebuffer, color_texture] = create_framebuffer({400, 400});
+  auto [framebuffer, color_texture] =
+      create_framebuffer(framebuffer_resolution);
   GLuint texture_id = color_texture.id();
 
   auto vertex_shader = create_vertex_shader();
@@ -285,7 +292,7 @@ int main()
         }
 
         draw(store, store.get());
-        draw_shader_output(texture_id);
+        draw_texture(texture_id);
 
         // Rendering
         ImGui::Render();
