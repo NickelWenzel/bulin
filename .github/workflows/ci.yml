@@ -115,7 +115,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-14, windows-2022]
+        os: [macos-14, ubuntu-22.04, windows-2022]
 
     runs-on: ${{ matrix.os }}
 
