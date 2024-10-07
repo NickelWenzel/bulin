@@ -60,10 +60,6 @@ set_target_properties(imgui::imgui PROPERTIES
     INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:imgui::imgui,INTERFACE_INCLUDE_DIRECTORIES>"
 )
 
-set_target_properties(SDL2::SDL2 PROPERTIES
-    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:SDL2::SDL2,INTERFACE_INCLUDE_DIRECTORIES>"
-)
-
 # ---- Declare executable ----
 
 add_executable(bulin_exe

@@ -79,12 +79,13 @@ jobs:
 
     runs-on: ubuntu-22.04
 
-    if: false
-
     env: { CXX: clang++-14 }
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Install system requirements
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build -y -q
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
@@ -114,7 +115,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-14, windows-2022]
+        os: [macos-14, ubuntu-22.04, windows-2022]
 
     runs-on: ${{ matrix.os }}
 
@@ -129,6 +130,10 @@ jobs:
         sudo update-alternatives --install
         /usr/bin/clang-tidy clang-tidy
         /usr/bin/clang-tidy-14 140
+
+    - name: Install system requirements
+      if: matrix.os == 'ubuntu-22.04'
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build -y -q
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
