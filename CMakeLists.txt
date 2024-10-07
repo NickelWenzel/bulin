@@ -65,11 +65,11 @@ find_package(SDL2 REQUIRED)
 
 # platform dependent gl context
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    set(BULIN_GLCONTEXT wGlContext)
+    set(BULIN_GLCONTEXT WglContext)
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(BULIN_GLCONTEXT GlxContext)
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    set(BULIN_GLCONTEXT cGlContext)
+    set(BULIN_GLCONTEXT CglContext)
 endif()
 
 find_package(Magnum REQUIRED MeshTools Primitives Shaders ${BULIN_GLCONTEXT})
