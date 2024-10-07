@@ -52,12 +52,34 @@ target_link_libraries(bulin_lib
     cereal::cereal
 )
 
+target_precompile_headers(bulin_lib
+    PRIVATE
+    <string>
+    <variant>
+    <lager/extra/struct.hpp>
+)
+
 find_package(OpenGL REQUIRED)
 find_package(imgui REQUIRED)
 find_package(SDL2 REQUIRED)
 
+# platform dependent gl context
+if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(BULIN_GLCONTEXT WglContext)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(BULIN_GLCONTEXT GlxContext)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(BULIN_GLCONTEXT CglContext)
+endif()
+
+find_package(Magnum REQUIRED MeshTools Primitives Shaders ${BULIN_GLCONTEXT})
+
 set_target_properties(imgui::imgui PROPERTIES
     INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:imgui::imgui,INTERFACE_INCLUDE_DIRECTORIES>"
+)
+
+set_target_properties(Magnum::Magnum PROPERTIES
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:Magnum::Magnum,INTERFACE_INCLUDE_DIRECTORIES>"
 )
 
 # ---- Declare executable ----
@@ -81,7 +103,19 @@ target_link_libraries(bulin_exe
     imgui::imgui
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+    Magnum::Magnum
+    Magnum::MeshTools
+    Magnum::Primitives
+    Magnum::Shaders
+    Magnum::GLContext
     bulin_lib
+)
+
+target_precompile_headers(bulin_exe
+    PRIVATE
+    <array>
+    <iostream>
+    <lager/store.hpp>
 )
 
 # ---- Install rules ----

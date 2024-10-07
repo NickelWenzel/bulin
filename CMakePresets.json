@@ -61,7 +61,7 @@
       "name": "clang-tidy",
       "hidden": true,
       "cacheVariables": {
-        "CMAKE_CXX_CLANG_TIDY": "clang-tidy;--header-filter=^${sourceDir}/"
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy;--header-filter=^(${sourceDir}/)(?!(${sourceDir}/build/)"
       }
     },
     {
@@ -102,8 +102,7 @@
     },
     {
       "name": "ci-linux",
-      "inherits": ["flags-gcc-clang", "ci-std"],
-      "generator": "Ninja",
+      "inherits": ["flags-gcc-clang", "ci-std", "clang"],
       "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
@@ -111,8 +110,7 @@
     },
     {
       "name": "ci-darwin",
-      "inherits": ["flags-appleclang", "ci-std"],
-      "generator": "Xcode",
+      "inherits": ["flags-appleclang", "ci-std", "clang"],
       "hidden": true,
       "cacheVariables": {
         "CMAKE_CATCH_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST"
@@ -175,7 +173,7 @@
     },
     {
       "name": "ci-ubuntu",
-      "inherits": ["ci-build", "ci-linux", "clang-tidy", "vcpkg", "vcpkg-linux64", "cppcheck", "dev-mode"]
+      "inherits": ["ci-build", "ci-linux", "vcpkg", "vcpkg-linux64", "cppcheck", "dev-mode"]
     },
     {
       "name": "ci-windows",

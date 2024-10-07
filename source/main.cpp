@@ -2,6 +2,27 @@
 #include <cstdint>
 #include <iostream>
 
+#include <Magnum/GL/Mesh.h>
+#include <Magnum/GL/Version.h>
+#include <Magnum/GL/Renderer.h>
+#include <Magnum/GL/Shader.h>
+#include <Magnum/GL/Framebuffer.h>
+#include <Magnum/GL/DefaultFramebuffer.h>
+#include <Magnum/GL/Renderbuffer.h>
+#include <Magnum/GL/RenderbufferFormat.h>
+#include <Magnum/GL/Texture.h>
+#include <Magnum/GL/TextureFormat.h>
+#include <Magnum/GL/AbstractShaderProgram.h>
+#include <Magnum/MeshTools/Compile.h>
+#include <Magnum/Primitives/Square.h>
+#include <Magnum/Math/Matrix3.h>
+#include <Magnum/Math/Color.h>
+#include <Magnum/Platform/GLContext.h>
+#include <Magnum/Tags.h>
+#include <MagnumExternal/OpenGL/GL/flextGL.h>
+#include <Magnum/Trade/MeshData.h>
+#include <Corrade/Containers/Reference.h>
+
 #include <SDL.h>
 #include <SDL_opengl.h>
 #include <imgui.h>
@@ -17,23 +38,50 @@ constexpr int window_width = 800;
 constexpr int window_height = 600;
 constexpr float editor_window_ratio = 1.F / 3.F;
 
+constexpr size_t buffer_resolution_x = 1000;
+constexpr size_t buffer_resolution_y = 1000;
+constexpr Magnum::Vector2i framebuffer_resolution {buffer_resolution_x,
+                                                   buffer_resolution_y};
 namespace text_input
 {
-static constexpr std::size_t buffer_size = 1 << 10;
+static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
 
 using buffer = std::array<char, buffer_size>;
 }  // namespace text_input
 
+namespace shader
+{
+using namespace Magnum;
+struct flat_shader : GL::AbstractShaderProgram
+{
+  auto set_transformation_projection_matrix(const Matrix3& matrix)
+      -> flat_shader&
+  {
+    setUniform(0, matrix);
+    return *this;
+  }
+
+  bool attach_and_link_shaders(
+      std::initializer_list<Containers::Reference<GL::Shader>> shaders)
+  {
+    attachShaders(std::move(shaders));
+    return link();
+  }
+};
+}  // namespace shader
+
 void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
-  ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration);
+  ImGui::Begin("Main shader input",
+               nullptr,
+               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
   static text_input::buffer buffer {};
   if (!m.new_shader_input.empty()) {
     std::ranges::copy(m.new_shader_input, buffer.data());
   }
 
-  if (ImGui::InputTextMultiline("##",
+  if (ImGui::InputTextMultiline("##shader_input",
                                 buffer.data(),
                                 text_input::buffer_size,
                                 ImGui::GetContentRegionAvail()))
@@ -44,9 +92,78 @@ void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
   ImGui::End();
 }
 
-void draw_shader_output()
+auto create_framebuffer(Magnum::Vector2i framebuffer_size)
+{
+  Magnum::GL::Framebuffer framebuffer {{{}, framebuffer_size}};
+  Magnum::GL::Texture2D color_texture;
+  color_texture
+      .setStorage(1, Magnum::GL::TextureFormat::RGBA8, framebuffer_size)
+      .setMinificationFilter(Magnum::SamplerFilter::Linear)
+      .setMagnificationFilter(Magnum::SamplerFilter::Linear);
+  framebuffer.attachTexture(
+      Magnum::GL::Framebuffer::ColorAttachment {0}, color_texture, 0);
+
+  Magnum::GL::Renderbuffer depth_buffer;
+  depth_buffer.setStorage(Magnum::GL::RenderbufferFormat::Depth24Stencil8,
+                          framebuffer_size);
+  framebuffer.attachRenderbuffer(
+      Magnum::GL::Framebuffer::BufferAttachment::DepthStencil, depth_buffer);
+
+  framebuffer.checkStatus(Magnum::GL::FramebufferTarget::Draw);
+
+  return std::make_pair(std::move(framebuffer), std::move(color_texture));
+}
+
+auto create_vertex_shader()
+{
+  using namespace Magnum;
+
+  GL::Shader vertex_shader {GL::Version::GLES300, GL::Shader::Type::Vertex};
+  vertex_shader.addSource(R"GLSL(
+uniform mat3 matrix;
+layout(location = 0) in vec4 position;
+
+void main() {
+    gl_Position = vec4(matrix*position.xyw, 0.0).xywz;
+}
+)GLSL");
+  return vertex_shader;
+}
+
+void bind_framebuffer(Magnum::GL::Framebuffer& framebuffer)
+{
+  framebuffer.bind();
+  framebuffer.clearColor(0, Magnum::Math::Color4 {0.0f, 1.0f, 0.0f, 0.0f});
+  framebuffer.clear(Magnum::GL::FramebufferClear::Color
+                    | Magnum::GL::FramebufferClear::Depth);
+}
+
+void render_shader_output(Magnum::GL::Mesh& mesh,
+                          Magnum::GL::Shader& vertex_shader,
+                          std::string_view shader_input)
+{
+  using namespace Magnum;
+  using namespace Magnum::Math::Literals;
+
+  shader::flat_shader shader {};
+
+  GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
+  fragment_shader.addSource(shader_input.data());
+  if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
+      && shader.attach_and_link_shaders({vertex_shader, fragment_shader}))
+  {
+    shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
+    shader.draw(mesh);
+  }
+}
+
+void draw_texture(GLuint texture_id)
 {
   ImGui::Begin("Shader output");
+
+  // Display the framebuffer texture in ImGui
+  ImGui::Image(reinterpret_cast<void*>(texture_id),
+               ImGui::GetContentRegionAvail());
 
   ImGui::End();
 }
@@ -107,6 +224,21 @@ int main()
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
+  Magnum::Platform::GLContext context {};
+
+  auto const mesh_data = Magnum::Primitives::squareSolid();
+  auto mesh = Magnum::MeshTools::compile(mesh_data);
+
+  auto [framebuffer, color_texture] =
+      create_framebuffer(framebuffer_resolution);
+  GLuint texture_id = color_texture.id();
+
+  auto vertex_shader = create_vertex_shader();
+  if (!vertex_shader.compile()) {
+    std::cerr << "Error compiling vertex shader." << std::endl;
+    return -1;
+  }
+
   ImGuiDockNodeFlags const dockspace_flags = ImGuiDockNodeFlags_NoUndocking;
 
   auto loop = lager::sdl_event_loop {};
@@ -160,10 +292,20 @@ int main()
         }
 
         draw(store, store.get());
-        draw_shader_output();
+        draw_texture(texture_id);
 
         // Rendering
         ImGui::Render();
+
+        bind_framebuffer(framebuffer);
+
+        render_shader_output(mesh, vertex_shader, store.get().new_shader_input);
+        /* Switch back to the default framebuffer */
+        Magnum::GL::defaultFramebuffer
+            .clear(Magnum::GL::FramebufferClear::Color
+                   | Magnum::GL::FramebufferClear::Depth)
+            .bind();
+
         SDL_GL_MakeCurrent(window, gl_context);
         auto size = ImGui::GetIO().DisplaySize;
         glViewport(0, 0, static_cast<int>(size.x), static_cast<int>(size.y));
