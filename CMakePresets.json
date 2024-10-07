@@ -102,8 +102,7 @@
     },
     {
       "name": "ci-linux",
-      "inherits": ["flags-gcc-clang", "ci-std"],
-      "generator": "Ninja",
+      "inherits": ["flags-gcc-clang", "ci-std", "clang"],
       "hidden": true,
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
@@ -111,8 +110,7 @@
     },
     {
       "name": "ci-darwin",
-      "inherits": ["flags-appleclang", "ci-std"],
-      "generator": "Xcode",
+      "inherits": ["flags-appleclang", "ci-std", "clang"],
       "hidden": true,
       "cacheVariables": {
         "CMAKE_CATCH_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST"
