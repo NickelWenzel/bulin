@@ -151,7 +151,8 @@ jobs:
       if: matrix.os == 'macos-14'
       run: |
         brew install llvm@18 ninja
-        echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> /Users/runner/.bash_profile
+        ln -s $(brew --prefix llvm@18)/bin/clang /usr/local/bin/clang
+        ln -s $(brew --prefix llvm@18)/bin/clang++ /usr/local/bin/clang++
 
     - name: Install static analyzers
       if: matrix.os == 'ubuntu-22.04'
