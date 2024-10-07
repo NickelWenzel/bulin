@@ -147,9 +147,11 @@ jobs:
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
 
-    - name: Install Clang 18
+    - name: Install Clang 18 and set in PATH
       if: matrix.os == 'macos-14'
-      run: brew install llvm@18 ninja
+      run: |
+        brew install llvm@18 ninja
+        echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> /Users/runner/.bash_profile
 
     - name: Install static analyzers
       if: matrix.os == 'ubuntu-22.04'
