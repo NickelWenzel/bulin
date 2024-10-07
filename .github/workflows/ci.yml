@@ -85,7 +85,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Install OpenGL development package
-      run: sudo apt-get install libegl1-mesa libx11-dev libxext-dev libxrandr-dev libxxf86vm-dev mesa-utils -y -q
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev -y -q
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
@@ -140,7 +140,7 @@ jobs:
 
     - name: Install OpenGL development package
       if: matrix.os == 'ubuntu-22.04'
-      run: sudo apt-get install libegl1-mesa libx11-dev libxext-dev libxrandr-dev libxxf86vm-dev mesa-utils -y -q
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev -y -q
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
