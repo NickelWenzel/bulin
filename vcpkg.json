@@ -13,7 +13,7 @@
     },
     {
       "name": "magnum",
-      "features": ["glxcontext"]
+      "features": [{"name": "glxcontext", "platform": "!windows & !osx"}]
     },
     "catch2"
   ],
