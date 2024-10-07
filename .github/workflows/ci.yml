@@ -1,9 +1,7 @@
 name: Continuous Integration
 
 on:
-  push:
-    branches:
-    - master
+  workflow_dispatch: # Enables manual trigger
 
   pull_request:
     branches:
