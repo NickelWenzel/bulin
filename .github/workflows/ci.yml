@@ -84,8 +84,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install OpenGL development package
-      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev -y -q
+    - name: Install system requirements
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build -y -q
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
@@ -93,13 +93,6 @@ jobs:
 
     - name: Configure
       run: cmake --preset=ci-sanitize
-
-    - name: publish magnum vcpkg logs
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: vcpkg-magnum-logs
-        path: /home/runner/work/bulin/bulin/vcpkg/buildtrees/magnum/*.log
 
     - name: Build
       run: cmake --build build/sanitize -j 2
@@ -138,9 +131,9 @@ jobs:
         /usr/bin/clang-tidy clang-tidy
         /usr/bin/clang-tidy-14 140
 
-    - name: Install OpenGL development package
+    - name: Install system requirements
       if: matrix.os == 'ubuntu-22.04'
-      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev -y -q
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build -y -q
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
@@ -155,13 +148,6 @@ jobs:
     - name: Configure
       shell: pwsh
       run: cmake "--preset=ci-$("${{ matrix.os }}".split("-")[0])"
-
-    - name: publish magnum vcpkg logs
-      if: failure() && matrix.os == 'ubuntu-22.04'
-      uses: actions/upload-artifact@v4
-      with:
-        name: vcpkg-magnum-logs
-        path: /home/runner/work/bulin/bulin/vcpkg/buildtrees/magnum/*.log
 
     - name: Build
       run: cmake --build build --config Release -j 2
