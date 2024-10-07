@@ -85,6 +85,20 @@ jobs:
     - name: Install system requirements
       run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build -y -q
 
+    - name: Install Clang 18 and set as default using update-alternatives
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget lsb-release software-properties-common
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 18
+
+        # Add clang-18 to update-alternatives
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 180
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
+        sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
+        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
       with: { committish: "${{ env.VCPKG_COMMIT }}" }
@@ -123,11 +137,25 @@ jobs:
     - name: Install static analyzers
       if: matrix.os == 'ubuntu-22.04'
       run: >-
-        sudo apt-get install clang-tidy-14 cppcheck -y -q
+        sudo apt-get install cppcheck -y -q
 
-        sudo update-alternatives --install
-        /usr/bin/clang-tidy clang-tidy
-        /usr/bin/clang-tidy-14 140
+    - name: Install Clang 18 and set as default using update-alternatives
+      if: matrix.os == 'ubuntu-22.04'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget lsb-release software-properties-common
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 18
+
+        # Add clang-18 to update-alternatives
+        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 180
+        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
+        sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
+        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+
+        # Add clang-tidy-18
+        sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 180
 
     - name: Install system requirements
       if: matrix.os == 'ubuntu-22.04'
