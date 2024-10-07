@@ -94,6 +94,13 @@ jobs:
     - name: Configure
       run: cmake --preset=ci-sanitize
 
+    - name: publish magnum vcpkg logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: vcpkg-magnum-logs
+        path: /home/runner/work/bulin/bulin/vcpkg/buildtrees/magnum/*.log
+
     - name: Build
       run: cmake --build build/sanitize -j 2
 
@@ -148,6 +155,13 @@ jobs:
     - name: Configure
       shell: pwsh
       run: cmake "--preset=ci-$("${{ matrix.os }}".split("-")[0])"
+
+    - name: publish magnum vcpkg logs
+      if: failure() && matrix.os == 'ubuntu-22.04'
+      uses: actions/upload-artifact@v4
+      with:
+        name: vcpkg-magnum-logs
+        path: /home/runner/work/bulin/bulin/vcpkg/buildtrees/magnum/*.log
 
     - name: Build
       run: cmake --build build --config Release -j 2
