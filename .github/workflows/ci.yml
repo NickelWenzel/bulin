@@ -149,6 +149,10 @@ jobs:
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
 
+    - name: Install Clang 18
+      if: matrix.os == 'macos-14'
+      run: brew install llvm@18 ninja
+
     - name: Install static analyzers
       if: matrix.os == 'ubuntu-22.04'
       run: >-
