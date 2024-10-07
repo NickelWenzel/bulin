@@ -62,7 +62,17 @@ target_precompile_headers(bulin_lib
 find_package(OpenGL REQUIRED)
 find_package(imgui REQUIRED)
 find_package(SDL2 REQUIRED)
-find_package(Magnum REQUIRED MeshTools Primitives Shaders GlxContext)
+
+# platform dependent gl context
+if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(BULIN_GLCONTEXT wGlContext)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(BULIN_GLCONTEXT GlxContext)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(BULIN_GLCONTEXT cGlContext)
+endif()
+
+find_package(Magnum REQUIRED MeshTools Primitives Shaders ${BULIN_GLCONTEXT})
 
 set_target_properties(imgui::imgui PROPERTIES
     INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:imgui::imgui,INTERFACE_INCLUDE_DIRECTORIES>"
