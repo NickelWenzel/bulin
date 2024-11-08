@@ -88,6 +88,8 @@ add_executable(bulin_exe
     source/main.cpp
     source/flat_shader.hpp
     source/flat_shader.cpp
+    source/shader_model.hpp
+    source/shader_model.cpp
 )
 
 target_include_directories(
