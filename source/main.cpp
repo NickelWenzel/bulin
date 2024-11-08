@@ -1,6 +1,5 @@
-#include <array>
-#include <cstdint>
-#include <iostream>
+#include "model.hpp"
+#include "flat_shader.hpp"
 
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/GL/Version.h>
@@ -12,7 +11,6 @@
 #include <Magnum/GL/RenderbufferFormat.h>
 #include <Magnum/GL/Texture.h>
 #include <Magnum/GL/TextureFormat.h>
-#include <Magnum/GL/AbstractShaderProgram.h>
 #include <Magnum/MeshTools/Compile.h>
 #include <Magnum/Primitives/Square.h>
 #include <Magnum/Math/Matrix3.h>
@@ -21,7 +19,6 @@
 #include <Magnum/Tags.h>
 #include <MagnumExternal/OpenGL/GL/flextGL.h>
 #include <Magnum/Trade/MeshData.h>
-#include <Corrade/Containers/Reference.h>
 
 #include <SDL.h>
 #include <SDL_opengl.h>
@@ -32,7 +29,9 @@
 #include <lager/event_loop/sdl.hpp>
 #include <lager/store.hpp>
 
-#include "model.hpp"
+#include <array>
+#include <cstdint>
+#include <iostream>
 
 constexpr int window_width = 800;
 constexpr int window_height = 600;
@@ -48,27 +47,6 @@ static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
 
 using buffer = std::array<char, buffer_size>;
 }  // namespace text_input
-
-namespace shader
-{
-using namespace Magnum;
-struct flat_shader : GL::AbstractShaderProgram
-{
-  auto set_transformation_projection_matrix(const Matrix3& matrix)
-      -> flat_shader&
-  {
-    setUniform(0, matrix);
-    return *this;
-  }
-
-  bool attach_and_link_shaders(
-      std::initializer_list<Containers::Reference<GL::Shader>> shaders)
-  {
-    attachShaders(std::move(shaders));
-    return link();
-  }
-};
-}  // namespace shader
 
 void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
@@ -150,7 +128,7 @@ void render_shader_output(Magnum::GL::Mesh& mesh,
   GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
   fragment_shader.addSource(shader_input.data());
   if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
-      && shader.attach_and_link_shaders({vertex_shader, fragment_shader}))
+      && shader.attach_and_link_shaders(vertex_shader, fragment_shader))
   {
     shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
     shader.draw(mesh);

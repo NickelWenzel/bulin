@@ -86,6 +86,14 @@ set_target_properties(Magnum::Magnum PROPERTIES
 
 add_executable(bulin_exe
     source/main.cpp
+    source/flat_shader.hpp
+    source/flat_shader.cpp
+)
+
+target_include_directories(
+    bulin_exe ${warning_guard}
+    PUBLIC
+    "\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>"
 )
 
 add_executable(bulin::exe ALIAS bulin_exe)
