@@ -14,7 +14,7 @@ auto bulin::flat_shader::set_transformation_projection_matrix(
 }
 
 bool bulin::flat_shader::attach_and_link_shaders(GL::Shader& vertex_shader,
-    GL::Shader& fragment_shader)
+                                                 GL::Shader& fragment_shader)
 {
   attachShaders({vertex_shader, fragment_shader});
   return link();

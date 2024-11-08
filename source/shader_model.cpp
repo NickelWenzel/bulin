@@ -28,7 +28,7 @@ void main() {
 
 bulin::shader_model::shader_model()
     : m_vertex_shader {create_vertex_shader()}
-    , m_shader{ }
+    , m_shader {}
 {
   if (!m_vertex_shader.compile()) {
     std::cerr << "Error compiling vertex shader." << std::endl;
@@ -49,7 +49,8 @@ void bulin::shader_model::update(std::string_view shader_input)
   if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
       && m_shader.attach_and_link_shaders(m_vertex_shader, fragment_shader))
   {
-    m_shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
+    m_shader.set_transformation_projection_matrix(
+        Matrix3::scaling({1.0f, 1.0f}));
   }
 }
 
