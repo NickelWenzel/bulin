@@ -1,27 +1,20 @@
-#include <array>
-#include <cstdint>
-#include <iostream>
+#include "model.hpp"
+#include "flat_shader.hpp"
+#include "shader_model.hpp"
 
-#include <Magnum/GL/Mesh.h>
-#include <Magnum/GL/Version.h>
 #include <Magnum/GL/Renderer.h>
-#include <Magnum/GL/Shader.h>
 #include <Magnum/GL/Framebuffer.h>
 #include <Magnum/GL/DefaultFramebuffer.h>
 #include <Magnum/GL/Renderbuffer.h>
 #include <Magnum/GL/RenderbufferFormat.h>
 #include <Magnum/GL/Texture.h>
 #include <Magnum/GL/TextureFormat.h>
-#include <Magnum/GL/AbstractShaderProgram.h>
-#include <Magnum/MeshTools/Compile.h>
-#include <Magnum/Primitives/Square.h>
+#include <Magnum/GL/Version.h>
 #include <Magnum/Math/Matrix3.h>
 #include <Magnum/Math/Color.h>
 #include <Magnum/Platform/GLContext.h>
 #include <Magnum/Tags.h>
 #include <MagnumExternal/OpenGL/GL/flextGL.h>
-#include <Magnum/Trade/MeshData.h>
-#include <Corrade/Containers/Reference.h>
 
 #include <SDL.h>
 #include <SDL_opengl.h>
@@ -32,7 +25,8 @@
 #include <lager/event_loop/sdl.hpp>
 #include <lager/store.hpp>
 
-#include "model.hpp"
+#include <array>
+#include <iostream>
 
 constexpr int window_width = 800;
 constexpr int window_height = 600;
@@ -48,27 +42,6 @@ static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
 
 using buffer = std::array<char, buffer_size>;
 }  // namespace text_input
-
-namespace shader
-{
-using namespace Magnum;
-struct flat_shader : GL::AbstractShaderProgram
-{
-  auto set_transformation_projection_matrix(const Matrix3& matrix)
-      -> flat_shader&
-  {
-    setUniform(0, matrix);
-    return *this;
-  }
-
-  bool attach_and_link_shaders(
-      std::initializer_list<Containers::Reference<GL::Shader>> shaders)
-  {
-    attachShaders(std::move(shaders));
-    return link();
-  }
-};
-}  // namespace shader
 
 void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
 {
@@ -92,7 +65,7 @@ void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
   ImGui::End();
 }
 
-auto create_framebuffer(Magnum::Vector2i framebuffer_size)
+auto create_framebuffer(Magnum::Vector2i const& framebuffer_size)
 {
   Magnum::GL::Framebuffer framebuffer {{{}, framebuffer_size}};
   Magnum::GL::Texture2D color_texture;
@@ -114,22 +87,6 @@ auto create_framebuffer(Magnum::Vector2i framebuffer_size)
   return std::make_pair(std::move(framebuffer), std::move(color_texture));
 }
 
-auto create_vertex_shader()
-{
-  using namespace Magnum;
-
-  GL::Shader vertex_shader {GL::Version::GLES300, GL::Shader::Type::Vertex};
-  vertex_shader.addSource(R"GLSL(
-uniform mat3 matrix;
-layout(location = 0) in vec4 position;
-
-void main() {
-    gl_Position = vec4(matrix*position.xyw, 0.0).xywz;
-}
-)GLSL");
-  return vertex_shader;
-}
-
 void bind_framebuffer(Magnum::GL::Framebuffer& framebuffer)
 {
   framebuffer.bind();
@@ -145,12 +102,12 @@ void render_shader_output(Magnum::GL::Mesh& mesh,
   using namespace Magnum;
   using namespace Magnum::Math::Literals;
 
-  shader::flat_shader shader {};
+  bulin::flat_shader shader {};
 
   GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
   fragment_shader.addSource(shader_input.data());
   if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
-      && shader.attach_and_link_shaders({vertex_shader, fragment_shader}))
+      && shader.attach_and_link_shaders(vertex_shader, fragment_shader))
   {
     shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
     shader.draw(mesh);
@@ -166,6 +123,34 @@ void draw_texture(GLuint texture_id)
                ImGui::GetContentRegionAvail());
 
   ImGui::End();
+}
+
+void init_imgui_dock_windows(ImGuiID const dockspace_id,
+                             ImGuiDockNodeFlags const dockspace_flags)
+{
+  // Start building the dockspace layout
+  ImGui::DockBuilderRemoveNode(dockspace_id);  // Clear any previous layout
+  ImGui::DockBuilderAddNode(
+      dockspace_id,
+      dockspace_flags | ImGuiDockNodeFlags_DockSpace);  // Create a new node
+  ImGui::DockBuilderSetNodeSize(
+      dockspace_id,
+      ImGui::GetMainViewport()->Size);  // Set size to match the viewport
+
+  // Split the central node into two (left and right)
+  ImGuiID left_node, right_node;
+  ImGui::DockBuilderSplitNode(dockspace_id,
+                              ImGuiDir_Left,
+                              editor_window_ratio,
+                              &left_node,
+                              &right_node);
+
+  // Dock "Window 1" in the left node
+  ImGui::DockBuilderDockWindow("Main shader input", left_node);
+  // Dock "Window 2" in the right node
+  ImGui::DockBuilderDockWindow("Shader output", right_node);
+  // Commit the layout
+  ImGui::DockBuilderFinish(dockspace_id);
 }
 
 int main()
@@ -185,8 +170,6 @@ int main()
   SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
   SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-  auto current = SDL_DisplayMode {};
-  SDL_GetCurrentDisplayMode(0, &current);
   auto* window =
       SDL_CreateWindow("Bulin",
                        SDL_WINDOWPOS_CENTERED,
@@ -226,18 +209,11 @@ int main()
 
   Magnum::Platform::GLContext context {};
 
-  auto const mesh_data = Magnum::Primitives::squareSolid();
-  auto mesh = Magnum::MeshTools::compile(mesh_data);
+  bulin::shader_model shader_model {};
 
   auto [framebuffer, color_texture] =
       create_framebuffer(framebuffer_resolution);
   GLuint texture_id = color_texture.id();
-
-  auto vertex_shader = create_vertex_shader();
-  if (!vertex_shader.compile()) {
-    std::cerr << "Error compiling vertex shader." << std::endl;
-    return -1;
-  }
 
   ImGuiDockNodeFlags const dockspace_flags = ImGuiDockNodeFlags_NoUndocking;
 
@@ -258,37 +234,12 @@ int main()
         ImGui::NewFrame();
 
         // Docking space
-        ImGuiID dockspace_id = ImGui::GetID("main_dockspace");
+        ImGuiID const dockspace_id = ImGui::GetID("main_dockspace");
         ImGui::DockSpaceOverViewport(
             dockspace_id, ImGui::GetMainViewport(), dockspace_flags);
 
         for (static bool first = true; first; first = false) {
-          // Start building the dockspace layout
-          ImGui::DockBuilderRemoveNode(
-              dockspace_id);  // Clear any previous layout
-          ImGui::DockBuilderAddNode(
-              dockspace_id,
-              dockspace_flags
-                  | ImGuiDockNodeFlags_DockSpace);  // Create a new node
-          ImGui::DockBuilderSetNodeSize(
-              dockspace_id,
-              ImGui::GetMainViewport()
-                  ->Size);  // Set size to match the viewport
-
-          // Split the central node into two (left and right)
-          ImGuiID left_node, right_node;
-          ImGui::DockBuilderSplitNode(dockspace_id,
-                                      ImGuiDir_Left,
-                                      editor_window_ratio,
-                                      &left_node,
-                                      &right_node);
-
-          // Dock "Window 1" in the left node
-          ImGui::DockBuilderDockWindow("Main shader input", left_node);
-          // Dock "Window 2" in the right node
-          ImGui::DockBuilderDockWindow("Shader output", right_node);
-          // Commit the layout
-          ImGui::DockBuilderFinish(dockspace_id);
+          init_imgui_dock_windows(dockspace_id, dockspace_flags);
         }
 
         draw(store, store.get());
@@ -299,7 +250,8 @@ int main()
 
         bind_framebuffer(framebuffer);
 
-        render_shader_output(mesh, vertex_shader, store.get().new_shader_input);
+        shader_model.update(store.get().new_shader_input);
+        shader_model.draw();
         /* Switch back to the default framebuffer */
         Magnum::GL::defaultFramebuffer
             .clear(Magnum::GL::FramebufferClear::Color
