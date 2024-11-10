@@ -48,8 +48,7 @@ app_result update(app app_state, app_action app_action)
         auto eff = [filepath = std::move(load_action.file)](auto&& ctx)
         {
           std::cout << "loading project: " << filepath << std::endl;
-          ctx.dispatch(
-              load_result_action {std::move(filepath), load(filepath)});
+          ctx.dispatch(load_result_action {filepath, load(filepath)});
         };
         return {std::move(app_state), eff};
       },
@@ -59,9 +58,8 @@ app_result update(app app_state, app_action app_action)
                     filepath = load_shader_action.file.string()](auto&& ctx)
         {
           std::cout << "loading shader: " << filepath << std::endl;
-          ctx.dispatch(load_result_action {
-              std::move(project_path),
-              {load_shader(filepath), std::move(filepath)}});
+          ctx.dispatch(load_result_action {project_path,
+                                           {load_shader(filepath), filepath}});
         };
         return {std::move(app_state), eff};
       },
