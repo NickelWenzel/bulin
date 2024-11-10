@@ -42,7 +42,7 @@ auto update(model state, model_action model_action) -> model_result
       });
 }
 
-void save(std::string const& fname, model state)
+void save(std::filesystem::path const& fname, model state)
 {
   auto stream = std::ofstream {fname};
   stream.exceptions(std::fstream::badbit | std::fstream::failbit);
@@ -52,7 +52,7 @@ void save(std::string const& fname, model state)
   }
 }
 
-model load(std::string const& fname)
+model load(std::filesystem::path const& fname)
 {
   auto stream = std::ifstream {fname};
   stream.exceptions(std::fstream::badbit);

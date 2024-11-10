@@ -17,6 +17,7 @@
 #include <lager/extra/struct.hpp>
 #include <lager/effect.hpp>
 
+#include <filesystem>
 #include <string>
 #include <variant>
 
@@ -41,8 +42,8 @@ using model_result =
 
 auto update(model state, model_action model_action) -> model_result;
 
-void save(std::string const& fname, model state);
-auto load(std::string const& fname) -> model;
+void save(std::filesystem::path const& fname, model state);
+auto load(std::filesystem::path const& fname) -> model;
 
 }  // namespace bulin
 
