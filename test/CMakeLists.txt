@@ -4,6 +4,8 @@
 
 project(bulinTests LANGUAGES CXX)
 
+include(../cmake/system-link.cmake)
+
 # ---- Dependencies ----
 
 find_package(Catch2 REQUIRED)
@@ -13,13 +15,8 @@ include(Catch)
 
 add_executable(bulin_test source/bulin_test.cpp)
 
-set_target_properties(Catch2::Catch2WithMain PROPERTIES
-    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:Catch2::Catch2WithMain,INTERFACE_INCLUDE_DIRECTORIES>"
-)
-
-target_link_libraries(
+target_link_system_libraries(
     bulin_test PRIVATE
-    bulin_lib
     Catch2::Catch2WithMain
 )
 target_compile_features(bulin_test PRIVATE cxx_std_20)
