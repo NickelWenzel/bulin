@@ -6,6 +6,8 @@
 #include <Magnum/GL/Version.h>
 #include <Magnum/Math/Matrix3.h>
 
+#include <iostream>
+
 namespace
 {
 auto create_vertex_shader()

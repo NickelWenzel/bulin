@@ -16,6 +16,7 @@
 
 #include <cereal/archives/json.hpp>
 #include <cereal/cereal.hpp>
+#include <lager/effect.hpp>
 #include <lager/extra/cereal/immer_flex_vector.hpp>
 #include <lager/extra/cereal/inline.hpp>
 #include <lager/extra/cereal/struct.hpp>
@@ -29,12 +30,15 @@ namespace bulin
 auto update(model state, model_action model_action) -> model_result
 {
   return lager::match(std::move(model_action))(
-      [&](changed_shader_input&& changed_shader_input)
+      [&](changed_shader_input&& changed_shader_input) -> model_result
       {
-        if (changed_shader_input.text != state.new_shader_input) {
-          state.new_shader_input = std::move(changed_shader_input.text);
+        if (changed_shader_input.text == state.new_shader_input) {
+          return {std::move(state), lager::noop};
         }
-        return std::move(state);
+        state.new_shader_input = std::move(changed_shader_input.text);
+        auto eff = [new_shader_input = state.new_shader_input](auto&& ctx)
+        { lager::get<shader_model>(ctx).update(new_shader_input); };
+        return {std::move(state), eff};
       });
 }
 

@@ -47,7 +47,7 @@ using app_action =
 
 using app_result = lager::result<app, app_action, lager::deps<shader_model&>>;
 
- BULIN_APPLICATION_EXPORT auto update(app, app_action) -> app_result;
+BULIN_APPLICATION_EXPORT auto update(app, app_action) -> app_result;
 
 }  // namespace bulin
 
