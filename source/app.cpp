@@ -13,6 +13,7 @@
 #include <bulin/application/app.hpp>
 
 #include <bulin/graphics/shader_model.hpp>
+#include <bulin/graphics/texture.hpp>
 
 #include <iostream>
 
@@ -26,12 +27,19 @@ app_result update(app app_state, app_action app_action)
         app_state.path = save_action.file.replace_extension("bulin");
         auto eff = [model = app_state.doc, filepath = app_state.path](auto&&)
         {
-          try {
-            std::cout << "saving file: " << filepath << std::endl;
-            save(filepath, model);
-          } catch (std::exception const& err) {
-            std::cerr << "error saving file: " << err.what() << std::endl;
-          }
+          std::cout << "saving file: " << filepath << std::endl;
+          save(filepath, model);
+        };
+        return {std::move(app_state), eff};
+      },
+      [&](save_shader_action&& save_shader_action) -> app_result
+      {
+        app_state.doc.path = save_shader_action.file.string();
+        auto eff = [shader = app_state.doc.shader_input,
+                    filepath = app_state.doc.path](auto&&)
+        {
+          std::cout << "saving file: " << filepath << std::endl;
+          save_shader(filepath, shader);
         };
         return {std::move(app_state), eff};
       },
@@ -39,21 +47,33 @@ app_result update(app app_state, app_action app_action)
       {
         auto eff = [filepath = std::move(load_action.file)](auto&& ctx)
         {
-          std::cout << "loading file: " << filepath << std::endl;
-          try {
-            auto model = load(filepath);
-            ctx.dispatch(load_result_action {filepath, std::move(model)});
-          } catch (std::exception const& err) {
-            std::cerr << "error loading file: " << err.what() << std::endl;
-          }
+          std::cout << "loading project: " << filepath << std::endl;
+          ctx.dispatch(
+              load_result_action {std::move(filepath), load(filepath)});
+        };
+        return {std::move(app_state), eff};
+      },
+      [&](load_shader_action&& load_shader_action) -> app_result
+      {
+        auto eff =
+            [project_path = app_state.path,
+             filepath = load_shader_action.file.string()](auto&& ctx)
+        {
+          std::cout << "loading shader: " << filepath << std::endl;
+          ctx.dispatch(load_result_action {
+              std::move(project_path),
+              {load_shader(filepath), std::move(filepath)}});
         };
         return {std::move(app_state), eff};
       },
       [&](load_result_action&& load_result_action) -> app_result
       {
-        app_state.doc = std::move(load_result_action.doc);
+        app_state.doc.path = std::move(load_result_action.doc.path);
         app_state.path = std::move(load_result_action.file);
-        return std::move(app_state);
+        auto eff = [new_shader_input = std::move(
+                        load_result_action.doc.shader_input)](auto&& ctx)
+        { ctx.dispatch(changed_shader_input {new_shader_input}); };
+        return {std::move(app_state), eff};
       },
       [&](model_action&& model_action) -> app_result
       {

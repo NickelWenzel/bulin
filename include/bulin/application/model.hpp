@@ -27,7 +27,8 @@ class shader_model;
 
 struct BULIN_APPLICATION_EXPORT model
 {
-  std::string new_shader_input;
+  std::string shader_input;
+  std::string path;
 };
 
 struct BULIN_APPLICATION_EXPORT changed_shader_input
@@ -45,6 +46,10 @@ auto update(model state, model_action model_action) -> model_result;
 void save(std::filesystem::path const& fname, model state);
 auto load(std::filesystem::path const& fname) -> model;
 
+void save_shader(std::filesystem::path const& filepath,
+                 std::string const& shader);
+auto load_shader(std::filesystem::path const& filepath) -> std::string;
+
 }  // namespace bulin
 
-LAGER_STRUCT(bulin, model, new_shader_input);
+LAGER_STRUCT(bulin, model, shader_input, path);

@@ -135,6 +135,7 @@ target_precompile_headers(bulin_application
 find_package(OpenGL REQUIRED)
 find_package(imgui REQUIRED)
 find_package(SDL2 REQUIRED)
+find_path(PORTABLE_FILE_DIALOGS_INCLUDE_DIRS "portable-file-dialogs.h")
 
 add_executable(bulin_exe
   source/main.cpp
@@ -165,6 +166,8 @@ target_link_libraries(bulin_exe
     bulin::graphics
     bulin::application
 )
+
+target_include_directories(bulin_exe PRIVATE ${PORTABLE_FILE_DIALOGS_INCLUDE_DIRS})
 
 target_precompile_headers(bulin_exe
   PRIVATE
