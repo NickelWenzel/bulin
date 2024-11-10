@@ -36,6 +36,7 @@ add_library(
   bulin_graphics STATIC
     source/flat_shader.cpp
     source/shader_model.cpp
+    source/texture.cpp
 )
 
 set(BULIN_GRAPHICS_EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/bulin/graphics/export.hpp)
@@ -51,6 +52,7 @@ target_sources(bulin_graphics
   FILES
     include/bulin/graphics/flat_shader.hpp
     include/bulin/graphics/shader_model.hpp
+    include/bulin/graphics/texture.hpp
     ${BULIN_GRAPHICS_EXPORT_FILE_NAME}
 )
 
