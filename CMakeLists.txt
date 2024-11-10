@@ -31,7 +31,7 @@ endif()
 
 # ---- Declare libraries ----
 
-# -------- garphics ---------
+# -------- graphics ---------
 add_library(
   bulin_graphics STATIC
     source/flat_shader.cpp
