@@ -1,4 +1,4 @@
-#include "flat_shader.hpp"
+#include <bulin/graphics/flat_shader.hpp>
 
 #include <Magnum/Math/Matrix3.h>
 #include <Magnum/GL/GL.h>

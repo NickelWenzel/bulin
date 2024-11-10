@@ -1,5 +1,4 @@
 #include "model.hpp"
-#include "flat_shader.hpp"
 #include "shader_model.hpp"
 
 #include <Magnum/GL/Renderer.h>
@@ -12,7 +11,6 @@
 #include <Magnum/GL/Version.h>
 #include <Magnum/Math/Matrix3.h>
 #include <Magnum/Math/Color.h>
-#include <Magnum/Platform/GLContext.h>
 #include <Magnum/Tags.h>
 #include <MagnumExternal/OpenGL/GL/flextGL.h>
 
@@ -93,25 +91,6 @@ void bind_framebuffer(Magnum::GL::Framebuffer& framebuffer)
   framebuffer.clearColor(0, Magnum::Math::Color4 {0.0f, 1.0f, 0.0f, 0.0f});
   framebuffer.clear(Magnum::GL::FramebufferClear::Color
                     | Magnum::GL::FramebufferClear::Depth);
-}
-
-void render_shader_output(Magnum::GL::Mesh& mesh,
-                          Magnum::GL::Shader& vertex_shader,
-                          std::string_view shader_input)
-{
-  using namespace Magnum;
-  using namespace Magnum::Math::Literals;
-
-  bulin::flat_shader shader {};
-
-  GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
-  fragment_shader.addSource(shader_input.data());
-  if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
-      && shader.attach_and_link_shaders(vertex_shader, fragment_shader))
-  {
-    shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
-    shader.draw(mesh);
-  }
 }
 
 void draw_texture(GLuint texture_id)
@@ -207,8 +186,6 @@ int main()
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
-  Magnum::Platform::GLContext context {};
-
   bulin::shader_model shader_model {};
 
   auto [framebuffer, color_texture] =
@@ -219,7 +196,9 @@ int main()
 
   auto loop = lager::sdl_event_loop {};
   auto store = lager::make_store<bulin::model_action>(
-      bulin::model {}, lager::with_sdl_event_loop {loop});
+      bulin::model {},
+      lager::with_sdl_event_loop {loop},
+      lager::with_deps(std::ref(shader_model)));
 
   loop.run(
       [&](const SDL_Event& ev)

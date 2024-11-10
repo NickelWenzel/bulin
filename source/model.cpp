@@ -10,9 +10,9 @@
 // or here: <https://github.com/arximboldi/lager/blob/master/LICENSE>
 //
 
-#include <fstream>
+#include <bulin/application/model.hpp>
 
-#include "model.hpp"
+#include <bulin/graphics/shader_model.hpp>
 
 #include <cereal/archives/json.hpp>
 #include <cereal/cereal.hpp>
@@ -21,41 +21,43 @@
 #include <lager/extra/cereal/struct.hpp>
 #include <lager/util.hpp>
 
+#include <fstream>
+
 namespace bulin
 {
 
-model update(model s, model_action a)
+auto update(model state, model_action model_action) -> model_result
 {
-  return lager::match(std::move(a))(
-      [&](changed_shader_input&& a)
+  return lager::match(std::move(model_action))(
+      [&](changed_shader_input&& changed_shader_input)
       {
-        if (a.text != s.new_shader_input) {
-          s.new_shader_input = std::move(a.text);
+        if (changed_shader_input.text != state.new_shader_input) {
+          state.new_shader_input = std::move(changed_shader_input.text);
         }
-        return std::move(s);
+        return std::move(state);
       });
 }
 
-void save(const std::string& fname, model shader_input)
+void save(std::string const& fname, model state)
 {
-  auto s = std::ofstream {fname};
-  s.exceptions(std::fstream::badbit | std::fstream::failbit);
+  auto stream = std::ofstream {fname};
+  stream.exceptions(std::fstream::badbit | std::fstream::failbit);
   {
-    auto a = cereal::JSONOutputArchive {s};
-    save_inline(a, shader_input);
+    auto archive = cereal::JSONOutputArchive {stream};
+    save_inline(archive, state);
   }
 }
 
-model load(const std::string& fname)
+model load(std::string const& fname)
 {
-  auto s = std::ifstream {fname};
-  s.exceptions(std::fstream::badbit);
-  auto r = model {};
+  auto stream = std::ifstream {fname};
+  stream.exceptions(std::fstream::badbit);
+  auto loaded_state = model {};
   {
-    auto a = cereal::JSONInputArchive {s};
-    load_inline(a, r);
+    auto archive = cereal::JSONInputArchive {stream};
+    load_inline(archive, loaded_state);
   }
-  return r;
+  return loaded_state;
 }
 
 }  // namespace bulin

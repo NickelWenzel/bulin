@@ -12,28 +12,37 @@
 
 #pragma once
 
+#include <bulin/application/export.hpp>
+
+#include <lager/extra/struct.hpp>
+#include <lager/effect.hpp>
+
 #include <string>
 #include <variant>
 
-#include <lager/extra/struct.hpp>
 namespace bulin
 {
-struct model
+class shader_model;
+
+struct BULIN_APPLICATION_EXPORT model
 {
   std::string new_shader_input;
 };
 
-struct changed_shader_input
+struct BULIN_APPLICATION_EXPORT changed_shader_input
 {
   std::string text;
 };
 
 using model_action = std::variant<changed_shader_input>;
 
-model update(model m, model_action a);
+using model_result =
+    lager::result<model, model_action, lager::deps<shader_model&>>;
 
-void save(const std::string& fname, model shader_input);
-model load(const std::string& fname);
+auto update(model state, model_action model_action) -> model_result;
+
+void save(std::string const& fname, model state);
+auto load(std::string const& fname) -> model;
 
 }  // namespace bulin
 
