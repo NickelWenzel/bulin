@@ -1,20 +1,8 @@
-#include "model.hpp"
-#include "flat_shader.hpp"
-#include "shader_model.hpp"
+#include <bulin/application/app.hpp>
+#include <bulin/application/model.hpp>
 
-#include <Magnum/GL/Renderer.h>
-#include <Magnum/GL/Framebuffer.h>
-#include <Magnum/GL/DefaultFramebuffer.h>
-#include <Magnum/GL/Renderbuffer.h>
-#include <Magnum/GL/RenderbufferFormat.h>
-#include <Magnum/GL/Texture.h>
-#include <Magnum/GL/TextureFormat.h>
-#include <Magnum/GL/Version.h>
-#include <Magnum/Math/Matrix3.h>
-#include <Magnum/Math/Color.h>
-#include <Magnum/Platform/GLContext.h>
-#include <Magnum/Tags.h>
-#include <MagnumExternal/OpenGL/GL/flextGL.h>
+#include <bulin/graphics/shader_model.hpp>
+#include <bulin/graphics/texture.hpp>
 
 #include <SDL.h>
 #include <SDL_opengl.h>
@@ -32,10 +20,8 @@ constexpr int window_width = 800;
 constexpr int window_height = 600;
 constexpr float editor_window_ratio = 1.F / 3.F;
 
-constexpr size_t buffer_resolution_x = 1000;
-constexpr size_t buffer_resolution_y = 1000;
-constexpr Magnum::Vector2i framebuffer_resolution {buffer_resolution_x,
-                                                   buffer_resolution_y};
+constexpr int buffer_resolution_x = 1000;
+constexpr int buffer_resolution_y = 1000;
 namespace text_input
 {
 static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
@@ -43,15 +29,15 @@ static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
 using buffer = std::array<char, buffer_size>;
 }  // namespace text_input
 
-void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
+void draw(const lager::context<bulin::app_action>& ctx, const bulin::app& app)
 {
   ImGui::Begin("Main shader input",
                nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
   static text_input::buffer buffer {};
-  if (!m.new_shader_input.empty()) {
-    std::ranges::copy(m.new_shader_input, buffer.data());
+  if (!app.doc.new_shader_input.empty()) {
+    std::ranges::copy(app.doc.new_shader_input, buffer.data());
   }
 
   if (ImGui::InputTextMultiline("##shader_input",
@@ -63,55 +49,6 @@ void draw(const lager::context<bulin::model_action>& ctx, const bulin::model& m)
   }
 
   ImGui::End();
-}
-
-auto create_framebuffer(Magnum::Vector2i const& framebuffer_size)
-{
-  Magnum::GL::Framebuffer framebuffer {{{}, framebuffer_size}};
-  Magnum::GL::Texture2D color_texture;
-  color_texture
-      .setStorage(1, Magnum::GL::TextureFormat::RGBA8, framebuffer_size)
-      .setMinificationFilter(Magnum::SamplerFilter::Linear)
-      .setMagnificationFilter(Magnum::SamplerFilter::Linear);
-  framebuffer.attachTexture(
-      Magnum::GL::Framebuffer::ColorAttachment {0}, color_texture, 0);
-
-  Magnum::GL::Renderbuffer depth_buffer;
-  depth_buffer.setStorage(Magnum::GL::RenderbufferFormat::Depth24Stencil8,
-                          framebuffer_size);
-  framebuffer.attachRenderbuffer(
-      Magnum::GL::Framebuffer::BufferAttachment::DepthStencil, depth_buffer);
-
-  framebuffer.checkStatus(Magnum::GL::FramebufferTarget::Draw);
-
-  return std::make_pair(std::move(framebuffer), std::move(color_texture));
-}
-
-void bind_framebuffer(Magnum::GL::Framebuffer& framebuffer)
-{
-  framebuffer.bind();
-  framebuffer.clearColor(0, Magnum::Math::Color4 {0.0f, 1.0f, 0.0f, 0.0f});
-  framebuffer.clear(Magnum::GL::FramebufferClear::Color
-                    | Magnum::GL::FramebufferClear::Depth);
-}
-
-void render_shader_output(Magnum::GL::Mesh& mesh,
-                          Magnum::GL::Shader& vertex_shader,
-                          std::string_view shader_input)
-{
-  using namespace Magnum;
-  using namespace Magnum::Math::Literals;
-
-  bulin::flat_shader shader {};
-
-  GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
-  fragment_shader.addSource(shader_input.data());
-  if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
-      && shader.attach_and_link_shaders(vertex_shader, fragment_shader))
-  {
-    shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
-    shader.draw(mesh);
-  }
 }
 
 void draw_texture(GLuint texture_id)
@@ -207,19 +144,16 @@ int main()
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
-  Magnum::Platform::GLContext context {};
-
   bulin::shader_model shader_model {};
-
-  auto [framebuffer, color_texture] =
-      create_framebuffer(framebuffer_resolution);
-  GLuint texture_id = color_texture.id();
+  bulin::texture texture {buffer_resolution_x, buffer_resolution_y};
 
   ImGuiDockNodeFlags const dockspace_flags = ImGuiDockNodeFlags_NoUndocking;
 
   auto loop = lager::sdl_event_loop {};
-  auto store = lager::make_store<bulin::model_action>(
-      bulin::model {}, lager::with_sdl_event_loop {loop});
+  auto store = lager::make_store<bulin::app_action>(
+      bulin::app {},
+      lager::with_sdl_event_loop {loop},
+      lager::with_deps(std::ref(shader_model)));
 
   loop.run(
       [&](const SDL_Event& ev)
@@ -243,20 +177,14 @@ int main()
         }
 
         draw(store, store.get());
-        draw_texture(texture_id);
+        draw_texture(texture.id());
 
         // Rendering
         ImGui::Render();
-
-        bind_framebuffer(framebuffer);
-
-        shader_model.update(store.get().new_shader_input);
-        shader_model.draw();
-        /* Switch back to the default framebuffer */
-        Magnum::GL::defaultFramebuffer
-            .clear(Magnum::GL::FramebufferClear::Color
-                   | Magnum::GL::FramebufferClear::Depth)
-            .bind();
+        {
+          auto const scope = texture.make_render_scope();
+          shader_model.draw();
+        }
 
         SDL_GL_MakeCurrent(window, gl_context);
         auto size = ImGui::GetIO().DisplaySize;

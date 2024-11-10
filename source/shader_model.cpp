@@ -1,11 +1,12 @@
-#include "shader_model.hpp"
-#include "flat_shader.hpp"
+#include <bulin/graphics/shader_model.hpp>
 
 #include <Magnum/MeshTools/Compile.h>
 #include <Magnum/Trade/MeshData.h>
 #include <Magnum/Primitives/Square.h>
 #include <Magnum/GL/Version.h>
 #include <Magnum/Math/Matrix3.h>
+
+#include <iostream>
 
 namespace
 {
@@ -27,7 +28,8 @@ void main() {
 }  // namespace
 
 bulin::shader_model::shader_model()
-    : m_vertex_shader {create_vertex_shader()}
+    : m_context {}
+    , m_vertex_shader {create_vertex_shader()}
     , m_shader {}
 {
   if (!m_vertex_shader.compile()) {

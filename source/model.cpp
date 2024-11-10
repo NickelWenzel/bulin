@@ -10,52 +10,58 @@
 // or here: <https://github.com/arximboldi/lager/blob/master/LICENSE>
 //
 
-#include <fstream>
+#include <bulin/application/model.hpp>
 
-#include "model.hpp"
+#include <bulin/graphics/shader_model.hpp>
 
 #include <cereal/archives/json.hpp>
 #include <cereal/cereal.hpp>
+#include <lager/effect.hpp>
 #include <lager/extra/cereal/immer_flex_vector.hpp>
 #include <lager/extra/cereal/inline.hpp>
 #include <lager/extra/cereal/struct.hpp>
 #include <lager/util.hpp>
 
+#include <fstream>
+
 namespace bulin
 {
 
-model update(model s, model_action a)
+auto update(model state, model_action model_action) -> model_result
 {
-  return lager::match(std::move(a))(
-      [&](changed_shader_input&& a)
+  return lager::match(std::move(model_action))(
+      [&](changed_shader_input&& changed_shader_input) -> model_result
       {
-        if (a.text != s.new_shader_input) {
-          s.new_shader_input = std::move(a.text);
+        if (changed_shader_input.text == state.new_shader_input) {
+          return {std::move(state), lager::noop};
         }
-        return std::move(s);
+        state.new_shader_input = std::move(changed_shader_input.text);
+        auto eff = [new_shader_input = state.new_shader_input](auto&& ctx)
+        { lager::get<shader_model>(ctx).update(new_shader_input); };
+        return {std::move(state), eff};
       });
 }
 
-void save(const std::string& fname, model shader_input)
+void save(std::filesystem::path const& fname, model state)
 {
-  auto s = std::ofstream {fname};
-  s.exceptions(std::fstream::badbit | std::fstream::failbit);
+  auto stream = std::ofstream {fname};
+  stream.exceptions(std::fstream::badbit | std::fstream::failbit);
   {
-    auto a = cereal::JSONOutputArchive {s};
-    save_inline(a, shader_input);
+    auto archive = cereal::JSONOutputArchive {stream};
+    save_inline(archive, state);
   }
 }
 
-model load(const std::string& fname)
+model load(std::filesystem::path const& fname)
 {
-  auto s = std::ifstream {fname};
-  s.exceptions(std::fstream::badbit);
-  auto r = model {};
+  auto stream = std::ifstream {fname};
+  stream.exceptions(std::fstream::badbit);
+  auto loaded_state = model {};
   {
-    auto a = cereal::JSONInputArchive {s};
-    load_inline(a, r);
+    auto archive = cereal::JSONInputArchive {stream};
+    load_inline(archive, loaded_state);
   }
-  return r;
+  return loaded_state;
 }
 
 }  // namespace bulin
