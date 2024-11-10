@@ -55,9 +55,8 @@ app_result update(app app_state, app_action app_action)
       },
       [&](load_shader_action&& load_shader_action) -> app_result
       {
-        auto eff =
-            [project_path = app_state.path,
-             filepath = load_shader_action.file.string()](auto&& ctx)
+        auto eff = [project_path = app_state.path,
+                    filepath = load_shader_action.file.string()](auto&& ctx)
         {
           std::cout << "loading shader: " << filepath << std::endl;
           ctx.dispatch(load_result_action {
