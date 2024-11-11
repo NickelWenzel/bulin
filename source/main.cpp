@@ -67,7 +67,7 @@ void draw_shader_menu(context const& ctx, bulin::app const& app)
 {
   if (ImGui::MenuItem("Load")) {
     auto fileopen =
-        pfd::open_file("Choose shader", app.path, shader_file_filters());
+        pfd::open_file("Choose shader", app.doc.path, shader_file_filters());
     if (auto files = fileopen.result(); !files.empty()) {
       ctx.dispatch(bulin::load_shader_action {files.front()});
     }
