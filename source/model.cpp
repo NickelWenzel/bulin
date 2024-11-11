@@ -17,7 +17,6 @@
 #include <cereal/archives/json.hpp>
 #include <cereal/cereal.hpp>
 #include <lager/effect.hpp>
-#include <lager/extra/cereal/immer_flex_vector.hpp>
 #include <lager/extra/cereal/inline.hpp>
 #include <lager/extra/cereal/struct.hpp>
 #include <lager/util.hpp>
@@ -32,11 +31,11 @@ auto update(model state, model_action model_action) -> model_result
   return lager::match(std::move(model_action))(
       [&](changed_shader_input&& changed_shader_input) -> model_result
       {
-        if (changed_shader_input.text == state.new_shader_input) {
+        if (changed_shader_input.text == state.shader_input) {
           return {std::move(state), lager::noop};
         }
-        state.new_shader_input = std::move(changed_shader_input.text);
-        auto eff = [new_shader_input = state.new_shader_input](auto&& ctx)
+        state.shader_input = std::move(changed_shader_input.text);
+        auto eff = [new_shader_input = state.shader_input](auto&& ctx)
         { lager::get<shader_model>(ctx).update(new_shader_input); };
         return {std::move(state), eff};
       });
@@ -62,6 +61,23 @@ model load(std::filesystem::path const& fname)
     load_inline(archive, loaded_state);
   }
   return loaded_state;
+}
+
+void save_shader(std::filesystem::path const& filepath,
+                 std::string const& shader)
+{
+  auto stream = std::ofstream {filepath};
+  stream.exceptions(std::fstream::badbit | std::fstream::failbit);
+  stream << shader;
+}
+
+auto load_shader(std::filesystem::path const& filepath) -> std::string
+{
+  auto stream = std::ifstream {filepath};
+  stream.exceptions(std::fstream::badbit);
+  std::stringstream buffer;
+  buffer << stream.rdbuf();  // Read the file into a stringstream
+  return buffer.str();  // Convert to a single string
 }
 
 }  // namespace bulin

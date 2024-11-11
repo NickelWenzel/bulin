@@ -10,8 +10,11 @@
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
 #include <imgui_internal.h>
+
 #include <lager/event_loop/sdl.hpp>
 #include <lager/store.hpp>
+
+#include <portable-file-dialogs.h>
 
 #include <array>
 #include <iostream>
@@ -29,15 +32,89 @@ static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
 using buffer = std::array<char, buffer_size>;
 }  // namespace text_input
 
-void draw(const lager::context<bulin::app_action>& ctx, const bulin::app& app)
+using context = lager::context<bulin::app_action, lager::deps<bulin::texture&>>;
+
+std::vector<std::string> project_file_filters()
+{
+  return {"Bulin files (.bulin)", "*.bulin", "All Files", "*"};
+}
+
+std::vector<std::string> shader_file_filters()
+{
+  return {"Shader files (.glsl)", "*.glsl", "All Files", "*"};
+}
+
+void draw_file_menu(context const& ctx, std::string const& default_project_path)
+{
+  if (ImGui::MenuItem("Open project")) {
+    auto fileopen = pfd::open_file(
+        "Choose project file", default_project_path, project_file_filters());
+    if (auto files = fileopen.result(); !files.empty()) {
+      ctx.dispatch(bulin::load_action {files.front()});
+    }
+  }
+  if (ImGui::MenuItem("Save project")) {
+    auto filesave = pfd::save_file(
+        "Choose location", default_project_path, project_file_filters());
+    ctx.dispatch(bulin::save_action {filesave.result()});
+  }
+  if (ImGui::MenuItem("Exit")) {
+    ctx.loop().finish();
+  }
+}
+
+void draw_shader_menu(context const& ctx,
+                      std::string const& default_shader_path)
+{
+  if (ImGui::MenuItem("Load")) {
+    auto fileopen = pfd::open_file(
+        "Choose shader", default_shader_path, shader_file_filters());
+    if (auto files = fileopen.result(); !files.empty()) {
+      ctx.dispatch(bulin::load_shader_action {files.front()});
+    }
+  }
+  if (ImGui::MenuItem("Save")) {
+    auto filesave = pfd::save_file(
+        "Choose location", default_shader_path, shader_file_filters());
+    ctx.dispatch(bulin::save_shader_action {filesave.result()});
+  }
+}
+
+void draw_menu(context const& ctx, bulin::app const& app)
+{
+  // Check if the main menu bar should open
+  if (!ImGui::BeginMainMenuBar()) {
+    return;
+  }
+
+  if (ImGui::BeginMenu("File")) {
+    draw_file_menu(ctx, app.path.string());
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Edit")) {
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Shader")) {
+    draw_shader_menu(ctx, app.doc.path);
+    ImGui::EndMenu();
+  }
+
+  ImGui::EndMainMenuBar();
+}
+
+void draw(context const& ctx, bulin::app const& app)
 {
   ImGui::Begin("Main shader input",
                nullptr,
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
+  draw_menu(ctx, app);
+
   static text_input::buffer buffer {};
-  if (!app.doc.new_shader_input.empty()) {
-    std::ranges::copy(app.doc.new_shader_input, buffer.data());
+  if (!app.doc.shader_input.empty()) {
+    std::ranges::copy(app.doc.shader_input, buffer.data());
   }
 
   if (ImGui::InputTextMultiline("##shader_input",
@@ -49,14 +126,11 @@ void draw(const lager::context<bulin::app_action>& ctx, const bulin::app& app)
   }
 
   ImGui::End();
-}
 
-void draw_texture(GLuint texture_id)
-{
+  // Display the texture
   ImGui::Begin("Shader output");
 
-  // Display the framebuffer texture in ImGui
-  ImGui::Image(reinterpret_cast<void*>(texture_id),
+  ImGui::Image(reinterpret_cast<void*>(lager::get<bulin::texture>(ctx).id()),
                ImGui::GetContentRegionAvail());
 
   ImGui::End();
@@ -153,7 +227,7 @@ int main()
   auto store = lager::make_store<bulin::app_action>(
       bulin::app {},
       lager::with_sdl_event_loop {loop},
-      lager::with_deps(std::ref(shader_model)));
+      lager::with_deps(std::ref(shader_model), std::ref(texture)));
 
   loop.run(
       [&](const SDL_Event& ev)
@@ -177,7 +251,6 @@ int main()
         }
 
         draw(store, store.get());
-        draw_texture(texture.id());
 
         // Rendering
         ImGui::Render();
