@@ -44,18 +44,18 @@ std::vector<std::string> shader_file_filters()
   return {"Shader files (.glsl)", "*.glsl", "All Files", "*"};
 }
 
-void draw_file_menu(context const& ctx, bulin::app const& app)
+void draw_file_menu(context const& ctx, std::string const& default_project_path)
 {
   if (ImGui::MenuItem("Open project")) {
     auto fileopen = pfd::open_file(
-        "Choose project file", app.path.string(), project_file_filters());
+        "Choose project file", default_project_path, project_file_filters());
     if (auto files = fileopen.result(); !files.empty()) {
       ctx.dispatch(bulin::load_action {files.front()});
     }
   }
   if (ImGui::MenuItem("Save project")) {
     auto filesave = pfd::save_file(
-        "Choose location", app.path.string(), project_file_filters());
+        "Choose location", default_project_path, project_file_filters());
     ctx.dispatch(bulin::save_action {filesave.result()});
   }
   if (ImGui::MenuItem("Exit")) {
@@ -63,18 +63,18 @@ void draw_file_menu(context const& ctx, bulin::app const& app)
   }
 }
 
-void draw_shader_menu(context const& ctx, bulin::app const& app)
+void draw_shader_menu(context const& ctx, std::string const& default_shader_path)
 {
   if (ImGui::MenuItem("Load")) {
     auto fileopen =
-        pfd::open_file("Choose shader", app.doc.path, shader_file_filters());
+        pfd::open_file("Choose shader", default_shader_path, shader_file_filters());
     if (auto files = fileopen.result(); !files.empty()) {
       ctx.dispatch(bulin::load_shader_action {files.front()});
     }
   }
   if (ImGui::MenuItem("Save")) {
     auto filesave =
-        pfd::save_file("Choose location", app.doc.path, shader_file_filters());
+        pfd::save_file("Choose location", default_shader_path, shader_file_filters());
     ctx.dispatch(bulin::save_shader_action {filesave.result()});
   }
 }
@@ -87,7 +87,7 @@ void draw_menu(context const& ctx, bulin::app const& app)
   }
 
   if (ImGui::BeginMenu("File")) {
-    draw_file_menu(ctx, app);
+    draw_file_menu(ctx, app.path.string());
     ImGui::EndMenu();
   }
 
@@ -96,7 +96,7 @@ void draw_menu(context const& ctx, bulin::app const& app)
   }
 
   if (ImGui::BeginMenu("Shader")) {
-    draw_shader_menu(ctx, app);
+    draw_shader_menu(ctx, app.doc.path);
     ImGui::EndMenu();
   }
 
