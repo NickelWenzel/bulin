@@ -44,52 +44,63 @@ std::vector<std::string> shader_file_filters()
   return {"Shader files (.glsl)", "*.glsl", "All Files", "*"};
 }
 
+void draw_file_menu(context const& ctx, bulin::app const& app)
+{
+  if (ImGui::MenuItem("Open project")) {
+    auto fileopen = pfd::open_file(
+        "Choose project file", app.path.string(), project_file_filters());
+    if (auto files = fileopen.result(); !files.empty()) {
+      ctx.dispatch(bulin::load_action {files.front()});
+    }
+  }
+  if (ImGui::MenuItem("Save project")) {
+    auto filesave = pfd::save_file(
+        "Choose location", app.path.string(), project_file_filters());
+    ctx.dispatch(bulin::save_action {filesave.result()});
+  }
+  if (ImGui::MenuItem("Exit")) {
+    ctx.loop().finish();
+  }
+}
+
+void draw_shader_menu(context const& ctx, bulin::app const& app)
+{
+  if (ImGui::MenuItem("Load")) {
+    auto fileopen =
+        pfd::open_file("Choose shader", app.path, shader_file_filters());
+    if (auto files = fileopen.result(); !files.empty()) {
+      ctx.dispatch(bulin::load_shader_action {files.front()});
+    }
+  }
+  if (ImGui::MenuItem("Save")) {
+    auto filesave =
+        pfd::save_file("Choose location", app.doc.path, shader_file_filters());
+    ctx.dispatch(bulin::save_shader_action {filesave.result()});
+  }
+}
+
 void draw_menu(context const& ctx, bulin::app const& app)
 {
   // Check if the main menu bar should open
-  if (ImGui::BeginMainMenuBar()) {
-    // Create a menu entry in the menu bar
-    if (ImGui::BeginMenu("File")) {
-      if (ImGui::MenuItem("Open project")) {
-        auto fileopen = pfd::open_file(
-            "Choose project file", app.path.string(), project_file_filters());
-        if (auto files = fileopen.result(); !files.empty()) {
-          ctx.dispatch(bulin::load_action {files.front()});
-        }
-      }
-      if (ImGui::MenuItem("Save project")) {
-        auto filesave = pfd::save_file(
-            "Choose location", app.path.string(), project_file_filters());
-        ctx.dispatch(bulin::save_action {filesave.result()});
-      }
-      if (ImGui::MenuItem("Exit")) {
-        ctx.loop().finish();
-      }
-      ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Edit")) {
-      ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Shader")) {
-      if (ImGui::MenuItem("Load")) {
-        auto fileopen =
-            pfd::open_file("Choose shader", app.path, shader_file_filters());
-        if (auto files = fileopen.result(); !files.empty()) {
-          ctx.dispatch(bulin::load_shader_action {files.front()});
-        }
-      }
-      if (ImGui::MenuItem("Save")) {
-        auto filesave = pfd::save_file(
-            "Choose location", app.doc.path, shader_file_filters());
-        ctx.dispatch(bulin::save_shader_action {filesave.result()});
-      }
-      ImGui::EndMenu();
-    }
-
-    ImGui::EndMainMenuBar();
+  if (!ImGui::BeginMainMenuBar()) {
+    return;
   }
+
+  if (ImGui::BeginMenu("File")) {
+    draw_file_menu(ctx, app);
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Edit")) {
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginMenu("Shader")) {
+    draw_shader_menu(ctx, app);
+    ImGui::EndMenu();
+  }
+
+  ImGui::EndMainMenuBar();
 }
 
 void draw(context const& ctx, bulin::app const& app)
