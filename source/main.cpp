@@ -63,18 +63,19 @@ void draw_file_menu(context const& ctx, std::string const& default_project_path)
   }
 }
 
-void draw_shader_menu(context const& ctx, std::string const& default_shader_path)
+void draw_shader_menu(context const& ctx,
+                      std::string const& default_shader_path)
 {
   if (ImGui::MenuItem("Load")) {
-    auto fileopen =
-        pfd::open_file("Choose shader", default_shader_path, shader_file_filters());
+    auto fileopen = pfd::open_file(
+        "Choose shader", default_shader_path, shader_file_filters());
     if (auto files = fileopen.result(); !files.empty()) {
       ctx.dispatch(bulin::load_shader_action {files.front()});
     }
   }
   if (ImGui::MenuItem("Save")) {
-    auto filesave =
-        pfd::save_file("Choose location", default_shader_path, shader_file_filters());
+    auto filesave = pfd::save_file(
+        "Choose location", default_shader_path, shader_file_filters());
     ctx.dispatch(bulin::save_shader_action {filesave.result()});
   }
 }
