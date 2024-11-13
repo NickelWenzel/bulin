@@ -21,6 +21,7 @@
 
 namespace bulin
 {
+class shader_data;
 class shader_model;
 class texture;
 
@@ -61,8 +62,8 @@ using app_action = std::variant<model_action,
                                 load_shader_action,
                                 load_result_action>;
 
-using app_result =
-    lager::result<app, app_action, lager::deps<shader_model&, texture&>>;
+using app_result = lager::
+    result<app, app_action, lager::deps<shader_data&, shader_model&, texture&>>;
 
 BULIN_APPLICATION_EXPORT auto update(app, app_action) -> app_result;
 

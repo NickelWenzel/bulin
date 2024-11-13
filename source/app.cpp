@@ -12,6 +12,7 @@
 
 #include <bulin/application/app.hpp>
 
+#include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
 

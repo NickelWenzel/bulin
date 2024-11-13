@@ -51,6 +51,7 @@ target_sources(bulin_graphics
     ${CMAKE_CURRENT_BINARY_DIR}
   FILES
     include/bulin/graphics/flat_shader.hpp
+    include/bulin/graphics/shader_data.hpp
     include/bulin/graphics/shader_model.hpp
     include/bulin/graphics/texture.hpp
     ${BULIN_GRAPHICS_EXPORT_FILE_NAME}

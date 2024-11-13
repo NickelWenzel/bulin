@@ -1,6 +1,7 @@
 #include <bulin/application/app.hpp>
 #include <bulin/application/model.hpp>
 
+#include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
 
@@ -25,14 +26,10 @@ constexpr float editor_window_ratio = 1.F / 3.F;
 
 constexpr int buffer_resolution_x = 1000;
 constexpr int buffer_resolution_y = 1000;
-namespace text_input
-{
-static constexpr std::size_t buffer_size = 1 << 20;  // 1 Mb
 
-using buffer = std::array<char, buffer_size>;
-}  // namespace text_input
-
-using context = lager::context<bulin::app_action, lager::deps<bulin::texture&>>;
+using context =
+    lager::context<bulin::app_action,
+                   lager::deps<bulin::shader_data&, bulin::texture&>>;
 
 std::vector<std::string> project_file_filters()
 {
@@ -112,14 +109,10 @@ void draw(context const& ctx, bulin::app const& app)
 
   draw_menu(ctx, app);
 
-  static text_input::buffer buffer {};
-  if (!app.doc.shader_input.empty()) {
-    std::ranges::copy(app.doc.shader_input, buffer.data());
-  }
-
-  if (ImGui::InputTextMultiline("##shader_input",
+  if (auto& buffer = lager::get<bulin::shader_data>(ctx).shader_input;
+      ImGui::InputTextMultiline("##shader_input",
                                 buffer.data(),
-                                text_input::buffer_size,
+                                bulin::text_input::buffer_size,
                                 ImGui::GetContentRegionAvail()))
   {
     ctx.dispatch(bulin::changed_shader_input {buffer.data()});
@@ -218,6 +211,7 @@ int main()
   ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
   ImGui_ImplOpenGL3_Init(glsl_version);
 
+  bulin::shader_data shader_data {};
   bulin::shader_model shader_model {};
   bulin::texture texture {buffer_resolution_x, buffer_resolution_y};
 
@@ -227,7 +221,8 @@ int main()
   auto store = lager::make_store<bulin::app_action>(
       bulin::app {},
       lager::with_sdl_event_loop {loop},
-      lager::with_deps(std::ref(shader_model), std::ref(texture)));
+      lager::with_deps(
+          std::ref(shader_data), std::ref(shader_model), std::ref(texture)));
 
   loop.run(
       [&](const SDL_Event& ev)

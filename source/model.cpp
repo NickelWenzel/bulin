@@ -12,6 +12,7 @@
 
 #include <bulin/application/model.hpp>
 
+#include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 
 #include <cereal/archives/json.hpp>
@@ -36,7 +37,11 @@ auto update(model state, model_action model_action) -> model_result
         }
         state.shader_input = std::move(changed_shader_input.text);
         auto eff = [new_shader_input = state.shader_input](auto&& ctx)
-        { lager::get<shader_model>(ctx).update(new_shader_input); };
+        {
+          std::ranges::copy(new_shader_input,
+                            lager::get<shader_data&>(ctx).shader_input.data());
+          lager::get<shader_model>(ctx).update(new_shader_input);
+        };
         return {std::move(state), eff};
       });
 }

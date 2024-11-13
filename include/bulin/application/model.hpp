@@ -23,6 +23,7 @@
 
 namespace bulin
 {
+class shader_data;
 class shader_model;
 
 struct BULIN_APPLICATION_EXPORT model
@@ -38,8 +39,8 @@ struct BULIN_APPLICATION_EXPORT changed_shader_input
 
 using model_action = std::variant<changed_shader_input>;
 
-using model_result =
-    lager::result<model, model_action, lager::deps<shader_model&>>;
+using model_result = lager::
+    result<model, model_action, lager::deps<shader_data&, shader_model&>>;
 
 auto update(model state, model_action model_action) -> model_result;
 
