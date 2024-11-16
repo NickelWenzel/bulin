@@ -7,6 +7,7 @@
 
 #include <SDL.h>
 #include <SDL_opengl.h>
+
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
@@ -167,7 +168,7 @@ int main()
   const char* glsl_version = "#version 300 es";
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
   SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
