@@ -12,10 +12,13 @@
 
 #pragma once
 
+#include <Magnum/GL/OpenGL.h>
 #include <bulin/application/export.hpp>
 
 #include <lager/extra/struct.hpp>
 #include <lager/effect.hpp>
+
+#include <immer/flex_vector.hpp>
 
 #include <filesystem>
 #include <string>
@@ -26,8 +29,15 @@ namespace bulin
 struct shader_data;
 class shader_model;
 
+using uniform_type = std::variant<GLfloat>;
+
 struct BULIN_APPLICATION_EXPORT model
 {
+  immer::flex_vector<std::string> uniform_names;
+  immer::flex_vector<uniform_type> uniform_values;
+
+  std::optional<std::string> time_name;
+
   std::string shader_input;
   std::string path;
 };
@@ -103,4 +113,5 @@ auto load_shader(std::filesystem::path const& filepath) -> std::string;
 
 }  // namespace bulin
 
-LAGER_STRUCT(bulin, model, shader_input, path);
+LAGER_STRUCT(
+    bulin, model, uniform_names, uniform_values, time_name, shader_input, path);
