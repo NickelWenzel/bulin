@@ -23,7 +23,7 @@
 
 namespace bulin
 {
-class shader_data;
+struct shader_data;
 class shader_model;
 
 struct BULIN_APPLICATION_EXPORT model
@@ -32,12 +32,62 @@ struct BULIN_APPLICATION_EXPORT model
   std::string path;
 };
 
+struct BULIN_APPLICATION_EXPORT set_shader_data
+{
+};
+
+struct BULIN_APPLICATION_EXPORT update_shader_model
+{
+};
+
 struct BULIN_APPLICATION_EXPORT changed_shader_input
 {
   std::string text;
 };
 
-using model_action = std::variant<changed_shader_input>;
+struct BULIN_APPLICATION_EXPORT load_shader_action
+{
+  std::filesystem::path file;
+};
+
+struct BULIN_APPLICATION_EXPORT save_shader_action
+{
+  std::filesystem::path file;
+};
+
+struct BULIN_APPLICATION_EXPORT add_time
+{
+};
+
+struct BULIN_APPLICATION_EXPORT remove_time
+{
+};
+
+struct BULIN_APPLICATION_EXPORT reset_time
+{
+};
+
+struct BULIN_APPLICATION_EXPORT add_uniform
+{
+  std::string name;
+  uniform_type init_value;
+};
+
+struct BULIN_APPLICATION_EXPORT remove_uniform
+{
+  int idx;
+};
+
+using model_action = std::variant<set_shader_data,
+                                  update_shader_model,
+                                  changed_shader_input,
+                                  load_shader_action,
+                                  save_shader_action,
+                                  add_time,
+                                  remove_time,
+                                  reset_time,
+                                  add_uniform,
+                                  remove_uniform>;
 
 using model_result = lager::
     result<model, model_action, lager::deps<shader_data&, shader_model&>>;

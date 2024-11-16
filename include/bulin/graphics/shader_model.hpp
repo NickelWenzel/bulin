@@ -7,16 +7,15 @@
 #include <Magnum/GL/Shader.h>
 #include <Magnum/Platform/GLContext.h>
 
-#include <string_view>
-
 namespace bulin
 {
+struct shader_data;
 class BULIN_GRAPHICS_EXPORT shader_model
 {
 public:
   shader_model();
 
-  void update(std::string_view shader_input);
+  void update(shader_data const& data);
 
   void draw();
 

@@ -1,4 +1,5 @@
 #include <bulin/graphics/shader_model.hpp>
+#include <bulin/graphics/shader_data.hpp>
 
 #include <Magnum/MeshTools/Compile.h>
 #include <Magnum/Trade/MeshData.h>
@@ -28,8 +29,7 @@ void main() {
 }  // namespace
 
 bulin::shader_model::shader_model()
-    : m_context {}
-    , m_vertex_shader {create_vertex_shader()}
+    : m_vertex_shader {create_vertex_shader()}
     , m_shader {}
 {
   if (!m_vertex_shader.compile()) {
@@ -40,14 +40,14 @@ bulin::shader_model::shader_model()
   m_mesh = Magnum::MeshTools::compile(mesh_data);
 }
 
-void bulin::shader_model::update(std::string_view shader_input)
+void bulin::shader_model::update(shader_data const& data)
 {
   using namespace Magnum;
 
   m_shader = bulin::flat_shader {};
 
   GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
-  fragment_shader.addSource(shader_input.data());
+  fragment_shader.addSource(data.shader_input.data());
   if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
       && m_shader.attach_and_link_shaders(m_vertex_shader, fragment_shader))
   {
