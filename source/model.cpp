@@ -41,8 +41,6 @@ auto update(model state, model_action model_action) -> model_result
         {
           auto& data = lager::get<shader_data&>(ctx);
           data.time_name = state.time_name;
-          data.time = 0;
-          data.start_time_point = std::chrono::steady_clock::now();
           std::ranges::copy(state.shader_input, data.shader_input.data());
           ctx.dispatch(reset_shader_model {});
         };
