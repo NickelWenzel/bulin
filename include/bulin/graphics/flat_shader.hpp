@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Magnum/GL/AbstractShaderProgram.h>
+#include <Magnum/GL/GL.h>
+#include <Magnum/GL/OpenGL.h>
 
 namespace Magnum::Math
 {
@@ -22,5 +24,8 @@ public:
 
   bool attach_and_link_shaders(Magnum::GL::Shader& vertex_shader,
                                Magnum::GL::Shader& fragment_shader);
+
+  auto get_uniform_location(std::string const& name) -> GLint;
+  void set_uniform_value(GLint location, GLfloat value);
 };
 }  // namespace bulin

@@ -46,9 +46,9 @@ app_result update(app app_state, app_action app_action)
       {
         app_state.path = std::move(load_result_action.file);
         app_state.doc = std::move(load_result_action.doc);
-        auto eff = [new_shader_input = std::move(
-                        load_result_action.doc.shader_input)](auto&& ctx)
-        { ctx.dispatch(set_shader_data {}); };
+        auto eff = [new_shader_input =
+                        std::move(load_result_action.doc.shader_input)](
+                       auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(app_state), eff};
       },
       [&](model_action&& model_action) -> app_result

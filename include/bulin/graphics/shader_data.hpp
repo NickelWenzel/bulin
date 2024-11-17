@@ -6,6 +6,7 @@
 #include <array>
 #include <variant>
 #include <vector>
+#include <chrono>
 
 namespace bulin
 {
@@ -23,6 +24,7 @@ struct BULIN_GRAPHICS_EXPORT shader_data
   std::vector<uniform_type> float_uniforms;
   std::vector<std::string> float_uniforms_names;
   std::string time_name;
-  GLfloat start_time;
+  GLfloat time;
+  std::chrono::time_point<std::chrono::steady_clock> start_time_point;
 };
 }  // namespace bulin

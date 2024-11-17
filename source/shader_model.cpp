@@ -40,13 +40,30 @@ bulin::shader_model::shader_model()
   m_mesh = Magnum::MeshTools::compile(mesh_data);
 }
 
-void bulin::shader_model::update(shader_data const& data)
+void bulin::shader_model::tick(shader_data const& data)
+{
+  // Time
+  if (!data.time_name.empty()) {
+    set_uniform_value(data.time_name, data.time);
+  }
+}
+
+void bulin::shader_model::reset(shader_data const& data)
 {
   using namespace Magnum;
 
   m_shader = bulin::flat_shader {};
 
   GL::Shader fragment_shader {GL::Version::GLES300, GL::Shader::Type::Fragment};
+  // Add precision
+  fragment_shader.addSource("precision mediump float;\n");
+
+  // Time
+  if (!data.time_name.empty()) {
+    fragment_shader.addSource("uniform float time;\n");
+  }
+
+  // Actual user shade code
   fragment_shader.addSource(data.shader_input.data());
   if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
       && m_shader.attach_and_link_shaders(m_vertex_shader, fragment_shader))
@@ -59,4 +76,10 @@ void bulin::shader_model::update(shader_data const& data)
 void bulin::shader_model::draw()
 {
   m_shader.draw(m_mesh);
+}
+
+void bulin::shader_model::set_uniform_value(std::string const& name, GLfloat value)
+{
+  auto const loc = m_shader.get_uniform_location(name);
+  m_shader.set_uniform_value(loc, value);
 }

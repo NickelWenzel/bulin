@@ -48,7 +48,7 @@ auto update(model state, model_action model_action) -> model_result
       [&](update_shader_model&&) -> model_result
       {
         auto eff = [](auto&& ctx) {
-          lager::get<shader_model&>(ctx).update(lager::get<shader_data&>(ctx));
+          lager::get<shader_model&>(ctx).reset(lager::get<shader_data&>(ctx));
         };
         return {std::move(state), eff};
       },
@@ -62,7 +62,7 @@ auto update(model state, model_action model_action) -> model_result
         {
           std::ranges::copy(new_shader_input,
                             lager::get<shader_data&>(ctx).shader_input.data());
-          lager::get<shader_model>(ctx).update(lager::get<shader_data&>(ctx));
+          lager::get<shader_model>(ctx).reset(lager::get<shader_data&>(ctx));
         };
         return {std::move(state), eff};
       },
@@ -86,9 +86,40 @@ auto update(model state, model_action model_action) -> model_result
         };
         return {std::move(state), eff};
       },
-      [&](add_time) -> model_result { return std::move(state); },
-      [&](remove_time) -> model_result { return std::move(state); },
-      [&](reset_time) -> model_result { return std::move(state); },
+      [&](add_time) -> model_result
+      {
+        state.time_name = "time";
+        auto eff = [time_name = state.time_name](auto&& ctx)
+        {
+          auto& data = lager::get<bulin::shader_data&>(ctx);
+          data.time_name = time_name;
+          data.time = 0;
+          data.start_time_point = std::chrono::steady_clock::now();
+          ctx.dispatch(update_shader_model {});
+        };
+        return {std::move(state), eff};
+      },
+      [&](remove_time) -> model_result
+      {
+        state.time_name.clear();
+        auto eff = [time_name = state.time_name](auto&& ctx)
+        {
+          lager::get<bulin::shader_data&>(ctx).time_name.clear();
+          ctx.dispatch(update_shader_model {});
+        };
+        return {std::move(state), eff};
+      },
+      [&](reset_time) -> model_result
+      {
+        auto eff = [time_name = state.time_name](auto&& ctx)
+        {
+          auto& data = lager::get<bulin::shader_data&>(ctx);
+          data.time = 0;
+          data.start_time_point = std::chrono::steady_clock::now();
+          ctx.dispatch(update_shader_model {});
+        };
+        return {std::move(state), eff};
+      },
       [&](add_uniform) -> model_result { return std::move(state); },
       [&](remove_uniform) -> model_result { return std::move(state); });
 }

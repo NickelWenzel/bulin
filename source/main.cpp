@@ -1,3 +1,4 @@
+#include <Magnum/GL/OpenGL.h>
 #include <bulin/application/app.hpp>
 #include <bulin/application/model.hpp>
 
@@ -20,6 +21,8 @@
 
 #include <array>
 #include <iostream>
+#include <chrono>
+#include <format>
 
 constexpr int window_width = 800;
 constexpr int window_height = 600;
@@ -45,16 +48,22 @@ std::vector<std::string> shader_file_filters()
 void draw_file_menu(context const& ctx, std::string const& default_project_path)
 {
   if (ImGui::MenuItem("Open project")) {
-    auto fileopen = pfd::open_file(
-        "Choose project file", default_project_path, project_file_filters());
-    if (auto files = fileopen.result(); !files.empty()) {
-      ctx.dispatch(bulin::load_action {files.front()});
+    try {
+      auto fileopen = pfd::open_file(
+          "Choose project file", default_project_path, project_file_filters());
+      if (auto files = fileopen.result(); !files.empty()) {
+        ctx.dispatch(bulin::load_action {files.front()});
+      }
+    } catch (std::exception const&) {
     }
   }
   if (ImGui::MenuItem("Save project")) {
-    auto filesave = pfd::save_file(
-        "Choose location", default_project_path, project_file_filters());
-    ctx.dispatch(bulin::save_action {filesave.result()});
+    try {
+      auto filesave = pfd::save_file(
+          "Choose location", default_project_path, project_file_filters());
+      ctx.dispatch(bulin::save_action {filesave.result()});
+    } catch (std::exception const&) {
+    }
   }
   if (ImGui::MenuItem("Exit")) {
     ctx.loop().finish();
@@ -65,16 +74,22 @@ void draw_shader_menu(context const& ctx,
                       std::string const& default_shader_path)
 {
   if (ImGui::MenuItem("Load")) {
-    auto fileopen = pfd::open_file(
-        "Choose shader", default_shader_path, shader_file_filters());
-    if (auto files = fileopen.result(); !files.empty()) {
-      ctx.dispatch(bulin::load_shader_action {files.front()});
+    try {
+      auto fileopen = pfd::open_file(
+          "Choose shader", default_shader_path, shader_file_filters());
+      if (auto files = fileopen.result(); !files.empty()) {
+        ctx.dispatch(bulin::load_shader_action {files.front()});
+      }
+    } catch (std::exception const&) {
     }
   }
   if (ImGui::MenuItem("Save")) {
-    auto filesave = pfd::save_file(
-        "Choose location", default_shader_path, shader_file_filters());
-    ctx.dispatch(bulin::save_shader_action {filesave.result()});
+    try {
+      auto filesave = pfd::save_file(
+          "Choose location", default_shader_path, shader_file_filters());
+      ctx.dispatch(bulin::save_shader_action {filesave.result()});
+    } catch (std::exception const&) {
+    }
   }
 }
 
@@ -102,6 +117,37 @@ void draw_menu(context const& ctx, bulin::app const& app)
   ImGui::EndMainMenuBar();
 }
 
+void draw_time(context const& ctx, std::string const& time_name)
+{
+  if (time_name.empty()) {
+    if (ImGui::Button("Add time")) {
+      ctx.dispatch(bulin::add_time {});
+    }
+  } else {
+    using namespace std::chrono_literals;
+    auto& time = lager::get<bulin::shader_data&>(ctx).time;
+    auto const now = std::chrono::steady_clock::now();
+    auto const& start = lager::get<bulin::shader_data&>(ctx).start_time_point;
+    time = std::chrono::duration<GLfloat>(now - start).count();
+
+    auto const& time_str = std::format("{}: {:.2f}s", time_name, time);
+    ImGui::Text(time_str.c_str());
+    ImGui::SameLine();
+
+    if (ImGui::Button("reset")) {
+      ctx.dispatch(bulin::reset_time {});
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button("x")) {
+      ctx.dispatch(bulin::remove_time {});
+    }
+  }
+  ImGui::Separator();
+}
+
+void draw_uniforms(context const& ctx, bulin::model const& model) {}
+
 void draw(context const& ctx, bulin::app const& app)
 {
   ImGui::Begin("Main shader input",
@@ -110,7 +156,9 @@ void draw(context const& ctx, bulin::app const& app)
 
   draw_menu(ctx, app);
 
-  if (auto& buffer = lager::get<bulin::shader_data>(ctx).shader_input;
+  draw_time(ctx, app.doc.time_name);
+
+  if (auto& buffer = lager::get<bulin::shader_data&>(ctx).shader_input;
       ImGui::InputTextMultiline("##shader_input",
                                 buffer.data(),
                                 bulin::text_input::buffer_size,
@@ -247,6 +295,7 @@ int main()
         }
 
         draw(store, store.get());
+        shader_model.tick(shader_data);
 
         // Rendering
         ImGui::Render();

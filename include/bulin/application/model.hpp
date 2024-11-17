@@ -36,7 +36,7 @@ struct BULIN_APPLICATION_EXPORT model
   immer::flex_vector<std::string> uniform_names;
   immer::flex_vector<uniform_type> uniform_values;
 
-  std::optional<std::string> time_name;
+  std::string time_name;
 
   std::string shader_input;
   std::string path;

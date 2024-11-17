@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Magnum/GL/OpenGL.h>
 #include <bulin/graphics/export.hpp>
 #include <bulin/graphics/flat_shader.hpp>
 
@@ -15,9 +16,13 @@ class BULIN_GRAPHICS_EXPORT shader_model
 public:
   shader_model();
 
-  void update(shader_data const& data);
+  void tick(shader_data const& data);
+  void reset(shader_data const& data);
 
   void draw();
+
+private:
+  void set_uniform_value(std::string const& name, GLfloat value);
 
 private:
   Magnum::Platform::GLContext m_context;
