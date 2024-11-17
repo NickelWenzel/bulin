@@ -21,8 +21,6 @@
 
 #include <array>
 #include <iostream>
-#include <chrono>
-#include <format>
 
 constexpr int window_width = 800;
 constexpr int window_height = 600;
@@ -124,23 +122,17 @@ void draw_time(context const& ctx, std::string const& time_name)
       ctx.dispatch(bulin::add_time {});
     }
   } else {
-    using namespace std::chrono_literals;
-    auto& time = lager::get<bulin::shader_data&>(ctx).time;
-    auto const now = std::chrono::steady_clock::now();
-    auto const& start = lager::get<bulin::shader_data&>(ctx).start_time_point;
-    time = std::chrono::duration<GLfloat>(now - start).count();
-
-    auto const& time_str = std::format("{}: {:.2f}s", time_name, time);
-    ImGui::Text(time_str.c_str());
+    ImGui::Text(std::format("{}: {:.2f}s", time_name, lager::get<bulin::shader_data&>(ctx).time).c_str());
     ImGui::SameLine();
 
     if (ImGui::Button("reset")) {
       ctx.dispatch(bulin::reset_time {});
     }
-    ImGui::SameLine();
-
-    if (ImGui::Button("x")) {
+    else if (ImGui::SameLine(), ImGui::Button("x")) {
       ctx.dispatch(bulin::remove_time {});
+    }
+    else{
+      ctx.dispatch(bulin::tick_time {});
     }
   }
   ImGui::Separator();
@@ -295,7 +287,6 @@ int main()
         }
 
         draw(store, store.get());
-        shader_model.tick(shader_data);
 
         // Rendering
         ImGui::Render();

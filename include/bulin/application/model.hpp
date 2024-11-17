@@ -46,7 +46,7 @@ struct BULIN_APPLICATION_EXPORT set_shader_data
 {
 };
 
-struct BULIN_APPLICATION_EXPORT update_shader_model
+struct BULIN_APPLICATION_EXPORT reset_shader_model
 {
 };
 
@@ -77,6 +77,10 @@ struct BULIN_APPLICATION_EXPORT reset_time
 {
 };
 
+struct BULIN_APPLICATION_EXPORT tick_time
+{
+};
+
 struct BULIN_APPLICATION_EXPORT add_uniform
 {
   std::string name;
@@ -88,16 +92,24 @@ struct BULIN_APPLICATION_EXPORT remove_uniform
   int idx;
 };
 
+struct BULIN_APPLICATION_EXPORT update_uniform
+{
+  int idx;
+  uniform_type value;
+};
+
 using model_action = std::variant<set_shader_data,
-                                  update_shader_model,
+                                  reset_shader_model,
                                   changed_shader_input,
                                   load_shader_action,
                                   save_shader_action,
                                   add_time,
                                   remove_time,
                                   reset_time,
+                                  tick_time,
                                   add_uniform,
-                                  remove_uniform>;
+                                  remove_uniform,
+                                  update_uniform>;
 
 using model_result = lager::
     result<model, model_action, lager::deps<shader_data&, shader_model&>>;

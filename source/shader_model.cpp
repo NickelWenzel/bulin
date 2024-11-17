@@ -78,7 +78,8 @@ void bulin::shader_model::draw()
   m_shader.draw(m_mesh);
 }
 
-void bulin::shader_model::set_uniform_value(std::string const& name, GLfloat value)
+void bulin::shader_model::set_uniform_value(std::string const& name,
+                                            GLfloat value)
 {
   auto const loc = m_shader.get_uniform_location(name);
   m_shader.set_uniform_value(loc, value);

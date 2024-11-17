@@ -27,6 +27,7 @@
 #include <cereal/types/optional.hpp>
 
 #include <fstream>
+#include <chrono>
 
 namespace bulin
 {
@@ -38,14 +39,16 @@ auto update(model state, model_action model_action) -> model_result
       {
         auto eff = [state = state](auto&& ctx)
         {
-          auto& shader_data_v = lager::get<shader_data&>(ctx);
-          std::ranges::copy(state.shader_input,
-                            shader_data_v.shader_input.data());
-          ctx.dispatch(update_shader_model {});
+          auto& data = lager::get<shader_data&>(ctx);
+          data.time_name = state.time_name;
+          data.time = 0;
+          data.start_time_point = std::chrono::steady_clock::now();
+          std::ranges::copy(state.shader_input, data.shader_input.data());
+          ctx.dispatch(reset_shader_model {});
         };
         return {std::move(state), eff};
       },
-      [&](update_shader_model&&) -> model_result
+      [&](reset_shader_model&&) -> model_result
       {
         auto eff = [](auto&& ctx) {
           lager::get<shader_model&>(ctx).reset(lager::get<shader_data&>(ctx));
@@ -58,12 +61,8 @@ auto update(model state, model_action model_action) -> model_result
           return {std::move(state), lager::noop};
         }
         state.shader_input = std::move(changed_shader_input.text);
-        auto eff = [new_shader_input = state.shader_input](auto&& ctx)
-        {
-          std::ranges::copy(new_shader_input,
-                            lager::get<shader_data&>(ctx).shader_input.data());
-          lager::get<shader_model>(ctx).reset(lager::get<shader_data&>(ctx));
-        };
+        auto eff = [time_name = state.time_name](auto&& ctx)
+        { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },
       [&](load_shader_action&& load_shader_action) -> model_result
@@ -86,42 +85,42 @@ auto update(model state, model_action model_action) -> model_result
         };
         return {std::move(state), eff};
       },
-      [&](add_time) -> model_result
+      [&](add_time&&) -> model_result
       {
         state.time_name = "time";
-        auto eff = [time_name = state.time_name](auto&& ctx)
-        {
-          auto& data = lager::get<bulin::shader_data&>(ctx);
-          data.time_name = time_name;
-          data.time = 0;
-          data.start_time_point = std::chrono::steady_clock::now();
-          ctx.dispatch(update_shader_model {});
-        };
+        auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },
-      [&](remove_time) -> model_result
+      [&](remove_time&&) -> model_result
       {
         state.time_name.clear();
-        auto eff = [time_name = state.time_name](auto&& ctx)
-        {
-          lager::get<bulin::shader_data&>(ctx).time_name.clear();
-          ctx.dispatch(update_shader_model {});
-        };
+        auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },
-      [&](reset_time) -> model_result
+      [&](reset_time&&) -> model_result
       {
-        auto eff = [time_name = state.time_name](auto&& ctx)
+        auto eff = [](auto&& ctx)
         {
           auto& data = lager::get<bulin::shader_data&>(ctx);
-          data.time = 0;
+          data.time = 0.F;
           data.start_time_point = std::chrono::steady_clock::now();
-          ctx.dispatch(update_shader_model {});
+          lager::get<bulin::shader_model&>(ctx).tick(data);
         };
         return {std::move(state), eff};
       },
-      [&](add_uniform) -> model_result { return std::move(state); },
-      [&](remove_uniform) -> model_result { return std::move(state); });
+      [&](tick_time&&) -> model_result
+      {
+        auto eff = [](auto&& ctx)
+        {
+          auto& data = lager::get<bulin::shader_data&>(ctx);
+          data.time = std::chrono::duration<GLfloat>(std::chrono::steady_clock::now() - data.start_time_point).count();
+          lager::get<bulin::shader_model&>(ctx).tick(data);
+        };
+        return {std::move(state), eff};
+      },
+      [&](add_uniform&&) -> model_result { return std::move(state); },
+      [&](remove_uniform&&) -> model_result { return std::move(state); },
+      [&](update_uniform&&) -> model_result { return std::move(state); });
 }
 
 void save(std::filesystem::path const& fname, model state)
