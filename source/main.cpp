@@ -116,19 +116,18 @@ void draw_menu(context const& ctx, bulin::app const& app)
   ImGui::EndMainMenuBar();
 }
 
-void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
+void draw_add_time(context const& ctx)
 {
-  auto const& name = bulin::time_name;
-  if (uniforms.find(name) == nullptr) {
-    if (ImGui::Button("Add time")) {
-      ctx.dispatch(bulin::add_time {});
-    }
-    return;
+  if (ImGui::Button("Add time")) {
+    ctx.dispatch(bulin::add_time {});
   }
+}
 
-  ImGui::Text(
-      std::format("{}: {:.2f}s", name, std::get<GLfloat>(uniforms.at(name)))
-          .c_str());
+void draw_added_time(context const& ctx,
+                     std::string const& name,
+                     GLfloat const& time)
+{
+  ImGui::Text(std::format("{}: {:.2f}s", name, time).c_str());
   ImGui::SameLine();
 
   if (ImGui::Button("reset")) {
@@ -141,6 +140,16 @@ void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
   }
 
   ctx.dispatch(bulin::tick_time {});
+}
+
+void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
+{
+  auto const& name = bulin::time_name;
+  if (uniforms.find(name) == nullptr) {
+    draw_add_time(ctx);
+  } else {
+    draw_added_time(ctx, name, std::get<GLfloat>(uniforms.at(name)));
+  }
   ImGui::Separator();
 }
 
@@ -161,7 +170,7 @@ void draw_uniform(context const& ctx,
   }
 }
 
-void draw_uniforms(context const& ctx)
+void draw_add_uniform(context const& ctx)
 {
   bool const add = ImGui::Button("Add uniform");
   ImGui::SameLine();
@@ -172,12 +181,17 @@ void draw_uniforms(context const& ctx)
   if (add) {
     ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), 0.F});
   }
+}
 
-  auto is_time = [](auto const& pair)
-  { return pair.first == bulin::time_name; };
+void draw_uniforms(context const& ctx)
+{
+  draw_add_time(ctx);
+
+  auto not_time = [](auto const& pair)
+  { return pair.first != bulin::time_name; };
 
   for (auto& [name, value] : lager::get<bulin::shader_data&>(ctx).uniforms
-           | std::views::filter(is_time))
+           | std::views::filter(not_time))
   {
     std::visit([&ctx, &name](auto& value) { draw_uniform(ctx, name, value); },
                value);
