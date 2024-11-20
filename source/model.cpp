@@ -140,6 +140,9 @@ auto update(model state, model_action model_action) -> model_result
       },
       [&](update_uniform&& update_uniform) -> model_result
       {
+        if (state.uniforms.find(update_uniform.name) == nullptr) {
+          return {std::move(state), lager::noop};
+        }
         state.uniforms = std::move(state.uniforms)
                              .set(update_uniform.name, update_uniform.value);
         auto eff = [name = std::move(update_uniform.name),
