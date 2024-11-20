@@ -119,14 +119,16 @@ void draw_menu(context const& ctx, bulin::app const& app)
 void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
 {
   auto const& name = bulin::time_name;
-  if (uniforms.find(name) == nullptr && ImGui::Button("Add time")) {
-    ctx.dispatch(bulin::add_time {});
+  if (uniforms.find(name) == nullptr) {
+    if (ImGui::Button("Add time")) {
+      ctx.dispatch(bulin::add_time {});
+    }
     return;
   }
 
   ImGui::Text(
-        std::format("{}: {:.2f}s", name, std::get<GLfloat>(uniforms.at(name)))
-            .c_str());
+      std::format("{}: {:.2f}s", name, std::get<GLfloat>(uniforms.at(name)))
+          .c_str());
   ImGui::SameLine();
 
   if (ImGui::Button("reset")) {
@@ -137,7 +139,7 @@ void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
   if (ImGui::Button("x")) {
     ctx.dispatch(bulin::remove_time {});
   }
-    
+
   ctx.dispatch(bulin::tick_time {});
   ImGui::Separator();
 }
@@ -162,7 +164,6 @@ void draw_uniform(context const& ctx,
 void draw_uniforms(context const& ctx)
 {
   bool const add = ImGui::Button("Add uniform");
-  ImGui::Text("Add uniform:");
   ImGui::SameLine();
   bulin::text_input::buffer new_uniform_name_buffer;
   ImGui::InputText("##new_uniform_name",
