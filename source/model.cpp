@@ -62,8 +62,7 @@ auto update(model state, model_action model_action) -> model_result
           return {std::move(state), lager::noop};
         }
         state.shader_input = std::move(changed_shader_input.text);
-        auto eff = [](auto&& ctx)
-        { ctx.dispatch(set_shader_data {}); };
+        auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },
       [&](load_shader_action&& load_shader_action) -> model_result

@@ -185,7 +185,7 @@ void draw_add_uniform(context const& ctx)
 
 void draw_uniforms(context const& ctx)
 {
-  draw_add_time(ctx);
+  draw_add_uniform(ctx);
 
   auto not_time = [](auto const& pair)
   { return pair.first != bulin::time_name; };
