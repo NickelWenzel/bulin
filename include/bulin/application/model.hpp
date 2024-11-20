@@ -35,7 +35,8 @@ class shader_model;
 
 struct BULIN_APPLICATION_EXPORT model
 {
-  immer::map<std::string, uniform_type> uniforms;
+  using uniform_map = immer::map<std::string, uniform_type>;
+  uniform_map uniforms;
   std::string shader_input;
   std::string path;
 };

@@ -9,6 +9,7 @@
 #include <SDL.h>
 #include <SDL_opengl.h>
 
+#include <bulin/graphics/types.hpp>
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
@@ -19,7 +20,7 @@
 
 #include <portable-file-dialogs.h>
 
-#include <array>
+#include <ranges>
 #include <iostream>
 
 constexpr int window_width = 800;
@@ -115,32 +116,73 @@ void draw_menu(context const& ctx, bulin::app const& app)
   ImGui::EndMainMenuBar();
 }
 
-void draw_time(context const& ctx)
+void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
 {
   auto const& name = bulin::time_name;
-  auto const& uniforms = lager::get<bulin::shader_data&>(ctx).uniforms;
-  if (!uniforms.contains(name)) {
-    if (ImGui::Button("Add time")) {
-      ctx.dispatch(bulin::add_time {});
-    }
-  } else {
-    ImGui::Text(
+  if (uniforms.find(name) == nullptr && ImGui::Button("Add time")) {
+    ctx.dispatch(bulin::add_time {});
+    return;
+  }
+
+  ImGui::Text(
         std::format("{}: {:.2f}s", name, std::get<GLfloat>(uniforms.at(name)))
             .c_str());
-    ImGui::SameLine();
+  ImGui::SameLine();
 
-    if (ImGui::Button("reset")) {
-      ctx.dispatch(bulin::reset_time {});
-    } else if (ImGui::SameLine(), ImGui::Button("x")) {
-      ctx.dispatch(bulin::remove_time {});
-    } else {
-      ctx.dispatch(bulin::tick_time {});
-    }
+  if (ImGui::Button("reset")) {
+    ctx.dispatch(bulin::reset_time {});
   }
+  ImGui::SameLine();
+
+  if (ImGui::Button("x")) {
+    ctx.dispatch(bulin::remove_time {});
+  }
+    
+  ctx.dispatch(bulin::tick_time {});
   ImGui::Separator();
 }
 
-void draw_uniforms(context const& ctx, bulin::model const& model) {}
+void draw_uniform(context const& ctx,
+                  std::string const& name,
+                  bulin::is_uniform_type auto& value)
+{
+  ImGui::Text(name.c_str());
+  ImGui::SameLine();
+
+  if (ImGui::InputFloat("##uniform_value", &value)) {
+    ctx.dispatch(bulin::update_uniform {name, value});
+  }
+  ImGui::SameLine();
+
+  if (ImGui::Button("x")) {
+    ctx.dispatch(bulin::remove_uniform {name});
+  }
+}
+
+void draw_uniforms(context const& ctx)
+{
+  bool const add = ImGui::Button("Add uniform");
+  ImGui::Text("Add uniform:");
+  ImGui::SameLine();
+  bulin::text_input::buffer new_uniform_name_buffer;
+  ImGui::InputText("##new_uniform_name",
+                   new_uniform_name_buffer.data(),
+                   bulin::text_input::buffer_size);
+  if (add) {
+    ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), 0.F});
+  }
+
+  auto is_time = [](auto const& pair)
+  { return pair.first == bulin::time_name; };
+
+  for (auto& [name, value] : lager::get<bulin::shader_data&>(ctx).uniforms
+           | std::views::filter(is_time))
+  {
+    std::visit([&ctx, &name](auto& value) { draw_uniform(ctx, name, value); },
+               value);
+  }
+  ImGui::Separator();
+}
 
 void draw(context const& ctx, bulin::app const& app)
 {
@@ -150,7 +192,9 @@ void draw(context const& ctx, bulin::app const& app)
 
   draw_menu(ctx, app);
 
-  draw_time(ctx);
+  draw_time(ctx, app.doc.uniforms);
+
+  draw_uniforms(ctx);
 
   if (auto& buffer = lager::get<bulin::shader_data&>(ctx).shader_input;
       ImGui::InputTextMultiline("##shader_input",
