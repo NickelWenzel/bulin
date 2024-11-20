@@ -115,23 +115,25 @@ void draw_menu(context const& ctx, bulin::app const& app)
   ImGui::EndMainMenuBar();
 }
 
-void draw_time(context const& ctx, std::string const& time_name)
+void draw_time(context const& ctx)
 {
-  if (time_name.empty()) {
+  auto const& name = bulin::time_name;
+  auto const& uniforms = lager::get<bulin::shader_data&>(ctx).uniforms;
+  if (!uniforms.contains(name)) {
     if (ImGui::Button("Add time")) {
       ctx.dispatch(bulin::add_time {});
     }
   } else {
-    ImGui::Text(std::format("{}: {:.2f}s", time_name, lager::get<bulin::shader_data&>(ctx).time).c_str());
+    ImGui::Text(
+        std::format("{}: {:.2f}s", name, std::get<GLfloat>(uniforms.at(name)))
+            .c_str());
     ImGui::SameLine();
 
     if (ImGui::Button("reset")) {
       ctx.dispatch(bulin::reset_time {});
-    }
-    else if (ImGui::SameLine(), ImGui::Button("x")) {
+    } else if (ImGui::SameLine(), ImGui::Button("x")) {
       ctx.dispatch(bulin::remove_time {});
-    }
-    else{
+    } else {
       ctx.dispatch(bulin::tick_time {});
     }
   }
@@ -148,7 +150,7 @@ void draw(context const& ctx, bulin::app const& app)
 
   draw_menu(ctx, app);
 
-  draw_time(ctx, app.doc.time_name);
+  draw_time(ctx);
 
   if (auto& buffer = lager::get<bulin::shader_data&>(ctx).shader_input;
       ImGui::InputTextMultiline("##shader_input",

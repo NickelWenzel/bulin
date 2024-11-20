@@ -18,13 +18,15 @@
 #include <lager/effect.hpp>
 #include <lager/extra/cereal/inline.hpp>
 #include <lager/extra/cereal/struct.hpp>
-#include <lager/extra/cereal/immer_flex_vector.hpp>
+#include <lager/extra/cereal/immer_map.hpp>
 #include <lager/extra/cereal/variant_with_name.hpp>
 #include <lager/util.hpp>
 
 #include <cereal/archives/json.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/optional.hpp>
+#include <cereal/types/string.hpp>
+#include "bulin/graphics/types.hpp"
 
 #include <fstream>
 #include <chrono>
@@ -40,8 +42,9 @@ auto update(model state, model_action model_action) -> model_result
         auto eff = [state = state](auto&& ctx)
         {
           auto& data = lager::get<shader_data&>(ctx);
-          data.time_name = state.time_name;
           std::ranges::copy(state.shader_input, data.shader_input.data());
+          data.uniforms = bulin::uniforms_type {state.uniforms.begin(),
+                                                state.uniforms.end()};
           ctx.dispatch(reset_shader_model {});
         };
         return {std::move(state), eff};
@@ -59,7 +62,7 @@ auto update(model state, model_action model_action) -> model_result
           return {std::move(state), lager::noop};
         }
         state.shader_input = std::move(changed_shader_input.text);
-        auto eff = [time_name = state.time_name](auto&& ctx)
+        auto eff = [](auto&& ctx)
         { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },
@@ -85,24 +88,27 @@ auto update(model state, model_action model_action) -> model_result
       },
       [&](add_time&&) -> model_result
       {
-        state.time_name = "time";
-        auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
+        auto eff = [](auto&& ctx)
+        {
+          lager::get<bulin::shader_data&>(ctx).start_time_point =
+              std::chrono::steady_clock::now();
+          ctx.dispatch(add_uniform {bulin::time_name, 0.F});
+        };
         return {std::move(state), eff};
       },
       [&](remove_time&&) -> model_result
       {
-        state.time_name.clear();
-        auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
+        auto eff = [](auto&& ctx)
+        { ctx.dispatch(remove_uniform {bulin::time_name}); };
         return {std::move(state), eff};
       },
       [&](reset_time&&) -> model_result
       {
         auto eff = [](auto&& ctx)
         {
-          auto& data = lager::get<bulin::shader_data&>(ctx);
-          data.time = 0.F;
-          data.start_time_point = std::chrono::steady_clock::now();
-          lager::get<bulin::shader_model&>(ctx).tick(data);
+          lager::get<bulin::shader_data&>(ctx).start_time_point =
+              std::chrono::steady_clock::now();
+          ctx.dispatch(tick_time {});
         };
         return {std::move(state), eff};
       },
@@ -110,15 +116,42 @@ auto update(model state, model_action model_action) -> model_result
       {
         auto eff = [](auto&& ctx)
         {
-          auto& data = lager::get<bulin::shader_data&>(ctx);
-          data.time = std::chrono::duration<GLfloat>(std::chrono::steady_clock::now() - data.start_time_point).count();
-          lager::get<bulin::shader_model&>(ctx).tick(data);
+          auto& start = lager::get<bulin::shader_data&>(ctx).start_time_point;
+          auto time = std::chrono::duration<GLfloat>(
+                          std::chrono::steady_clock::now() - start)
+                          .count();
+          ctx.dispatch(update_uniform {bulin::time_name, time});
         };
         return {std::move(state), eff};
       },
-      [&](add_uniform&&) -> model_result { return std::move(state); },
-      [&](remove_uniform&&) -> model_result { return std::move(state); },
-      [&](update_uniform&&) -> model_result { return std::move(state); });
+      [&](add_uniform&& add_uniform) -> model_result
+      {
+        state.uniforms =
+            std::move(state.uniforms)
+                .insert({add_uniform.name, add_uniform.init_value});
+        auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
+        return {std::move(state), eff};
+      },
+      [&](remove_uniform&& remove_uniform) -> model_result
+      {
+        state.uniforms = state.uniforms.erase(remove_uniform.name);
+        auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
+        return {std::move(state), eff};
+      },
+      [&](update_uniform&& update_uniform) -> model_result
+      {
+        state.uniforms = std::move(state.uniforms)
+                             .set(update_uniform.name, update_uniform.value);
+        auto eff = [name = std::move(update_uniform.name),
+                    value = update_uniform.value](auto&& ctx)
+        {
+          uniform_type uniform_value = value;
+          lager::get<bulin::shader_model&>(ctx).update_uniform_value(
+              name, uniform_value);
+          lager::get<bulin::shader_data&>(ctx).uniforms[name] = uniform_value;
+        };
+        return {std::move(state), eff};
+      });
 }
 
 void save(std::filesystem::path const& fname, model state)

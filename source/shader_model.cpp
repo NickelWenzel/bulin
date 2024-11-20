@@ -1,5 +1,6 @@
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/shader_data.hpp>
+#include <bulin/graphics/types.hpp>
 
 #include <Magnum/MeshTools/Compile.h>
 #include <Magnum/Trade/MeshData.h>
@@ -8,6 +9,8 @@
 #include <Magnum/Math/Matrix3.h>
 
 #include <iostream>
+#include <algorithm>
+#include <ranges>
 
 namespace
 {
@@ -26,6 +29,14 @@ void main() {
 )GLSL");
   return vertex_shader;
 }
+
+void set_uniform_value(bulin::flat_shader& flat_shader,
+                       std::string const& name,
+                       bulin::is_uniform_type auto const& value)
+{
+  auto const loc = flat_shader.get_uniform_location(name);
+  flat_shader.set_uniform_value(loc, value);
+}
 }  // namespace
 
 bulin::shader_model::shader_model()
@@ -40,14 +51,6 @@ bulin::shader_model::shader_model()
   m_mesh = Magnum::MeshTools::compile(mesh_data);
 }
 
-void bulin::shader_model::tick(shader_data const& data)
-{
-  // Time
-  if (!data.time_name.empty()) {
-    set_uniform_value(data.time_name, data.time);
-  }
-}
-
 void bulin::shader_model::reset(shader_data const& data)
 {
   using namespace Magnum;
@@ -58,10 +61,11 @@ void bulin::shader_model::reset(shader_data const& data)
   // Add precision
   fragment_shader.addSource("precision mediump float;\n");
 
-  // Time
-  if (!data.time_name.empty()) {
-    fragment_shader.addSource("uniform float time;\n");
-  }
+  // Uniforms
+  std::ranges::for_each(
+      data.uniforms | std::views::keys,
+      [&fragment_shader](auto const& name)
+      { fragment_shader.addSource(std::format("uniform float {};\n", name)); });
 
   // Actual user shade code
   fragment_shader.addSource(data.shader_input.data());
@@ -70,6 +74,14 @@ void bulin::shader_model::reset(shader_data const& data)
   {
     m_shader.set_transformation_projection_matrix(
         Matrix3::scaling({1.0f, 1.0f}));
+
+    // Uniforms
+    std::ranges::for_each(data.uniforms,
+                          [this](auto const& name_value_pair)
+                          {
+                            auto const& [name, value] = name_value_pair;
+                            update_uniform_value(name, value);
+                          });
   }
 }
 
@@ -78,9 +90,10 @@ void bulin::shader_model::draw()
   m_shader.draw(m_mesh);
 }
 
-void bulin::shader_model::set_uniform_value(std::string const& name,
-                                            GLfloat value)
+void bulin::shader_model::update_uniform_value(std::string const& name,
+                                               bulin::uniform_type const& value)
 {
-  auto const loc = m_shader.get_uniform_location(name);
-  m_shader.set_uniform_value(loc, value);
+  std::visit([this, &name](auto const& value)
+             { set_uniform_value(m_shader, name, value); },
+             value);
 }

@@ -54,6 +54,7 @@ target_sources(bulin_graphics
     include/bulin/graphics/shader_data.hpp
     include/bulin/graphics/shader_model.hpp
     include/bulin/graphics/texture.hpp
+    include/bulin/graphics/types.hpp
     ${BULIN_GRAPHICS_EXPORT_FILE_NAME}
 )
 
