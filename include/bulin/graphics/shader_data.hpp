@@ -7,7 +7,7 @@
 
 #include <array>
 #include <chrono>
-#include <string_view>
+#include <string>
 
 namespace bulin
 {

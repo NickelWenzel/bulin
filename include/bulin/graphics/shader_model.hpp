@@ -3,11 +3,11 @@
 #include <Magnum/GL/OpenGL.h>
 #include <bulin/graphics/export.hpp>
 #include <bulin/graphics/flat_shader.hpp>
+#include <bulin/graphics/types.hpp>
 
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/GL/Shader.h>
 #include <Magnum/Platform/GLContext.h>
-#include "bulin/graphics/types.hpp"
 
 namespace bulin
 {

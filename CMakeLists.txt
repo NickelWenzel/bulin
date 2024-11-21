@@ -82,6 +82,15 @@ target_link_system_libraries(bulin_graphics
   Magnum::GLContext
 )
 
+target_precompile_headers(bulin_graphics
+  PRIVATE
+    <array>
+    <chrono>
+    <string>
+    <map>
+    <variant>
+)
+
 # ------- application -------
 add_library(
   bulin_application STATIC
@@ -128,9 +137,12 @@ target_link_libraries(bulin_application
 
 target_precompile_headers(bulin_application
   PRIVATE
+    <filesystem>
     <string>
     <variant>
     <lager/extra/struct.hpp>
+    <lager/effect.hpp>
+    <immer/map.hpp>
 )
 
 # ---- Declare executable ----
@@ -173,9 +185,10 @@ target_include_directories(bulin_exe PRIVATE ${PORTABLE_FILE_DIALOGS_INCLUDE_DIR
 
 target_precompile_headers(bulin_exe
   PRIVATE
-    <array>
+    <ranges>
     <iostream>
     <lager/store.hpp>
+    <lager/event_loop/sdl.hpp>
 )
 
 # ---- Install rules ----

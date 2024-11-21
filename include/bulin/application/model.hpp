@@ -12,16 +12,15 @@
 
 #pragma once
 
+#include <Magnum/GL/OpenGL.h>
 #include <bulin/application/export.hpp>
 
 #include <bulin/graphics/types.hpp>
 
-#include <Magnum/GL/OpenGL.h>
 
 #include <lager/extra/struct.hpp>
 #include <lager/effect.hpp>
 
-#include <immer/flex_vector.hpp>
 #include <immer/map.hpp>
 
 #include <filesystem>

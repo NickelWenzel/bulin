@@ -5,11 +5,11 @@
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
+#include <bulin/graphics/types.hpp>
 
 #include <SDL.h>
 #include <SDL_opengl.h>
 
-#include <bulin/graphics/types.hpp>
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl2.h>
