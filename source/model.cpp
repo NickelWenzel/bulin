@@ -133,7 +133,7 @@ auto update(model state, model_action model_action) -> model_result
       },
       [&](remove_uniform&& remove_uniform) -> model_result
       {
-        state.uniforms = state.uniforms.erase(remove_uniform.name);
+        state.uniforms = std::move(state.uniforms).erase(remove_uniform.name);
         auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },

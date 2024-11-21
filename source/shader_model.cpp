@@ -34,8 +34,9 @@ void set_uniform_value(bulin::flat_shader& flat_shader,
                        std::string const& name,
                        bulin::is_uniform_type auto const& value)
 {
-  auto const loc = flat_shader.get_uniform_location(name);
-  flat_shader.set_uniform_value(loc, value);
+  if (auto const loc = flat_shader.get_uniform_location(name); loc != -1) {
+    flat_shader.set_uniform_value(loc, value);
+  }
 }
 }  // namespace
 

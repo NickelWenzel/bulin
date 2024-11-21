@@ -116,26 +116,26 @@ void draw_menu(context const& ctx, bulin::app const& app)
   ImGui::EndMainMenuBar();
 }
 
-void draw_add_time(context const& ctx)
+void draw_add_uniform_time(context const& ctx)
 {
-  if (ImGui::Button("Add time")) {
+  if (ImGui::Button("Add time##time")) {
     ctx.dispatch(bulin::add_time {});
   }
 }
 
-void draw_added_time(context const& ctx,
-                     std::string const& name,
-                     GLfloat const& time)
+void draw_uniform_time_info(context const& ctx,
+                            std::string const& name,
+                            GLfloat const& time)
 {
   ImGui::Text(std::format("{}: {:.2f}s", name, time).c_str());
   ImGui::SameLine();
 
-  if (ImGui::Button("reset")) {
+  if (ImGui::Button("reset##time")) {
     ctx.dispatch(bulin::reset_time {});
   }
   ImGui::SameLine();
 
-  if (ImGui::Button("x")) {
+  if (ImGui::Button("x##time")) {
     ctx.dispatch(bulin::remove_time {});
   }
 
@@ -146,33 +146,16 @@ void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
 {
   auto const& name = bulin::time_name;
   if (uniforms.find(name) == nullptr) {
-    draw_add_time(ctx);
+    draw_add_uniform_time(ctx);
   } else {
-    draw_added_time(ctx, name, std::get<GLfloat>(uniforms.at(name)));
+    draw_uniform_time_info(ctx, name, std::get<GLfloat>(uniforms.at(name)));
   }
   ImGui::Separator();
 }
 
-void draw_uniform(context const& ctx,
-                  std::string const& name,
-                  bulin::is_uniform_type auto& value)
-{
-  ImGui::Text(name.c_str());
-  ImGui::SameLine();
-
-  if (ImGui::InputFloat("##uniform_value", &value)) {
-    ctx.dispatch(bulin::update_uniform {name, value});
-  }
-  ImGui::SameLine();
-
-  if (ImGui::Button("x")) {
-    ctx.dispatch(bulin::remove_uniform {name});
-  }
-}
-
 void draw_add_uniform(context const& ctx)
 {
-  bool const add = ImGui::Button("Add uniform");
+  bool const add = ImGui::Button("Add uniform##uniform");
   ImGui::SameLine();
   bulin::text_input::buffer new_uniform_name_buffer;
   ImGui::InputText("##new_uniform_name",
@@ -183,17 +166,33 @@ void draw_add_uniform(context const& ctx)
   }
 }
 
-void draw_uniforms(context const& ctx)
+void draw_uniform_info(context const& ctx,
+                       std::string const& name,
+                       bulin::is_uniform_type auto value)
+{
+  ImGui::Text(name.c_str());
+  ImGui::SameLine();
+
+  if (ImGui::InputFloat(std::format("##uniform_value_{}", name).c_str(), &value)) {
+    ctx.dispatch(bulin::update_uniform {name, std::move(value)});
+  }
+  ImGui::SameLine();
+
+  if (ImGui::Button(std::format("x##{}", name).c_str())) {
+    ctx.dispatch(bulin::remove_uniform {name});
+  }
+}
+
+void draw_uniforms(context const& ctx,
+                   bulin::model::uniform_map const& uniforms)
 {
   draw_add_uniform(ctx);
 
   auto not_time = [](auto const& pair)
   { return pair.first != bulin::time_name; };
 
-  for (auto& [name, value] : lager::get<bulin::shader_data&>(ctx).uniforms
-           | std::views::filter(not_time))
-  {
-    std::visit([&ctx, &name](auto& value) { draw_uniform(ctx, name, value); },
+  for (auto& [name, value] : uniforms | std::views::filter(not_time)) {
+    std::visit([&ctx, &name](auto& val) { draw_uniform_info(ctx, name, val); },
                value);
   }
   ImGui::Separator();
@@ -209,7 +208,7 @@ void draw(context const& ctx, bulin::app const& app)
 
   draw_time(ctx, app.doc.uniforms);
 
-  draw_uniforms(ctx);
+  draw_uniforms(ctx, app.doc.uniforms);
 
   if (auto& buffer = lager::get<bulin::shader_data&>(ctx).shader_input;
       ImGui::InputTextMultiline("##shader_input",
