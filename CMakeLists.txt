@@ -110,6 +110,7 @@ target_sources(bulin_application
     ${CMAKE_CURRENT_BINARY_DIR}
   FILES
     include/bulin/application/app.hpp
+    include/bulin/application/cereal.hpp
     include/bulin/application/model.hpp
     ${BULIN_APPLICATION_EXPORT_FILE_NAME}
 )

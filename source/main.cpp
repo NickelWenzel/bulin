@@ -20,7 +20,6 @@
 
 #include <portable-file-dialogs.h>
 
-#include <ranges>
 #include <iostream>
 
 constexpr int window_width = 800;
@@ -173,10 +172,11 @@ void draw_uniform_info(context const& ctx,
   ImGui::Text(name.c_str());
   ImGui::SameLine();
 
-  if (ImGui::InputFloat(std::format("##uniform_value_{}", name).c_str(), &value)) {
-    ctx.dispatch(bulin::update_uniform {name, std::move(value)});
-  }
-  ImGui::SameLine();
+  // if (ImGui::InputFloat(std::format("##uniform_value_{}", name).c_str(),
+  // &value)) {
+  //   ctx.dispatch(bulin::update_uniform {name, std::move(value)});
+  // }
+  // ImGui::SameLine();
 
   if (ImGui::Button(std::format("x##{}", name).c_str())) {
     ctx.dispatch(bulin::remove_uniform {name});
@@ -192,7 +192,7 @@ void draw_uniforms(context const& ctx,
   { return pair.first != bulin::time_name; };
 
   for (auto& [name, value] : uniforms | std::views::filter(not_time)) {
-    std::visit([&ctx, &name](auto& val) { draw_uniform_info(ctx, name, val); },
+    std::visit([&ctx, &name](auto const& val) { draw_uniform_info(ctx, name, val); },
                value);
   }
   ImGui::Separator();
@@ -267,7 +267,8 @@ int main()
 
   const char* glsl_version = "#version 300 es";
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                      SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 

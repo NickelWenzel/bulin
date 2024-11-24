@@ -17,7 +17,6 @@
 
 #include <bulin/graphics/types.hpp>
 
-
 #include <lager/extra/struct.hpp>
 #include <lager/effect.hpp>
 

@@ -29,15 +29,6 @@ void main() {
 )GLSL");
   return vertex_shader;
 }
-
-void set_uniform_value(bulin::flat_shader& flat_shader,
-                       std::string const& name,
-                       bulin::is_uniform_type auto const& value)
-{
-  if (auto const loc = flat_shader.get_uniform_location(name); loc != -1) {
-    flat_shader.set_uniform_value(loc, value);
-  }
-}
 }  // namespace
 
 bulin::shader_model::shader_model()
@@ -94,7 +85,12 @@ void bulin::shader_model::draw()
 void bulin::shader_model::update_uniform_value(std::string const& name,
                                                bulin::uniform_type const& value)
 {
-  std::visit([this, &name](auto const& value)
-             { set_uniform_value(m_shader, name, value); },
-             value);
+  std::visit(
+      [this, &name](auto const& val) -> void
+      {
+        if (auto const loc = m_shader.get_uniform_location(name); loc != -1) {
+          m_shader.set_uniform_value(loc, val);
+        }
+      },
+      value);
 }

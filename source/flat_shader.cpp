@@ -25,8 +25,3 @@ auto bulin::flat_shader::get_uniform_location(std::string const& name) -> GLint
 {
   return uniformLocation(name);
 }
-
-void bulin::flat_shader::set_uniform_value(GLint location, GLfloat value)
-{
-  return setUniform(location, value);
-}
