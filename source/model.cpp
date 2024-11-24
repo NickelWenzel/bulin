@@ -11,7 +11,7 @@
 //
 
 #include <bulin/application/model.hpp>
-//#include <bulin/application/cereal.hpp>
+#include <bulin/application/cereal.hpp>
 
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
