@@ -21,6 +21,7 @@
 #include <portable-file-dialogs.h>
 
 #include <cstddef>
+#include <filesystem>
 #include <iostream>
 #include <utility>
 #include <type_traits>
@@ -300,6 +301,14 @@ void draw(context const& ctx, bulin::app const& app)
   ImGui::Image(reinterpret_cast<void*>(lager::get<bulin::texture>(ctx).id()), ImGui::GetContentRegionAvail());
 
   ImGui::End();
+
+  // Check if shader was edited on disc
+  if (!app.doc.path.empty()
+      && app.doc.shader_timestamp
+          < static_cast<std::size_t>(std::filesystem::last_write_time(app.doc.path).time_since_epoch().count()))
+  {
+    ctx.dispatch(bulin::load_shader_action {app.doc.path});
+  }
 }
 
 void init_imgui_dock_windows(ImGuiID const dockspace_id, ImGuiDockNodeFlags const dockspace_flags)
