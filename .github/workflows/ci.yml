@@ -85,6 +85,7 @@ jobs:
 
     - name: Install system requirements
       run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config -y -q
+
     - name: Install Clang 18 and set as default using update-alternatives
       run: |
         sudo apt-get update
