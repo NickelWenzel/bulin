@@ -99,11 +99,13 @@ jobs:
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+        clang --version
 
     - name: Install cmake-3.28
       run: |
         sudo snap install cmake --channel=3.28/stable --classic
         sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
+        cmake --version
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
@@ -154,6 +156,7 @@ jobs:
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+        clang --version
 
     - name: Install Clang 18 and set in PATH
       if: matrix.os == 'macos-14'
@@ -179,6 +182,7 @@ jobs:
       run: |
         sudo snap install cmake --channel=3.28/stable --classic
         sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
+        cmake --version
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
