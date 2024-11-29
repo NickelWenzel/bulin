@@ -109,7 +109,7 @@ void process_key_events(context const& ctx, bulin::app const& app)
   bool const isCrtlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
   bool const isShiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
   if (isCrtlDown && isShiftDown) {
-    process_key_project_event(ctx, app.path);
+    process_key_project_event(ctx, app.path.string());
   } else if (isCrtlDown) {
     process_key_shader_event(ctx, app.doc.path);
   }
