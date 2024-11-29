@@ -100,6 +100,11 @@ jobs:
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
 
+    - name: Install cmake-3.28
+      run: |
+        sudo snap install cmake --channel=3.28/stable --classic
+        sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
+
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
       with: { committish: "${{ env.VCPKG_COMMIT }}", cache-version: "sanitize" }
@@ -168,6 +173,12 @@ jobs:
     - name: Install system requirements
       if: matrix.os == 'ubuntu-24.04'
       run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config perl -y -q
+
+    - name: Install cmake-3.28
+      if: matrix.os == 'ubuntu-24.04'
+      run: |
+        sudo snap install cmake --channel=3.28/stable --classic
+        sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
