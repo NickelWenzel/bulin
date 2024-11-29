@@ -227,7 +227,11 @@ void draw_add_uniform(context const& ctx, bulin::uniform_type const& new_uniform
   ImGui::TableSetColumnIndex(1);
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
   bulin::text_input::buffer new_uniform_name_buffer;
-  if (ImGui::InputText("##new_uniform_name", new_uniform_name_buffer.data(), bulin::text_input::buffer_size, ImGuiInputTextFlags_EnterReturnsTrue)) {
+  if (ImGui::InputText("##new_uniform_name",
+                       new_uniform_name_buffer.data(),
+                       bulin::text_input::buffer_size,
+                       ImGuiInputTextFlags_EnterReturnsTrue))
+  {
     ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), new_uniform});
   }
 

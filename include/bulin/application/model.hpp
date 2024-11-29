@@ -103,12 +103,6 @@ struct BULIN_APPLICATION_EXPORT update_uniform
   uniform_type value;
 };
 
-struct BULIN_APPLICATION_EXPORT update_uniform
-{
-  int idx;
-  uniform_type value;
-};
-
 using model_action = std::variant<set_shader_data,
                                   reset_shader_model,
                                   changed_shader_input,

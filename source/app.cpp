@@ -46,7 +46,8 @@ app_result update(app app_state, app_action app_action)
       {
         app_state.path = std::move(load_result_action.file);
         app_state.doc = std::move(load_result_action.doc);
-        app_state.doc.shader_timestamp = static_cast<std::size_t> (std::chrono::file_clock::now().time_since_epoch().count());
+        app_state.doc.shader_timestamp =
+            static_cast<std::size_t>(std::chrono::file_clock::now().time_since_epoch().count());
         auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(app_state), eff};
       },
