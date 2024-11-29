@@ -10,7 +10,7 @@
 
 #include <iostream>
 #include <algorithm>
-#include <ranges>
+#include <format>
 
 namespace
 {
