@@ -56,11 +56,11 @@ auto update(model state, model_action model_action) -> model_result
       },
       [&](changed_shader_input&& changed_shader_input) -> model_result
       {
+        state.shader_timestamp = static_cast<std::size_t> (std::chrono::file_clock::now().time_since_epoch().count());
         if (changed_shader_input.text == state.shader_input) {
           return {std::move(state), lager::noop};
         }
         state.shader_input = std::move(changed_shader_input.text);
-        state.shader_timestamp = static_cast<std::size_t> (std::chrono::file_clock::now().time_since_epoch().count());
         auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },

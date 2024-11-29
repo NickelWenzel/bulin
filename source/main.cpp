@@ -130,21 +130,28 @@ void draw_menu(context const& ctx, bulin::app const& app)
 
 void draw_add_uniform_time(context const& ctx)
 {
-  if (ImGui::Button("Add time##time")) {
+  ImGui::TableSetColumnIndex(0);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+  ImGui::Text("time");
+
+  ImGui::TableSetColumnIndex(2);
+  if (ImGui::Button("+##add_time")) {
     ctx.dispatch(bulin::add_time {});
   }
 }
 
 void draw_uniform_time_info(context const& ctx, std::string const& name, GLfloat const& time)
 {
-  ImGui::Text(std::format("{}: {:.2f}s", name, time).c_str());
-  ImGui::SameLine();
-
-  if (ImGui::Button("reset##time")) {
+  ImGui::TableSetColumnIndex(0);
+  if (ImGui::Button("reset##reset_time", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
     ctx.dispatch(bulin::reset_time {});
   }
-  ImGui::SameLine();
 
+  ImGui::TableSetColumnIndex(1);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+  ImGui::Text(std::format("{:.3f}s", time).c_str());
+
+  ImGui::TableSetColumnIndex(2);
   if (ImGui::Button("x##time")) {
     ctx.dispatch(bulin::remove_time {});
   }
@@ -160,7 +167,6 @@ void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
   } else {
     draw_uniform_time_info(ctx, name, std::get<GLfloat>(uniforms.at(name)));
   }
-  ImGui::Separator();
 }
 
 template<class... Ts>
@@ -211,19 +217,23 @@ void draw_select_uniform_types(context const& ctx, std::size_t selected_idx)
 
 void draw_add_uniform(context const& ctx, bulin::uniform_type const& new_uniform)
 {
-  bool const add = ImGui::Button("Add uniform##uniform");
-  ImGui::SameLine();
-
-  bulin::text_input::buffer new_uniform_name_buffer;
-  ImGui::InputText("##new_uniform_name", new_uniform_name_buffer.data(), bulin::text_input::buffer_size);
-  if (add) {
-    ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), new_uniform});
-  }
-
-  ImGui::SameLine();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
   if (ImGui::BeginCombo("##new_uniform_type", uniform_type_name(new_uniform).data())) {
     draw_select_uniform_types(ctx, new_uniform.index());
     ImGui::EndCombo();
+  }
+
+  ImGui::TableSetColumnIndex(1);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+  bulin::text_input::buffer new_uniform_name_buffer;
+  if (ImGui::InputText("##new_uniform_name", new_uniform_name_buffer.data(), bulin::text_input::buffer_size, ImGuiInputTextFlags_EnterReturnsTrue)) {
+    ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), new_uniform});
+  }
+
+  ImGui::TableSetColumnIndex(2);
+  if (ImGui::Button("+##uniform")) {
+    ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), new_uniform});
   }
 }
 
@@ -249,15 +259,19 @@ auto draw_uniform_input(std::string_view name, bulin::uniform_type uniform) -> s
 
 void draw_uniform_info(context const& ctx, std::string const& name, bulin::uniform_type const& uniform)
 {
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
   ImGui::Text(name.c_str());
-  ImGui::SameLine();
 
+  ImGui::TableSetColumnIndex(1);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
   auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name).c_str(), uniform);
   if (new_uniform) {
     ctx.dispatch(bulin::update_uniform {name, std::move(new_uniform).value()});
   }
-  ImGui::SameLine();
 
+  ImGui::TableSetColumnIndex(2);
   if (ImGui::Button(std::format("x##{}", name).c_str())) {
     ctx.dispatch(bulin::remove_uniform {name});
   }
@@ -267,6 +281,18 @@ void draw_uniforms(context const& ctx,
                    bulin::model::uniform_map const& uniforms,
                    bulin::uniform_type const& new_uniform)
 {
+  if (!ImGui::BeginTable("##uniforms_table", 3, ImGuiTableFlags_Resizable)) {
+    return;
+  }
+
+  ImGui::TableSetupColumn("##uniform_name_column");
+  ImGui::TableSetupColumn("##uniform_value_column");
+  ImGui::TableSetupColumn("##uniform_action_column", ImGuiTableColumnFlags_WidthFixed, 20.0f);
+
+  ImGui::TableNextRow();
+  draw_time(ctx, uniforms);
+
+  ImGui::TableNextRow();
   draw_add_uniform(ctx, new_uniform);
 
   auto not_time = [](auto const& pair) { return pair.first != bulin::time_name; };
@@ -274,6 +300,8 @@ void draw_uniforms(context const& ctx,
   for (auto& [name, value] : uniforms | std::views::filter(not_time)) {
     std::visit([&ctx, &name](auto const& val) { draw_uniform_info(ctx, name, val); }, value);
   }
+
+  ImGui::EndTable();
   ImGui::Separator();
 }
 
@@ -282,8 +310,6 @@ void draw(context const& ctx, bulin::app const& app)
   ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
   draw_menu(ctx, app);
-
-  draw_time(ctx, app.doc.uniforms);
 
   draw_uniforms(ctx, app.doc.uniforms, app.doc.new_uniform);
 
@@ -303,9 +329,12 @@ void draw(context const& ctx, bulin::app const& app)
   ImGui::End();
 
   // Check if shader was edited on disc
-  if (!app.doc.path.empty()
-      && app.doc.shader_timestamp
-          < static_cast<std::size_t>(std::filesystem::last_write_time(app.doc.path).time_since_epoch().count()))
+  if (app.doc.path.empty()) {
+    return;
+  }
+  if (auto const last_write =
+          static_cast<std::size_t>(std::filesystem::last_write_time(app.doc.path).time_since_epoch().count());
+      app.doc.shader_timestamp < last_write)
   {
     ctx.dispatch(bulin::load_shader_action {app.doc.path});
   }
