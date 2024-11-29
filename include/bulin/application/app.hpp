@@ -45,11 +45,9 @@ struct BULIN_APPLICATION_EXPORT load_result_action
   std::filesystem::path file;
   model doc;
 };
-using app_action =
-    std::variant<model_action, save_action, load_action, load_result_action>;
+using app_action = std::variant<model_action, save_action, load_action, load_result_action>;
 
-using app_result = lager::
-    result<app, app_action, lager::deps<shader_data&, shader_model&, texture&>>;
+using app_result = lager::result<app, app_action, lager::deps<shader_data&, shader_model&, texture&>>;
 
 BULIN_APPLICATION_EXPORT auto update(app, app_action) -> app_result;
 

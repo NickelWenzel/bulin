@@ -51,8 +51,7 @@ app_result update(app app_state, app_action app_action)
       },
       [&](model_action&& model_action) -> app_result
       {
-        auto [doc, eff] =
-            update(std::move(app_state.doc), std::move(model_action));
+        auto [doc, eff] = update(std::move(app_state.doc), std::move(model_action));
         app_state.doc = std::move(doc);
 
         return {std::move(app_state), eff};

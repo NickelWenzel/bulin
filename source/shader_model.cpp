@@ -36,31 +36,19 @@ struct overloaded : Ts...
   using Ts::operator()...;
 };
 
-auto uniform_string(bulin::uniform_type const& uniform,
-                    std::string const& name) -> std::string
+auto uniform_string(bulin::uniform_type const& uniform, std::string const& name) -> std::string
 {
-  return std::visit(
-      overloaded {[&name](Magnum::Int const&)
-                  { return std::format("uniform int {};\n", name); },
-                  [&name](Magnum::Float const&)
-                  { return std::format("uniform float {};\n", name); },
-                  [&name](Magnum::Vector2 const&)
-                  { return std::format("uniform vec2 {};\n", name); },
-                  [&name](Magnum::Vector3 const&)
-                  { return std::format("uniform vec3 {};\n", name); },
-                  [&name](Magnum::Color3 const&)
-                  { return std::format("uniform vec3 {};\n", name); },
-                  [&name](Magnum::Vector4 const&)
-                  { return std::format("uniform vec4 {};\n", name); },
-                  [&name](Magnum::Color4 const&)
-                  { return std::format("uniform vec4 {};\n", name); },
-                  [&name](Magnum::Vector2i const&)
-                  { return std::format("uniform ivec2 {};\n", name); },
-                  [&name](Magnum::Vector3i const&)
-                  { return std::format("uniform ivec3 {};\n", name); },
-                  [&name](Magnum::Vector4i const&)
-                  { return std::format("uniform ivec4 {};\n", name); }},
-      uniform);
+  return std::visit(overloaded {[&name](Magnum::Int const&) { return std::format("uniform int {};\n", name); },
+                                [&name](Magnum::Float const&) { return std::format("uniform float {};\n", name); },
+                                [&name](Magnum::Vector2 const&) { return std::format("uniform vec2 {};\n", name); },
+                                [&name](Magnum::Vector3 const&) { return std::format("uniform vec3 {};\n", name); },
+                                [&name](Magnum::Color3 const&) { return std::format("uniform vec3 {};\n", name); },
+                                [&name](Magnum::Vector4 const&) { return std::format("uniform vec4 {};\n", name); },
+                                [&name](Magnum::Color4 const&) { return std::format("uniform vec4 {};\n", name); },
+                                [&name](Magnum::Vector2i const&) { return std::format("uniform ivec2 {};\n", name); },
+                                [&name](Magnum::Vector3i const&) { return std::format("uniform ivec3 {};\n", name); },
+                                [&name](Magnum::Vector4i const&) { return std::format("uniform ivec4 {};\n", name); }},
+                    uniform);
 }
 }  // namespace
 
@@ -87,21 +75,19 @@ void bulin::shader_model::reset(shader_data const& data)
   fragment_shader.addSource("precision mediump float;\n");
 
   // Uniforms
-  std::ranges::for_each(
-      data.uniforms,
-      [&fragment_shader](auto const& name_uniform)
-      {
-        auto const& [name, uniform] = name_uniform;
-        fragment_shader.addSource(uniform_string(uniform, name));
-      });
+  std::ranges::for_each(data.uniforms,
+                        [&fragment_shader](auto const& name_uniform)
+                        {
+                          auto const& [name, uniform] = name_uniform;
+                          fragment_shader.addSource(uniform_string(uniform, name));
+                        });
 
   // Actual user shade code
   fragment_shader.addSource(data.shader_input.data());
   if ((fragment_shader.sources().size()) > 1 && fragment_shader.compile()
       && m_shader.attach_and_link_shaders(m_vertex_shader, fragment_shader))
   {
-    m_shader.set_transformation_projection_matrix(
-        Matrix3::scaling({1.0f, 1.0f}));
+    m_shader.set_transformation_projection_matrix(Matrix3::scaling({1.0f, 1.0f}));
 
     // Uniforms
     std::ranges::for_each(data.uniforms,
@@ -118,8 +104,7 @@ void bulin::shader_model::draw()
   m_shader.draw(m_mesh);
 }
 
-void bulin::shader_model::update_uniform_value(std::string const& name,
-                                               bulin::uniform_type const& value)
+void bulin::shader_model::update_uniform_value(std::string const& name, bulin::uniform_type const& value)
 {
   std::visit(
       [this, &name](auto const& val) -> void

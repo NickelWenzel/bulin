@@ -116,16 +116,14 @@ using model_action = std::variant<set_shader_data,
                                   remove_uniform,
                                   update_uniform>;
 
-using model_result = lager::
-    result<model, model_action, lager::deps<shader_data&, shader_model&>>;
+using model_result = lager::result<model, model_action, lager::deps<shader_data&, shader_model&>>;
 
 auto update(model state, model_action model_action) -> model_result;
 
 void save(std::filesystem::path const& fname, model state);
 auto load(std::filesystem::path const& fname) -> model;
 
-void save_shader(std::filesystem::path const& filepath,
-                 std::string const& shader);
+void save_shader(std::filesystem::path const& filepath, std::string const& shader);
 auto load_shader(std::filesystem::path const& filepath) -> std::string;
 
 }  // namespace bulin

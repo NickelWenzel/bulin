@@ -18,8 +18,7 @@ class BULIN_GRAPHICS_EXPORT shader_model
 public:
   shader_model();
 
-  void update_uniform_value(std::string const& name,
-                            bulin::uniform_type const& value);
+  void update_uniform_value(std::string const& name, bulin::uniform_type const& value);
 
   void reset(shader_data const& data);
   void draw();
