@@ -13,8 +13,10 @@ void main(){
 
     float f = abs(cos(a*2.5 + speed * time))*.5+.3;
 
-    color = vec3(0.7, 0.4,  1.-smoothstep(f,f+0.02,r) );
+  float ratio = smoothstep(f,f+0.02,r);
+    color =  flower_color * (1.-ratio);
+  vec3 back = vec3(1.) * ratio;
 
   // Visualize the distance field
-  fragColor = vec4(color, 1.0);
+  fragColor = vec4(color + back, 1.0);
 }

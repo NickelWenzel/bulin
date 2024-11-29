@@ -4,24 +4,43 @@
             "key": "speed",
             "value": {
                 "type": "float",
-                "data": 2.0
+                "data": 9.057999610900879
             }
         },
         {
             "key": "time",
             "value": {
                 "type": "float",
-                "data": 299.3722839355469
+                "data": 21.201271057128908
+            }
+        },
+        {
+            "key": "flower_color",
+            "value": {
+                "type": "Magnum::Math::Color3<float>",
+                "data": {
+                    "value0": 0.39385002851486208,
+                    "value1": 0.024413686245679857,
+                    "value2": 0.6225490570068359
+                }
             }
         },
         {
             "key": "radius",
             "value": {
                 "type": "float",
-                "data": 0.5
+                "data": 0.4000000059604645
             }
         }
     ],
-    "shader_input": "out vec4 fragColor;\n\nvoid main(){\n  vec2 st = gl_FragCoord.xy/vec2(1000, 1000);\n    vec3 color = vec3(0.5, 0.3, 0.0);\n\n    float d = 0.25 + 0.5 * (0.5 + 0.5* sin(2.*time));\n\n    vec2 pos = vec2(d)-st;\n\n    float r = (2.+ sin(time))/radius * length(pos);\n    float a = atan(pos.y,pos.x);\n\n    float f = abs(cos(a*2.5 + speed * time))*.5+.3;\n\n    color = vec3(0.7, 0.4,  1.-smoothstep(f,f+0.02,r) );\n\n  // Visualize the distance field\n  fragColor = vec4(color, 1.0);\n}\n",
-    "path": "/home/nickel/Programming/sources/bulin/build/test_shader.glsl"
+    "new_uniform": {
+        "type": "Magnum::Math::Color3<float>",
+        "data": {
+            "value0": 0.0,
+            "value1": 0.0,
+            "value2": 0.0
+        }
+    },
+    "shader_input": "out vec4 fragColor;\n\nvoid main(){\n  vec2 st = gl_FragCoord.xy/vec2(1000, 1000);\n    vec3 color = vec3(0.5, 0.3, 0.0);\n\n    float d = 0.25 + 0.5 * (0.5 + 0.5* sin(2.*time));\n\n    vec2 pos = vec2(d)-st;\n\n    float r = (2.+ sin(9. * time))/radius * length(pos);\n    float a = atan(pos.y,pos.x);\n\n    float f = abs(cos(a*2.5 + speed * time))*.5+.3;\n\n  float ratio = smoothstep(f,f+0.02,r);\n    color =  flower_color * (1.-ratio);\n  vec3 back = vec3(1.) * ratio;\n\n  // Visualize the distance field\n  fragColor = vec4(color + back, 1.0);\n}\n",
+    "path": "/home/nickel/Programming/repos/bulin/example/test_shader.glsl"
 }

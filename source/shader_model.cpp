@@ -29,6 +29,39 @@ void main() {
 )GLSL");
   return vertex_shader;
 }
+
+template<class... Ts>
+struct overloaded : Ts...
+{
+  using Ts::operator()...;
+};
+
+auto uniform_string(bulin::uniform_type const& uniform,
+                    std::string const& name) -> std::string
+{
+  return std::visit(
+      overloaded {[&name](Magnum::Int const&)
+                  { return std::format("uniform int {};\n", name); },
+                  [&name](Magnum::Float const&)
+                  { return std::format("uniform float {};\n", name); },
+                  [&name](Magnum::Vector2 const&)
+                  { return std::format("uniform vec2 {};\n", name); },
+                  [&name](Magnum::Vector3 const&)
+                  { return std::format("uniform vec3 {};\n", name); },
+                  [&name](Magnum::Color3 const&)
+                  { return std::format("uniform vec3 {};\n", name); },
+                  [&name](Magnum::Vector4 const&)
+                  { return std::format("uniform vec4 {};\n", name); },
+                  [&name](Magnum::Color4 const&)
+                  { return std::format("uniform vec4 {};\n", name); },
+                  [&name](Magnum::Vector2i const&)
+                  { return std::format("uniform ivec2 {};\n", name); },
+                  [&name](Magnum::Vector3i const&)
+                  { return std::format("uniform ivec3 {};\n", name); },
+                  [&name](Magnum::Vector4i const&)
+                  { return std::format("uniform ivec4 {};\n", name); }},
+      uniform);
+}
 }  // namespace
 
 bulin::shader_model::shader_model()
@@ -55,9 +88,12 @@ void bulin::shader_model::reset(shader_data const& data)
 
   // Uniforms
   std::ranges::for_each(
-      data.uniforms | std::views::keys,
-      [&fragment_shader](auto const& name)
-      { fragment_shader.addSource(std::format("uniform float {};\n", name)); });
+      data.uniforms,
+      [&fragment_shader](auto const& name_uniform)
+      {
+        auto const& [name, uniform] = name_uniform;
+        fragment_shader.addSource(uniform_string(uniform, name));
+      });
 
   // Actual user shade code
   fragment_shader.addSource(data.shader_input.data());

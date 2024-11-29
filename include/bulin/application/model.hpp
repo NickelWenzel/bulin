@@ -21,6 +21,7 @@
 #include <lager/effect.hpp>
 
 #include <immer/map.hpp>
+#include <immer/box.hpp>
 
 #include <filesystem>
 #include <string>
@@ -35,6 +36,7 @@ struct BULIN_APPLICATION_EXPORT model
 {
   using uniform_map = immer::map<std::string, uniform_type>;
   uniform_map uniforms;
+  uniform_type new_uniform;
   std::string shader_input;
   std::string path;
 };
@@ -50,6 +52,11 @@ struct BULIN_APPLICATION_EXPORT reset_shader_model
 struct BULIN_APPLICATION_EXPORT changed_shader_input
 {
   std::string text;
+};
+
+struct BULIN_APPLICATION_EXPORT changed_new_uniform
+{
+  uniform_type uniform;
 };
 
 struct BULIN_APPLICATION_EXPORT load_shader_action
@@ -98,6 +105,7 @@ struct BULIN_APPLICATION_EXPORT update_uniform
 using model_action = std::variant<set_shader_data,
                                   reset_shader_model,
                                   changed_shader_input,
+                                  changed_new_uniform,
                                   load_shader_action,
                                   save_shader_action,
                                   add_time,
@@ -122,4 +130,4 @@ auto load_shader(std::filesystem::path const& filepath) -> std::string;
 
 }  // namespace bulin
 
-LAGER_STRUCT(bulin, model, uniforms, shader_input, path);
+LAGER_STRUCT(bulin, model, uniforms, new_uniform, shader_input, path);

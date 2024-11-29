@@ -29,7 +29,7 @@ public:
 
   auto get_uniform_location(std::string const& name) -> GLint;
   void set_uniform_value(GLint location,
-                         bulin::is_uniform_type auto const& value)
+                         bulin::uniform_type_c auto const& value)
   {
     setUniform(location, value);
   }

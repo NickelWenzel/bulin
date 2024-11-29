@@ -66,6 +66,11 @@ auto update(model state, model_action model_action) -> model_result
         auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },
+      [&](changed_new_uniform&& changed_changed_new_uniform) -> model_result
+      {
+        state.new_uniform = changed_changed_new_uniform.uniform;
+        return {std::move(state), lager::noop};
+      },
       [&](load_shader_action&& load_shader_action) -> model_result
       {
         state.path = load_shader_action.file.string();
