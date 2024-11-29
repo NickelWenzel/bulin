@@ -141,25 +141,23 @@ void draw_shader_menu(context const& ctx, std::string const& default_shader_path
 void draw_menu(context const& ctx, bulin::app const& app)
 {
   // Check if the main menu bar should open
-  if (!ImGui::BeginMainMenuBar()) {
-    return;
-  }
+  if (ImGui::BeginMainMenuBar()) {
+    if (ImGui::BeginMenu("File")) {
+      draw_file_menu(ctx, app.path.string());
+      ImGui::EndMenu();
+    }
 
-  if (ImGui::BeginMenu("File")) {
-    draw_file_menu(ctx, app.path.string());
-    ImGui::EndMenu();
-  }
+    if (ImGui::BeginMenu("Edit")) {
+      ImGui::EndMenu();
+    }
 
-  if (ImGui::BeginMenu("Edit")) {
-    ImGui::EndMenu();
-  }
+    if (ImGui::BeginMenu("Shader")) {
+      draw_shader_menu(ctx, app.doc.path);
+      ImGui::EndMenu();
+    }
 
-  if (ImGui::BeginMenu("Shader")) {
-    draw_shader_menu(ctx, app.doc.path);
-    ImGui::EndMenu();
+    ImGui::EndMainMenuBar();
   }
-
-  ImGui::EndMainMenuBar();
 }
 
 void draw_add_uniform_time(context const& ctx)
