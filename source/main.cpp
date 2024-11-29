@@ -34,21 +34,6 @@ constexpr float editor_window_ratio = 1.F / 3.F;
 constexpr int buffer_resolution_x = 1000;
 constexpr int buffer_resolution_y = 1000;
 
-template<typename T>
-concept scalar_c = std::is_scalar_v<T>;
-
-template<typename T, std::size_t N>
-concept vec_c = T::Size == N;
-
-template<typename T>
-concept vec2_c = vec_c<T, 2>;
-
-template<typename T>
-concept vec3_c = vec_c<T, 3>;
-
-template<typename T>
-concept vec4_c = vec_c<T, 4>;
-
 using context = lager::context<bulin::app_action, lager::deps<bulin::shader_data&, bulin::texture&>>;
 
 std::vector<std::string> project_file_filters()
@@ -61,23 +46,82 @@ std::vector<std::string> shader_file_filters()
   return {"Shader files (.glsl)", "*.glsl", "All Files", "*"};
 }
 
+template<typename LOAD_ACTION>
+void load_with_dialog(context const& ctx,
+                      std::string_view title,
+                      std::string const& default_path,
+                      std::vector<std::string> filters)
+{
+  try {
+    auto fileopen = pfd::open_file(title.data(), default_path, std::move(filters));
+    if (auto files = fileopen.result(); !files.empty()) {
+      ctx.dispatch(LOAD_ACTION {files.front()});
+    }
+  } catch (std::exception const&) {
+  }
+}
+
+template<typename SAVE_ACTION>
+void save_with_dialog(context const& ctx,
+                      std::string_view title,
+                      std::string const& default_path,
+                      std::vector<std::string> filters)
+{
+  try {
+    auto filesave = pfd::save_file(title.data(), default_path, std::move(filters));
+    ctx.dispatch(SAVE_ACTION {filesave.result()});
+  } catch (std::exception const&) {
+  }
+}
+
+void process_key_project_event(context const& ctx, std::string const& default_project_path)
+{
+  bool const open = ImGui::IsKeyPressed(ImGuiKey_O);
+  bool const save = ImGui::IsKeyPressed(ImGuiKey_S);
+  if (open) {
+    load_with_dialog<bulin::load_action>(ctx, "Choose project file", default_project_path, project_file_filters());
+  } else if (save) {
+    if (default_project_path.empty()) {
+      save_with_dialog<bulin::save_action>(ctx, "Choose location", default_project_path, project_file_filters());
+    } else {
+      ctx.dispatch(bulin::save_action {default_project_path});
+    }
+  }
+}
+
+void process_key_shader_event(context const& ctx, std::string const& default_shader_path)
+{
+  bool const open = ImGui::IsKeyPressed(ImGuiKey_O);
+  bool const save = ImGui::IsKeyPressed(ImGuiKey_S);
+  if (open) {
+    load_with_dialog<bulin::load_shader_action>(ctx, "Choose shader", default_shader_path, shader_file_filters());
+  } else if (save) {
+    if (default_shader_path.empty()) {
+      save_with_dialog<bulin::save_shader_action>(ctx, "Choose location", default_shader_path, shader_file_filters());
+    } else {
+      ctx.dispatch(bulin::save_shader_action {default_shader_path});
+    }
+  }
+}
+
+void process_key_events(context const& ctx, bulin::app const& app)
+{
+  bool const isCrtlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
+  bool const isShiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+  if (isCrtlDown && isShiftDown) {
+    process_key_project_event(ctx, app.path);
+  } else if (isCrtlDown) {
+    process_key_shader_event(ctx, app.doc.path);
+  }
+}
+
 void draw_file_menu(context const& ctx, std::string const& default_project_path)
 {
   if (ImGui::MenuItem("Open project")) {
-    try {
-      auto fileopen = pfd::open_file("Choose project file", default_project_path, project_file_filters());
-      if (auto files = fileopen.result(); !files.empty()) {
-        ctx.dispatch(bulin::load_action {files.front()});
-      }
-    } catch (std::exception const&) {
-    }
+    load_with_dialog<bulin::load_action>(ctx, "Choose project file", default_project_path, project_file_filters());
   }
   if (ImGui::MenuItem("Save project")) {
-    try {
-      auto filesave = pfd::save_file("Choose location", default_project_path, project_file_filters());
-      ctx.dispatch(bulin::save_action {filesave.result()});
-    } catch (std::exception const&) {
-    }
+    save_with_dialog<bulin::save_action>(ctx, "Choose location", default_project_path, project_file_filters());
   }
   if (ImGui::MenuItem("Exit")) {
     ctx.loop().finish();
@@ -87,20 +131,10 @@ void draw_file_menu(context const& ctx, std::string const& default_project_path)
 void draw_shader_menu(context const& ctx, std::string const& default_shader_path)
 {
   if (ImGui::MenuItem("Load")) {
-    try {
-      auto fileopen = pfd::open_file("Choose shader", default_shader_path, shader_file_filters());
-      if (auto files = fileopen.result(); !files.empty()) {
-        ctx.dispatch(bulin::load_shader_action {files.front()});
-      }
-    } catch (std::exception const&) {
-    }
+    load_with_dialog<bulin::load_shader_action>(ctx, "Choose shader", default_shader_path, shader_file_filters());
   }
   if (ImGui::MenuItem("Save")) {
-    try {
-      auto filesave = pfd::save_file("Choose location", default_shader_path, shader_file_filters());
-      ctx.dispatch(bulin::save_shader_action {filesave.result()});
-    } catch (std::exception const&) {
-    }
+    save_with_dialog<bulin::save_shader_action>(ctx, "Choose location", default_shader_path, shader_file_filters());
   }
 }
 
@@ -450,6 +484,7 @@ int main()
           init_imgui_dock_windows(dockspace_id, dockspace_flags);
         }
 
+        process_key_events(store, store.get());
         draw(store, store.get());
 
         // Rendering
