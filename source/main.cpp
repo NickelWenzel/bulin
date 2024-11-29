@@ -21,6 +21,7 @@
 #include <portable-file-dialogs.h>
 
 #include <cstddef>
+#include <filesystem>
 #include <iostream>
 #include <utility>
 #include <type_traits>
@@ -32,21 +33,6 @@ constexpr float editor_window_ratio = 1.F / 3.F;
 
 constexpr int buffer_resolution_x = 1000;
 constexpr int buffer_resolution_y = 1000;
-
-template<typename T>
-concept scalar_c = std::is_scalar_v<T>;
-
-template<typename T, std::size_t N>
-concept vec_c = T::Size == N;
-
-template<typename T>
-concept vec2_c = vec_c<T, 2>;
-
-template<typename T>
-concept vec3_c = vec_c<T, 3>;
-
-template<typename T>
-concept vec4_c = vec_c<T, 4>;
 
 using context = lager::context<bulin::app_action, lager::deps<bulin::shader_data&, bulin::texture&>>;
 
@@ -60,23 +46,82 @@ std::vector<std::string> shader_file_filters()
   return {"Shader files (.glsl)", "*.glsl", "All Files", "*"};
 }
 
+template<typename LOAD_ACTION>
+void load_with_dialog(context const& ctx,
+                      std::string_view title,
+                      std::string const& default_path,
+                      std::vector<std::string> filters)
+{
+  try {
+    auto fileopen = pfd::open_file(title.data(), default_path, std::move(filters));
+    if (auto files = fileopen.result(); !files.empty()) {
+      ctx.dispatch(LOAD_ACTION {files.front()});
+    }
+  } catch (std::exception const&) {
+  }
+}
+
+template<typename SAVE_ACTION>
+void save_with_dialog(context const& ctx,
+                      std::string_view title,
+                      std::string const& default_path,
+                      std::vector<std::string> filters)
+{
+  try {
+    auto filesave = pfd::save_file(title.data(), default_path, std::move(filters));
+    ctx.dispatch(SAVE_ACTION {filesave.result()});
+  } catch (std::exception const&) {
+  }
+}
+
+void process_key_project_event(context const& ctx, std::string const& default_project_path)
+{
+  bool const open = ImGui::IsKeyPressed(ImGuiKey_O);
+  bool const save = ImGui::IsKeyPressed(ImGuiKey_S);
+  if (open) {
+    load_with_dialog<bulin::load_action>(ctx, "Choose project file", default_project_path, project_file_filters());
+  } else if (save) {
+    if (default_project_path.empty()) {
+      save_with_dialog<bulin::save_action>(ctx, "Choose location", default_project_path, project_file_filters());
+    } else {
+      ctx.dispatch(bulin::save_action {default_project_path});
+    }
+  }
+}
+
+void process_key_shader_event(context const& ctx, std::string const& default_shader_path)
+{
+  bool const open = ImGui::IsKeyPressed(ImGuiKey_O);
+  bool const save = ImGui::IsKeyPressed(ImGuiKey_S);
+  if (open) {
+    load_with_dialog<bulin::load_shader_action>(ctx, "Choose shader", default_shader_path, shader_file_filters());
+  } else if (save) {
+    if (default_shader_path.empty()) {
+      save_with_dialog<bulin::save_shader_action>(ctx, "Choose location", default_shader_path, shader_file_filters());
+    } else {
+      ctx.dispatch(bulin::save_shader_action {default_shader_path});
+    }
+  }
+}
+
+void process_key_events(context const& ctx, bulin::app const& app)
+{
+  bool const isCrtlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
+  bool const isShiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+  if (isCrtlDown && isShiftDown) {
+    process_key_project_event(ctx, app.path.string());
+  } else if (isCrtlDown) {
+    process_key_shader_event(ctx, app.doc.path);
+  }
+}
+
 void draw_file_menu(context const& ctx, std::string const& default_project_path)
 {
   if (ImGui::MenuItem("Open project")) {
-    try {
-      auto fileopen = pfd::open_file("Choose project file", default_project_path, project_file_filters());
-      if (auto files = fileopen.result(); !files.empty()) {
-        ctx.dispatch(bulin::load_action {files.front()});
-      }
-    } catch (std::exception const&) {
-    }
+    load_with_dialog<bulin::load_action>(ctx, "Choose project file", default_project_path, project_file_filters());
   }
   if (ImGui::MenuItem("Save project")) {
-    try {
-      auto filesave = pfd::save_file("Choose location", default_project_path, project_file_filters());
-      ctx.dispatch(bulin::save_action {filesave.result()});
-    } catch (std::exception const&) {
-    }
+    save_with_dialog<bulin::save_action>(ctx, "Choose location", default_project_path, project_file_filters());
   }
   if (ImGui::MenuItem("Exit")) {
     ctx.loop().finish();
@@ -86,64 +131,59 @@ void draw_file_menu(context const& ctx, std::string const& default_project_path)
 void draw_shader_menu(context const& ctx, std::string const& default_shader_path)
 {
   if (ImGui::MenuItem("Load")) {
-    try {
-      auto fileopen = pfd::open_file("Choose shader", default_shader_path, shader_file_filters());
-      if (auto files = fileopen.result(); !files.empty()) {
-        ctx.dispatch(bulin::load_shader_action {files.front()});
-      }
-    } catch (std::exception const&) {
-    }
+    load_with_dialog<bulin::load_shader_action>(ctx, "Choose shader", default_shader_path, shader_file_filters());
   }
   if (ImGui::MenuItem("Save")) {
-    try {
-      auto filesave = pfd::save_file("Choose location", default_shader_path, shader_file_filters());
-      ctx.dispatch(bulin::save_shader_action {filesave.result()});
-    } catch (std::exception const&) {
-    }
+    save_with_dialog<bulin::save_shader_action>(ctx, "Choose location", default_shader_path, shader_file_filters());
   }
 }
 
 void draw_menu(context const& ctx, bulin::app const& app)
 {
   // Check if the main menu bar should open
-  if (!ImGui::BeginMainMenuBar()) {
-    return;
-  }
+  if (ImGui::BeginMainMenuBar()) {
+    if (ImGui::BeginMenu("File")) {
+      draw_file_menu(ctx, app.path.string());
+      ImGui::EndMenu();
+    }
 
-  if (ImGui::BeginMenu("File")) {
-    draw_file_menu(ctx, app.path.string());
-    ImGui::EndMenu();
-  }
+    if (ImGui::BeginMenu("Edit")) {
+      ImGui::EndMenu();
+    }
 
-  if (ImGui::BeginMenu("Edit")) {
-    ImGui::EndMenu();
-  }
+    if (ImGui::BeginMenu("Shader")) {
+      draw_shader_menu(ctx, app.doc.path);
+      ImGui::EndMenu();
+    }
 
-  if (ImGui::BeginMenu("Shader")) {
-    draw_shader_menu(ctx, app.doc.path);
-    ImGui::EndMenu();
+    ImGui::EndMainMenuBar();
   }
-
-  ImGui::EndMainMenuBar();
 }
 
 void draw_add_uniform_time(context const& ctx)
 {
-  if (ImGui::Button("Add time##time")) {
+  ImGui::TableSetColumnIndex(0);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+  ImGui::Text("time");
+
+  ImGui::TableSetColumnIndex(2);
+  if (ImGui::Button("+##add_time")) {
     ctx.dispatch(bulin::add_time {});
   }
 }
 
 void draw_uniform_time_info(context const& ctx, std::string const& name, GLfloat const& time)
 {
-  ImGui::Text(std::format("{}: {:.2f}s", name, time).c_str());
-  ImGui::SameLine();
-
-  if (ImGui::Button("reset##time")) {
+  ImGui::TableSetColumnIndex(0);
+  if (ImGui::Button("reset##reset_time", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
     ctx.dispatch(bulin::reset_time {});
   }
-  ImGui::SameLine();
 
+  ImGui::TableSetColumnIndex(1);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+  ImGui::Text(std::format("{:.3f}s", time).c_str());
+
+  ImGui::TableSetColumnIndex(2);
   if (ImGui::Button("x##time")) {
     ctx.dispatch(bulin::remove_time {});
   }
@@ -159,7 +199,6 @@ void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
   } else {
     draw_uniform_time_info(ctx, name, std::get<GLfloat>(uniforms.at(name)));
   }
-  ImGui::Separator();
 }
 
 template<class... Ts>
@@ -210,19 +249,27 @@ void draw_select_uniform_types(context const& ctx, std::size_t selected_idx)
 
 void draw_add_uniform(context const& ctx, bulin::uniform_type const& new_uniform)
 {
-  bool const add = ImGui::Button("Add uniform##uniform");
-  ImGui::SameLine();
-
-  bulin::text_input::buffer new_uniform_name_buffer;
-  ImGui::InputText("##new_uniform_name", new_uniform_name_buffer.data(), bulin::text_input::buffer_size);
-  if (add) {
-    ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), new_uniform});
-  }
-
-  ImGui::SameLine();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
   if (ImGui::BeginCombo("##new_uniform_type", uniform_type_name(new_uniform).data())) {
     draw_select_uniform_types(ctx, new_uniform.index());
     ImGui::EndCombo();
+  }
+
+  ImGui::TableSetColumnIndex(1);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+  bulin::text_input::buffer new_uniform_name_buffer;
+  if (ImGui::InputText("##new_uniform_name",
+                       new_uniform_name_buffer.data(),
+                       bulin::text_input::buffer_size,
+                       ImGuiInputTextFlags_EnterReturnsTrue))
+  {
+    ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), new_uniform});
+  }
+
+  ImGui::TableSetColumnIndex(2);
+  if (ImGui::Button("+##uniform")) {
+    ctx.dispatch(bulin::add_uniform {new_uniform_name_buffer.data(), new_uniform});
   }
 }
 
@@ -248,15 +295,19 @@ auto draw_uniform_input(std::string_view name, bulin::uniform_type uniform) -> s
 
 void draw_uniform_info(context const& ctx, std::string const& name, bulin::uniform_type const& uniform)
 {
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
   ImGui::Text(name.c_str());
-  ImGui::SameLine();
 
+  ImGui::TableSetColumnIndex(1);
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
   auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name).c_str(), uniform);
   if (new_uniform) {
     ctx.dispatch(bulin::update_uniform {name, std::move(new_uniform).value()});
   }
-  ImGui::SameLine();
 
+  ImGui::TableSetColumnIndex(2);
   if (ImGui::Button(std::format("x##{}", name).c_str())) {
     ctx.dispatch(bulin::remove_uniform {name});
   }
@@ -266,6 +317,18 @@ void draw_uniforms(context const& ctx,
                    bulin::model::uniform_map const& uniforms,
                    bulin::uniform_type const& new_uniform)
 {
+  if (!ImGui::BeginTable("##uniforms_table", 3, ImGuiTableFlags_Resizable)) {
+    return;
+  }
+
+  ImGui::TableSetupColumn("##uniform_name_column");
+  ImGui::TableSetupColumn("##uniform_value_column");
+  ImGui::TableSetupColumn("##uniform_action_column", ImGuiTableColumnFlags_WidthFixed, 20.0f);
+
+  ImGui::TableNextRow();
+  draw_time(ctx, uniforms);
+
+  ImGui::TableNextRow();
   draw_add_uniform(ctx, new_uniform);
 
   auto not_time = [](auto const& pair) { return pair.first != bulin::time_name; };
@@ -273,6 +336,8 @@ void draw_uniforms(context const& ctx,
   for (auto& [name, value] : uniforms | std::views::filter(not_time)) {
     std::visit([&ctx, &name](auto const& val) { draw_uniform_info(ctx, name, val); }, value);
   }
+
+  ImGui::EndTable();
   ImGui::Separator();
 }
 
@@ -281,8 +346,6 @@ void draw(context const& ctx, bulin::app const& app)
   ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
   draw_menu(ctx, app);
-
-  draw_time(ctx, app.doc.uniforms);
 
   draw_uniforms(ctx, app.doc.uniforms, app.doc.new_uniform);
 
@@ -300,6 +363,17 @@ void draw(context const& ctx, bulin::app const& app)
   ImGui::Image(reinterpret_cast<void*>(lager::get<bulin::texture>(ctx).id()), ImGui::GetContentRegionAvail());
 
   ImGui::End();
+
+  // Check if shader was edited on disc
+  if (app.doc.path.empty()) {
+    return;
+  }
+  if (auto const last_write =
+          static_cast<std::size_t>(std::filesystem::last_write_time(app.doc.path).time_since_epoch().count());
+      app.doc.shader_timestamp < last_write)
+  {
+    ctx.dispatch(bulin::load_shader_action {app.doc.path});
+  }
 }
 
 void init_imgui_dock_windows(ImGuiID const dockspace_id, ImGuiDockNodeFlags const dockspace_flags)
@@ -408,6 +482,7 @@ int main()
           init_imgui_dock_windows(dockspace_id, dockspace_flags);
         }
 
+        process_key_events(store, store.get());
         draw(store, store.get());
 
         // Rendering

@@ -39,6 +39,7 @@ struct BULIN_APPLICATION_EXPORT model
   uniform_type new_uniform;
   std::string shader_input;
   std::string path;
+  std::size_t shader_timestamp;
 };
 
 struct BULIN_APPLICATION_EXPORT set_shader_data
@@ -128,4 +129,4 @@ auto load_shader(std::filesystem::path const& filepath) -> std::string;
 
 }  // namespace bulin
 
-LAGER_STRUCT(bulin, model, uniforms, new_uniform, shader_input, path);
+LAGER_STRUCT(bulin, model, uniforms, new_uniform, shader_input, path, shader_timestamp);
