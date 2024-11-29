@@ -6,9 +6,11 @@ build/
 cmake-build-*/
 prefix/
 .clangd
+.cache
 CMakeLists.txt.user
 CMakeUserPresets.json
 compile_commands.json
 conan_cache_*.tgz
 bindings/
 imgui.ini
+tmp.sh

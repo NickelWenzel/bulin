@@ -12,7 +12,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
@@ -23,8 +23,11 @@ jobs:
     - name: Install codespell
       run: pip3 install codespell
 
+    - name: Install clang-format-18
+      run: sudo apt install -y clang-format-18
+
     - name: Lint
-      run: cmake -D FORMAT_COMMAND=clang-format-14 -P cmake/lint.cmake
+      run: cmake -D FORMAT_COMMAND=clang-format-18 -P cmake/lint.cmake
 
     - name: Spell check
       if: always()
@@ -33,7 +36,7 @@ jobs:
   coverage:
     needs: [lint]
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     # To enable coverage, delete the last line from the conditional below and
     # edit the "<name>" placeholder to your GitHub name.
@@ -75,13 +78,13 @@ jobs:
   sanitize:
     needs: [lint]
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
     - uses: actions/checkout@v4
 
     - name: Install system requirements
-      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build -y -q
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config libltdl-dev -y -q
 
     - name: Install Clang 18 and set as default using update-alternatives
       run: |
@@ -96,6 +99,13 @@ jobs:
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+        clang --version
+
+    - name: Install cmake-3.28
+      run: |
+        sudo snap install cmake --channel=3.28/stable --classic
+        sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
+        cmake --version
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
@@ -125,7 +135,7 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-14, ubuntu-22.04, windows-2022]
+        os: [macos-14, ubuntu-24.04, windows-2022]
 
     runs-on: ${{ matrix.os }}
 
@@ -133,7 +143,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Install Clang 18 and set as default using update-alternatives
-      if: matrix.os == 'ubuntu-22.04'
+      if: matrix.os == 'ubuntu-24.04'
       run: |
         sudo apt-get update
         sudo apt-get install -y wget lsb-release software-properties-common
@@ -146,6 +156,7 @@ jobs:
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
         sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
         sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+        clang --version
 
     - name: Install Clang 18 and set in PATH
       if: matrix.os == 'macos-14'
@@ -155,7 +166,7 @@ jobs:
         ln -s $(brew --prefix llvm@18)/bin/clang++ /usr/local/bin/clang++
 
     - name: Install static analyzers
-      if: matrix.os == 'ubuntu-22.04'
+      if: matrix.os == 'ubuntu-24.04'
       run: >-
         sudo apt-get install cppcheck clang-tidy-18 -y -q
 
@@ -163,8 +174,15 @@ jobs:
         sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 180
 
     - name: Install system requirements
-      if: matrix.os == 'ubuntu-22.04'
-      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build -y -q
+      if: matrix.os == 'ubuntu-24.04'
+      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config libltdl-dev -y -q
+
+    - name: Install cmake-3.28
+      if: matrix.os == 'ubuntu-24.04'
+      run: |
+        sudo snap install cmake --channel=3.28/stable --classic
+        sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
+        cmake --version
 
     - name: Install vcpkg
       uses: friendlyanon/setup-vcpkg@v1
@@ -194,7 +212,7 @@ jobs:
     # Deploy docs only when builds succeed
     needs: [sanitize, test]
 
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     # To enable, first you have to create an orphaned gh-pages branch:
     #

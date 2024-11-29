@@ -1,23 +1,26 @@
 #pragma once
 
+#include <Magnum/GL/OpenGL.h>
 #include <bulin/graphics/export.hpp>
 #include <bulin/graphics/flat_shader.hpp>
+#include <bulin/graphics/types.hpp>
 
 #include <Magnum/GL/Mesh.h>
 #include <Magnum/GL/Shader.h>
 #include <Magnum/Platform/GLContext.h>
 
-#include <string_view>
-
 namespace bulin
 {
+struct shader_data;
+
 class BULIN_GRAPHICS_EXPORT shader_model
 {
 public:
   shader_model();
 
-  void update(std::string_view shader_input);
+  void update_uniform_value(std::string const& name, bulin::uniform_type const& value);
 
+  void reset(shader_data const& data);
   void draw();
 
 private:
