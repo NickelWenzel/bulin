@@ -42,13 +42,3 @@ target_link_libraries(bulin_model
   PUBLIC
     bulin::graphics
 )
-
-target_precompile_headers(bulin_model
-  PRIVATE
-    <filesystem>
-    <string>
-    <variant>
-    <lager/extra/struct.hpp>
-    <lager/effect.hpp>
-    <immer/map.hpp>
-)

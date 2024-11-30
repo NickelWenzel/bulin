@@ -29,10 +29,3 @@ target_link_libraries(bulin_exe
     bulin::graphics
     bulin::application
 )
-
-target_precompile_headers(bulin_exe
-  PRIVATE
-    <iostream>
-    <lager/store.hpp>
-    <lager/event_loop/sdl.hpp>
-)

@@ -37,7 +37,3 @@ target_link_libraries(bulin_ui
     bulin::model
     bulin::application
 )
-
-target_precompile_headers(bulin_ui
-  PRIVATE
-)

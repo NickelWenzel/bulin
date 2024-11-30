@@ -50,12 +50,3 @@ target_link_system_libraries(bulin_graphics
   Magnum::Shaders
   Magnum::GLContext
 )
-
-target_precompile_headers(bulin_graphics
-  PRIVATE
-    <array>
-    <chrono>
-    <string>
-    <map>
-    <variant>
-)
