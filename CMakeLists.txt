@@ -34,7 +34,7 @@ endif()
 add_subdirectory(libs/graphics)
 add_subdirectory(libs/model)
 add_subdirectory(libs/application)
-#add_subdirectory(libs/ui)
+add_subdirectory(libs/ui)
 
 # ---- Declare executables ----
 

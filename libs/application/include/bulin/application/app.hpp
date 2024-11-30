@@ -49,6 +49,8 @@ using app_action = std::variant<model_action, save_action, load_action, load_res
 
 using app_result = lager::result<app, app_action, lager::deps<shader_data&, shader_model&, texture&>>;
 
+using app_context = lager::context<bulin::app_action, lager::deps<bulin::shader_data&, bulin::texture&>>;
+
 BULIN_APPLICATION_EXPORT auto update(app, app_action) -> app_result;
 
 }  // namespace bulin

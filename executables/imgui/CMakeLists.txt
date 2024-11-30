@@ -25,13 +25,13 @@ target_link_system_libraries(bulin_exe
 
 target_link_libraries(bulin_exe
   PRIVATE
+    bulin::ui
     bulin::graphics
     bulin::application
 )
 
 target_precompile_headers(bulin_exe
   PRIVATE
-    <ranges>
     <iostream>
     <lager/store.hpp>
     <lager/event_loop/sdl.hpp>

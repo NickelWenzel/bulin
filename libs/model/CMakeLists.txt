@@ -19,7 +19,7 @@ target_sources(bulin_model
   FILES
     include/bulin/model/cereal.hpp
     include/bulin/model/model.hpp
-  ${BULIN_MODEL_EXPORT_FILE_NAME}
+    ${BULIN_MODEL_EXPORT_FILE_NAME}
 )
 
 add_library(bulin::model ALIAS bulin_model)

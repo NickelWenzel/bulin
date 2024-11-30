@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 # ------- ui -------
 add_library(
   bulin_ui STATIC
+  src/draw.cpp
 )
 
 set(BULIN_UI_EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/bulin/ui/export.hpp)
@@ -16,6 +17,7 @@ target_sources(bulin_ui
     include
     ${CMAKE_CURRENT_BINARY_DIR}
   FILES
+    include/bulin/ui/imgui/draw.hpp
     ${BULIN_UI_EXPORT_FILE_NAME}
 )
 
