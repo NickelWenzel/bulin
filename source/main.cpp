@@ -27,6 +27,8 @@
 #include <type_traits>
 #include <variant>
 
+namespace
+{
 constexpr int window_width = 800;
 constexpr int window_height = 600;
 constexpr float editor_window_ratio = 1.F / 3.F;
@@ -302,7 +304,7 @@ void draw_uniform_info(context const& ctx, std::string const& name, bulin::unifo
 
   ImGui::TableSetColumnIndex(1);
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-  auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name).c_str(), uniform);
+  auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name), uniform);
   if (new_uniform) {
     ctx.dispatch(bulin::update_uniform {name, std::move(new_uniform).value()});
   }
@@ -396,6 +398,7 @@ void init_imgui_dock_windows(ImGuiID const dockspace_id, ImGuiDockNodeFlags cons
   // Commit the layout
   ImGui::DockBuilderFinish(dockspace_id);
 }
+}  // namespace
 
 int main()
 {

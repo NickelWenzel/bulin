@@ -29,8 +29,10 @@
 #include <cereal/types/string.hpp>
 #include "bulin/graphics/types.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <chrono>
+#include <utility>
 
 namespace bulin
 {
@@ -60,31 +62,31 @@ auto update(model state, model_action model_action) -> model_result
         if (changed_shader_input.text == state.shader_input) {
           return {std::move(state), lager::noop};
         }
-        state.shader_input = std::move(changed_shader_input.text);
+        state.shader_input = std::move(changed_shader_input).text;
         auto eff = [](auto&& ctx) { ctx.dispatch(set_shader_data {}); };
         return {std::move(state), eff};
       },
       [&](changed_new_uniform&& changed_changed_new_uniform) -> model_result
       {
-        state.new_uniform = changed_changed_new_uniform.uniform;
+        state.new_uniform = std::move(changed_changed_new_uniform).uniform;
         return {std::move(state), lager::noop};
       },
       [&](load_shader_action&& load_shader_action) -> model_result
       {
         state.path = load_shader_action.file.string();
-        auto eff = [filepath = load_shader_action.file.string()](auto&& ctx)
+        auto eff = [filepath = std::move(load_shader_action).file.string()](auto&& ctx)
         {
-          std::cout << "loading shader: " << filepath << std::endl;
+          std::cout << "loading shader: " << filepath << '\n';
           ctx.dispatch(changed_shader_input {load_shader(filepath)});
         };
         return {std::move(state), eff};
       },
       [&](save_shader_action&& save_shader_action) -> model_result
       {
-        state.path = save_shader_action.file.string();
+        state.path = std::move(save_shader_action).file.string();
         auto eff = [shader = state.shader_input, filepath = state.path](auto&&)
         {
-          std::cout << "saving file: " << filepath << std::endl;
+          std::cout << "saving file: " << filepath << '\n';
           save_shader(filepath, shader);
         };
         return {std::move(state), eff};

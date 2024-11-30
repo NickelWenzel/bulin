@@ -28,7 +28,7 @@ app_result update(app app_state, app_action app_action)
         app_state.path = save_action.file.replace_extension("bulin");
         auto eff = [model = app_state.doc, filepath = app_state.path](auto&&)
         {
-          std::cout << "saving file: " << filepath << std::endl;
+          std::cout << "saving file: " << filepath << '\n';
           save(filepath, model);
         };
         return {std::move(app_state), eff};
