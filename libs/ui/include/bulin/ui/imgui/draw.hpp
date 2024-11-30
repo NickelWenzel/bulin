@@ -5,7 +5,7 @@
 
 #include <bulin/ui/export.hpp>
 
-#include <bulin/application/app.hpp>
+#include <bulin/application/app_fwd.hpp>
 
 namespace bulin
 {

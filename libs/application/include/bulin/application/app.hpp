@@ -15,16 +15,12 @@
 #include <bulin/application/export.hpp>
 #include <bulin/model/model.hpp>
 
-#include <lager/effect.hpp>
-
 #include <filesystem>
+
+
 
 namespace bulin
 {
-struct shader_data;
-class shader_model;
-class texture;
-
 struct BULIN_APPLICATION_EXPORT app
 {
   model doc;
@@ -45,14 +41,4 @@ struct BULIN_APPLICATION_EXPORT load_result_action
   std::filesystem::path file;
   model doc;
 };
-using app_action = std::variant<model_action, save_action, load_action, load_result_action>;
-
-using app_result = lager::result<app, app_action, lager::deps<shader_data&, shader_model&, texture&>>;
-
-using app_context = lager::context<bulin::app_action, lager::deps<bulin::shader_data&, bulin::texture&>>;
-
-BULIN_APPLICATION_EXPORT auto update(app, app_action) -> app_result;
-
 }  // namespace bulin
-
-LAGER_STRUCT(bulin, app, doc, path);

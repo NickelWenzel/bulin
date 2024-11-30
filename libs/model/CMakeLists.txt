@@ -19,6 +19,7 @@ target_sources(bulin_model
   FILES
     include/bulin/model/cereal.hpp
     include/bulin/model/model.hpp
+    include/bulin/model/model_fwd.hpp
     ${BULIN_MODEL_EXPORT_FILE_NAME}
 )
 

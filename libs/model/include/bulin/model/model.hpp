@@ -15,7 +15,10 @@
 #include <Magnum/GL/OpenGL.h>
 #include <bulin/model/export.hpp>
 
+#include <bulin/model/model_fwd.hpp>
+
 #include <bulin/graphics/types.hpp>
+#include <bulin/graphics/graphics_fwd.hpp>
 
 #include <lager/extra/struct.hpp>
 #include <lager/effect.hpp>
@@ -29,9 +32,6 @@
 
 namespace bulin
 {
-struct shader_data;
-class shader_model;
-
 struct BULIN_MODEL_EXPORT model
 {
   using uniform_map = immer::map<std::string, uniform_type>;
@@ -102,20 +102,6 @@ struct BULIN_MODEL_EXPORT update_uniform
   std::string name;
   uniform_type value;
 };
-
-using model_action = std::variant<set_shader_data,
-                                  reset_shader_model,
-                                  changed_shader_input,
-                                  changed_new_uniform,
-                                  load_shader_action,
-                                  save_shader_action,
-                                  add_time,
-                                  remove_time,
-                                  reset_time,
-                                  tick_time,
-                                  add_uniform,
-                                  remove_uniform,
-                                  update_uniform>;
 
 using model_result = lager::result<model, model_action, lager::deps<shader_data&, shader_model&>>;
 

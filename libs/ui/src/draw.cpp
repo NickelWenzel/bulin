@@ -7,6 +7,8 @@
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/texture.hpp>
 
+#include <bulin/application/app.hpp>
+
 #include <portable-file-dialogs.h>
 
 #include <imgui.h>

@@ -1,10 +1,12 @@
 #include <Magnum/GL/OpenGL.h>
+
 #include <bulin/application/app.hpp>
+#include <bulin/application/update.hpp>
+#include <bulin/model/model.hpp>
 
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
-#include <bulin/graphics/types.hpp>
 #include <bulin/ui/imgui/draw.hpp>
 
 #include <SDL.h>

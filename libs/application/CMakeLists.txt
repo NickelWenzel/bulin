@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 # ------- application -------
 add_library(bulin_application STATIC
-  src/app.cpp
+  src/update.cpp
 )
 
 set(BULIN_APPLICATION_EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/bulin/application/export.hpp)
@@ -17,6 +17,8 @@ target_sources(bulin_application
     ${CMAKE_CURRENT_BINARY_DIR}
   FILES
     include/bulin/application/app.hpp
+    include/bulin/application/app_fwd.hpp
+    include/bulin/application/update.hpp
     ${BULIN_APPLICATION_EXPORT_FILE_NAME}
 )
 
