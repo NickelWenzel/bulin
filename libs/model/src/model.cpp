@@ -10,8 +10,8 @@
 // or here: <https://github.com/arximboldi/lager/blob/master/LICENSE>
 //
 
-#include <bulin/application/model.hpp>
-#include <bulin/application/cereal.hpp>
+#include <bulin/model/model.hpp>
+#include <bulin/model/cereal.hpp>
 
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>

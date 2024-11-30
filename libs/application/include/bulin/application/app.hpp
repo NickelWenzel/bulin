@@ -13,7 +13,7 @@
 #pragma once
 
 #include <bulin/application/export.hpp>
-#include <bulin/application/model.hpp>
+#include <bulin/model/model.hpp>
 
 #include <lager/effect.hpp>
 

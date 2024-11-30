@@ -13,7 +13,7 @@
 #pragma once
 
 #include <Magnum/GL/OpenGL.h>
-#include <bulin/application/export.hpp>
+#include <bulin/model/export.hpp>
 
 #include <bulin/graphics/types.hpp>
 
@@ -32,7 +32,7 @@ namespace bulin
 struct shader_data;
 class shader_model;
 
-struct BULIN_APPLICATION_EXPORT model
+struct BULIN_MODEL_EXPORT model
 {
   using uniform_map = immer::map<std::string, uniform_type>;
   uniform_map uniforms;
@@ -42,62 +42,62 @@ struct BULIN_APPLICATION_EXPORT model
   std::size_t shader_timestamp;
 };
 
-struct BULIN_APPLICATION_EXPORT set_shader_data
+struct BULIN_MODEL_EXPORT set_shader_data
 {
 };
 
-struct BULIN_APPLICATION_EXPORT reset_shader_model
+struct BULIN_MODEL_EXPORT reset_shader_model
 {
 };
 
-struct BULIN_APPLICATION_EXPORT changed_shader_input
+struct BULIN_MODEL_EXPORT changed_shader_input
 {
   std::string text;
 };
 
-struct BULIN_APPLICATION_EXPORT changed_new_uniform
+struct BULIN_MODEL_EXPORT changed_new_uniform
 {
   uniform_type uniform;
 };
 
-struct BULIN_APPLICATION_EXPORT load_shader_action
+struct BULIN_MODEL_EXPORT load_shader_action
 {
   std::filesystem::path file;
 };
 
-struct BULIN_APPLICATION_EXPORT save_shader_action
+struct BULIN_MODEL_EXPORT save_shader_action
 {
   std::filesystem::path file;
 };
 
-struct BULIN_APPLICATION_EXPORT add_time
+struct BULIN_MODEL_EXPORT add_time
 {
 };
 
-struct BULIN_APPLICATION_EXPORT remove_time
+struct BULIN_MODEL_EXPORT remove_time
 {
 };
 
-struct BULIN_APPLICATION_EXPORT reset_time
+struct BULIN_MODEL_EXPORT reset_time
 {
 };
 
-struct BULIN_APPLICATION_EXPORT tick_time
+struct BULIN_MODEL_EXPORT tick_time
 {
 };
 
-struct BULIN_APPLICATION_EXPORT add_uniform
+struct BULIN_MODEL_EXPORT add_uniform
 {
   std::string name;
   uniform_type init_value;
 };
 
-struct BULIN_APPLICATION_EXPORT remove_uniform
+struct BULIN_MODEL_EXPORT remove_uniform
 {
   std::string name;
 };
 
-struct BULIN_APPLICATION_EXPORT update_uniform
+struct BULIN_MODEL_EXPORT update_uniform
 {
   std::string name;
   uniform_type value;
