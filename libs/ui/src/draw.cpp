@@ -144,7 +144,7 @@ void draw_add_uniform_time(app_context const& ctx)
   }
 }
 
-void draw_uniform_time_info(app_context const& ctx, std::string const& name, GLfloat const& time)
+void draw_uniform_time_info(app_context const& ctx, GLfloat const& time)
 {
   ImGui::TableSetColumnIndex(0);
   if (ImGui::Button("reset##reset_time", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
@@ -169,7 +169,7 @@ void draw_time(app_context const& ctx, bulin::model::uniform_map const& uniforms
   if (uniforms.find(name) == nullptr) {
     draw_add_uniform_time(ctx);
   } else {
-    draw_uniform_time_info(ctx, name, std::get<GLfloat>(uniforms.at(name)));
+    draw_uniform_time_info(ctx, std::get<Magnum::Float>(uniforms.at(name)));
   }
 }
 
@@ -274,8 +274,7 @@ void draw_uniform_info(app_context const& ctx, std::string const& name, bulin::u
 
   ImGui::TableSetColumnIndex(1);
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-  auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name), uniform);
-  if (new_uniform) {
+  if (auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name), uniform)) {
     ctx.dispatch(bulin::update_uniform {name, std::move(new_uniform).value()});
   }
 
