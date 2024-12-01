@@ -7,9 +7,9 @@ if(BUILD_TESTING)
 endif()
 
 add_custom_target(
-    run-exe
-    COMMAND bulin_exe
-    VERBATIM
+  run-exe
+  COMMAND bulin_exe
+  VERBATIM
 )
 add_dependencies(run-exe bulin_exe)
 

@@ -5,7 +5,7 @@ on:
 
   pull_request:
     branches:
-    - master
+      - master
 
 env:
   VCPKG_COMMIT: "76d153790caf0592fce8fc4484aa6db18c7d00d4"
@@ -15,26 +15,26 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - uses: actions/setup-python@v5
-      with: { python-version: "3.12" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
 
-    - name: Install codespell
-      run: pip3 install codespell
+      - name: Install codespell
+        run: pip3 install codespell
 
-    - name: Install clang-format-18
-      run: sudo apt install -y clang-format-18
+      - name: Install clang-format-18
+        run: sudo apt install -y clang-format-18
 
-    - name: Lint
-      run: cmake -D FORMAT_COMMAND=clang-format-18 -P cmake/lint.cmake
+      - name: Lint
+        run: cmake -D FORMAT_COMMAND=clang-format-18 -P cmake/lint.cmake
 
-    - name: Spell check
-      if: always()
-      run: cmake -P cmake/spell.cmake
+      - name: Spell check
+        if: always()
+        run: cmake -P cmake/spell.cmake
 
   coverage:
-    needs: [lint]
+    needs: [ lint ]
 
     runs-on: ubuntu-24.04
 
@@ -46,171 +46,171 @@ jobs:
       && false
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install LCov
-      run: sudo apt-get update -q
-        && sudo apt-get install lcov -q -y
+      - name: Install LCov
+        run: sudo apt-get update -q
+          && sudo apt-get install lcov -q -y
 
-    - name: Install vcpkg
-      uses: friendlyanon/setup-vcpkg@v1
-      with: { committish: "${{ env.VCPKG_COMMIT }}",  cache-version: "lint" }
+      - name: Install vcpkg
+        uses: friendlyanon/setup-vcpkg@v1
+        with: { committish: "${{ env.VCPKG_COMMIT }}",  cache-version: "lint" }
 
-    - name: Configure
-      run: cmake --preset=ci-coverage
+      - name: Configure
+        run: cmake --preset=ci-coverage
 
-    - name: Build
-      run: cmake --build build/coverage -j 2
+      - name: Build
+        run: cmake --build build/coverage -j 2
 
-    - name: Test
-      working-directory: build/coverage
-      run: ctest --output-on-failure --no-tests=error -j 2
+      - name: Test
+        working-directory: build/coverage
+        run: ctest --output-on-failure --no-tests=error -j 2
 
-    - name: Process coverage info
-      run: cmake --build build/coverage -t coverage
+      - name: Process coverage info
+        run: cmake --build build/coverage -t coverage
 
-    - name: Submit to codecov.io
-      uses: codecov/codecov-action@v4
-      with:
-        file: build/coverage/coverage.info
-        token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Submit to codecov.io
+        uses: codecov/codecov-action@v4
+        with:
+          file: build/coverage/coverage.info
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   sanitize:
-    needs: [lint]
+    needs: [ lint ]
 
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install system requirements
-      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config libltdl-dev -y -q
+      - name: Install system requirements
+        run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config libltdl-dev -y -q
 
-    - name: Install Clang 18 and set as default using update-alternatives
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget lsb-release software-properties-common
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 18
+      - name: Install Clang 18 and set as default using update-alternatives
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget lsb-release software-properties-common
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          
+          # Add clang-18 to update-alternatives
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 180
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
+          sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+          clang --version
 
-        # Add clang-18 to update-alternatives
-        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 180
-        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
-        sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
-        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
-        clang --version
+      - name: Install cmake-3.28
+        run: |
+          sudo snap install cmake --channel=3.28/stable --classic
+          sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
+          cmake --version
 
-    - name: Install cmake-3.28
-      run: |
-        sudo snap install cmake --channel=3.28/stable --classic
-        sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
-        cmake --version
+      - name: Install vcpkg
+        uses: friendlyanon/setup-vcpkg@v1
+        with: { committish: "${{ env.VCPKG_COMMIT }}", cache-version: "sanitize" }
 
-    - name: Install vcpkg
-      uses: friendlyanon/setup-vcpkg@v1
-      with: { committish: "${{ env.VCPKG_COMMIT }}", cache-version: "sanitize" }
+      - name: Configure
+        run: cmake --preset=ci-sanitize
 
-    - name: Configure
-      run: cmake --preset=ci-sanitize
+      - name: Build
+        run: cmake --build build/sanitize -j 2
 
-    - name: Build
-      run: cmake --build build/sanitize -j 2
-
-    - name: Test
-      working-directory: build/sanitize
-      env:
-        ASAN_OPTIONS: "strict_string_checks=1:\
+      - name: Test
+        working-directory: build/sanitize
+        env:
+          ASAN_OPTIONS: "strict_string_checks=1:\
           detect_stack_use_after_return=1:\
           check_initialization_order=1:\
           strict_init_order=1:\
           detect_leaks=1:\
           halt_on_error=1"
-        UBSAN_OPTIONS: "print_stacktrace=1:\
+          UBSAN_OPTIONS: "print_stacktrace=1:\
           halt_on_error=1"
-      run: ctest --output-on-failure --no-tests=error -j 2
+        run: ctest --output-on-failure --no-tests=error -j 2
 
   test:
-    needs: [lint]
+    needs: [ lint ]
 
     strategy:
       matrix:
-        os: [macos-14, ubuntu-24.04, windows-2022]
+        os: [ macos-14, ubuntu-24.04, windows-2022 ]
 
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install Clang 18 and set as default using update-alternatives
-      if: matrix.os == 'ubuntu-24.04'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y wget lsb-release software-properties-common
-        wget https://apt.llvm.org/llvm.sh
-        chmod +x llvm.sh
-        sudo ./llvm.sh 18
+      - name: Install Clang 18 and set as default using update-alternatives
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget lsb-release software-properties-common
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          
+          # Add clang-18 to update-alternatives
+          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 180
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
+          sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
+          sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
+          clang --version
 
-        # Add clang-18 to update-alternatives
-        sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-18 180
-        sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-18 180
-        sudo update-alternatives --install /usr/bin/cc cc /usr/bin/clang-18 180
-        sudo update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-18 180
-        clang --version
+      - name: Install Clang 18 and set in PATH
+        if: matrix.os == 'macos-14'
+        run: |
+          brew install llvm@18 ninja
+          ln -s $(brew --prefix llvm@18)/bin/clang /usr/local/bin/clang
+          ln -s $(brew --prefix llvm@18)/bin/clang++ /usr/local/bin/clang++
 
-    - name: Install Clang 18 and set in PATH
-      if: matrix.os == 'macos-14'
-      run: |
-        brew install llvm@18 ninja
-        ln -s $(brew --prefix llvm@18)/bin/clang /usr/local/bin/clang
-        ln -s $(brew --prefix llvm@18)/bin/clang++ /usr/local/bin/clang++
+      - name: Install static analyzers
+        if: matrix.os == 'ubuntu-24.04'
+        run: >-
+          sudo apt-get install cppcheck clang-tidy-18 -y -q
+          
+          # Add clang-tidy-18
+          sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 180
 
-    - name: Install static analyzers
-      if: matrix.os == 'ubuntu-24.04'
-      run: >-
-        sudo apt-get install cppcheck clang-tidy-18 -y -q
+      - name: Install system requirements
+        if: matrix.os == 'ubuntu-24.04'
+        run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config libltdl-dev -y -q
 
-        # Add clang-tidy-18
-        sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-18 180
+      - name: Install cmake-3.28
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo snap install cmake --channel=3.28/stable --classic
+          sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
+          cmake --version
 
-    - name: Install system requirements
-      if: matrix.os == 'ubuntu-24.04'
-      run: sudo apt-get install libgl-dev libglx-dev libgl1-mesa-dev libxext-dev ninja-build autoconf automake libtool pkg-config libltdl-dev -y -q
+      - name: Install vcpkg
+        uses: friendlyanon/setup-vcpkg@v1
+        with: { committish: "${{ env.VCPKG_COMMIT }}" }
 
-    - name: Install cmake-3.28
-      if: matrix.os == 'ubuntu-24.04'
-      run: |
-        sudo snap install cmake --channel=3.28/stable --classic
-        sudo update-alternatives --install /usr/bin/cmake cmake /snap/bin/cmake 328
-        cmake --version
+      - name: Setup MultiToolTask
+        if: matrix.os == 'windows-2022'
+        run: |
+          Add-Content "$env:GITHUB_ENV" 'UseMultiToolTask=true'
+          Add-Content "$env:GITHUB_ENV" 'EnforceProcessCountAcrossBuilds=true'
 
-    - name: Install vcpkg
-      uses: friendlyanon/setup-vcpkg@v1
-      with: { committish: "${{ env.VCPKG_COMMIT }}" }
+      - name: Configure
+        shell: pwsh
+        run: cmake "--preset=ci-$("${{ matrix.os }}".split("-")[0])"
 
-    - name: Setup MultiToolTask
-      if: matrix.os == 'windows-2022'
-      run: |
-        Add-Content "$env:GITHUB_ENV" 'UseMultiToolTask=true'
-        Add-Content "$env:GITHUB_ENV" 'EnforceProcessCountAcrossBuilds=true'
+      - name: Build
+        run: cmake --build build --config Release -j 2
 
-    - name: Configure
-      shell: pwsh
-      run: cmake "--preset=ci-$("${{ matrix.os }}".split("-")[0])"
+      - name: Install
+        run: cmake --install build --config Release --prefix prefix
 
-    - name: Build
-      run: cmake --build build --config Release -j 2
-
-    - name: Install
-      run: cmake --install build --config Release --prefix prefix
-
-    - name: Test
-      working-directory: build
-      run: ctest --output-on-failure --no-tests=error -C Release -j 2
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure --no-tests=error -C Release -j 2
 
   docs:
     # Deploy docs only when builds succeed
-    needs: [sanitize, test]
+    needs: [ sanitize, test ]
 
     runs-on: ubuntu-24.04
 
@@ -234,24 +234,24 @@ jobs:
       contents: write
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - uses: actions/setup-python@v5
-      with: { python-version: "3.12" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
 
-    - name: Install m.css dependencies
-      run: pip3 install jinja2 Pygments
+      - name: Install m.css dependencies
+        run: pip3 install jinja2 Pygments
 
-    - name: Install Doxygen
-      run: sudo apt-get update -q
-        && sudo apt-get install doxygen -q -y
+      - name: Install Doxygen
+        run: sudo apt-get update -q
+          && sudo apt-get install doxygen -q -y
 
-    - name: Build docs
-      run: cmake "-DPROJECT_SOURCE_DIR=$PWD" "-DPROJECT_BINARY_DIR=$PWD/build"
-        -P cmake/docs-ci.cmake
+      - name: Build docs
+        run: cmake "-DPROJECT_SOURCE_DIR=$PWD" "-DPROJECT_BINARY_DIR=$PWD/build"
+          -P cmake/docs-ci.cmake
 
-    - name: Deploy docs
-      uses: peaceiris/actions-gh-pages@v4
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: build/docs/html
+      - name: Deploy docs
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: build/docs/html

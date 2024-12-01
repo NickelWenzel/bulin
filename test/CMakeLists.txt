@@ -16,8 +16,8 @@ include(Catch)
 add_executable(bulin_test source/bulin_test.cpp)
 
 target_link_system_libraries(
-    bulin_test PRIVATE
-    Catch2::Catch2WithMain
+  bulin_test PRIVATE
+  Catch2::Catch2WithMain
 )
 target_compile_features(bulin_test PRIVATE cxx_std_20)
 

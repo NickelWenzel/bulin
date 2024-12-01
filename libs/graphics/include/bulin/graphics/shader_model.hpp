@@ -2,6 +2,7 @@
 
 #include <Magnum/GL/OpenGL.h>
 #include <bulin/graphics/export.hpp>
+#include <bulin/graphics/graphics_fwd.hpp>
 #include <bulin/graphics/flat_shader.hpp>
 #include <bulin/graphics/types.hpp>
 
@@ -11,14 +12,12 @@
 
 namespace bulin
 {
-struct shader_data;
-
 class BULIN_GRAPHICS_EXPORT shader_model
 {
 public:
   shader_model();
 
-  void update_uniform_value(std::string const& name, bulin::uniform_type const& value);
+  void update_uniform_value(std::string const& name, uniform_type const& value);
 
   void reset(shader_data const& data);
   void draw();

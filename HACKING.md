@@ -157,4 +157,5 @@ them respectively. Customization available using the `SPELL_COMMAND` cache
 variable.
 
 [1]: https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html
+
 [2]: https://cmake.org/download/

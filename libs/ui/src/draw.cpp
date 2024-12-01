@@ -1,40 +1,25 @@
-#include <Magnum/GL/OpenGL.h>
-#include <bulin/application/app.hpp>
-#include <bulin/application/model.hpp>
+//
+// Created by nickel on 11/30/24.
+//
+
+#include <bulin/ui/imgui/draw.hpp>
 
 #include <bulin/graphics/shader_data.hpp>
-#include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
-#include <bulin/graphics/types.hpp>
 
-#include <SDL.h>
-#include <SDL_opengl.h>
-
-#include <imgui.h>
-#include <imgui_impl_opengl3.h>
-#include <imgui_impl_sdl2.h>
-#include <imgui_internal.h>
-
-#include <lager/event_loop/sdl.hpp>
-#include <lager/store.hpp>
+#include <bulin/application/app.hpp>
 
 #include <portable-file-dialogs.h>
 
-#include <cstddef>
-#include <filesystem>
-#include <iostream>
-#include <utility>
-#include <type_traits>
-#include <variant>
+#include <imgui.h>
 
-constexpr int window_width = 800;
-constexpr int window_height = 600;
-constexpr float editor_window_ratio = 1.F / 3.F;
+#include <ranges>
+#include <string>
+#include <vector>
 
-constexpr int buffer_resolution_x = 1000;
-constexpr int buffer_resolution_y = 1000;
-
-using context = lager::context<bulin::app_action, lager::deps<bulin::shader_data&, bulin::texture&>>;
+namespace
+{
+using namespace bulin;
 
 std::vector<std::string> project_file_filters()
 {
@@ -47,7 +32,7 @@ std::vector<std::string> shader_file_filters()
 }
 
 template<typename LOAD_ACTION>
-void load_with_dialog(context const& ctx,
+void load_with_dialog(app_context const& ctx,
                       std::string_view title,
                       std::string const& default_path,
                       std::vector<std::string> filters)
@@ -62,7 +47,7 @@ void load_with_dialog(context const& ctx,
 }
 
 template<typename SAVE_ACTION>
-void save_with_dialog(context const& ctx,
+void save_with_dialog(app_context const& ctx,
                       std::string_view title,
                       std::string const& default_path,
                       std::vector<std::string> filters)
@@ -74,7 +59,7 @@ void save_with_dialog(context const& ctx,
   }
 }
 
-void process_key_project_event(context const& ctx, std::string const& default_project_path)
+void process_key_project_event(app_context const& ctx, std::string const& default_project_path)
 {
   bool const open = ImGui::IsKeyPressed(ImGuiKey_O);
   bool const save = ImGui::IsKeyPressed(ImGuiKey_S);
@@ -89,7 +74,7 @@ void process_key_project_event(context const& ctx, std::string const& default_pr
   }
 }
 
-void process_key_shader_event(context const& ctx, std::string const& default_shader_path)
+void process_key_shader_event(app_context const& ctx, std::string const& default_shader_path)
 {
   bool const open = ImGui::IsKeyPressed(ImGuiKey_O);
   bool const save = ImGui::IsKeyPressed(ImGuiKey_S);
@@ -104,18 +89,7 @@ void process_key_shader_event(context const& ctx, std::string const& default_sha
   }
 }
 
-void process_key_events(context const& ctx, bulin::app const& app)
-{
-  bool const isCrtlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
-  bool const isShiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
-  if (isCrtlDown && isShiftDown) {
-    process_key_project_event(ctx, app.path.string());
-  } else if (isCrtlDown) {
-    process_key_shader_event(ctx, app.doc.path);
-  }
-}
-
-void draw_file_menu(context const& ctx, std::string const& default_project_path)
+void draw_file_menu(app_context const& ctx, std::string const& default_project_path)
 {
   if (ImGui::MenuItem("Open project")) {
     load_with_dialog<bulin::load_action>(ctx, "Choose project file", default_project_path, project_file_filters());
@@ -128,7 +102,7 @@ void draw_file_menu(context const& ctx, std::string const& default_project_path)
   }
 }
 
-void draw_shader_menu(context const& ctx, std::string const& default_shader_path)
+void draw_shader_menu(app_context const& ctx, std::string const& default_shader_path)
 {
   if (ImGui::MenuItem("Load")) {
     load_with_dialog<bulin::load_shader_action>(ctx, "Choose shader", default_shader_path, shader_file_filters());
@@ -138,7 +112,7 @@ void draw_shader_menu(context const& ctx, std::string const& default_shader_path
   }
 }
 
-void draw_menu(context const& ctx, bulin::app const& app)
+void draw_menu(app_context const& ctx, bulin::app const& app)
 {
   // Check if the main menu bar should open
   if (ImGui::BeginMainMenuBar()) {
@@ -160,7 +134,7 @@ void draw_menu(context const& ctx, bulin::app const& app)
   }
 }
 
-void draw_add_uniform_time(context const& ctx)
+void draw_add_uniform_time(app_context const& ctx)
 {
   ImGui::TableSetColumnIndex(0);
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -172,7 +146,7 @@ void draw_add_uniform_time(context const& ctx)
   }
 }
 
-void draw_uniform_time_info(context const& ctx, std::string const& name, GLfloat const& time)
+void draw_uniform_time_info(app_context const& ctx, GLfloat const& time)
 {
   ImGui::TableSetColumnIndex(0);
   if (ImGui::Button("reset##reset_time", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
@@ -191,13 +165,13 @@ void draw_uniform_time_info(context const& ctx, std::string const& name, GLfloat
   ctx.dispatch(bulin::tick_time {});
 }
 
-void draw_time(context const& ctx, bulin::model::uniform_map const& uniforms)
+void draw_time(app_context const& ctx, bulin::model::uniform_map const& uniforms)
 {
   auto const& name = bulin::time_name;
   if (uniforms.find(name) == nullptr) {
     draw_add_uniform_time(ctx);
   } else {
-    draw_uniform_time_info(ctx, name, std::get<GLfloat>(uniforms.at(name)));
+    draw_uniform_time_info(ctx, std::get<Magnum::Float>(uniforms.at(name)));
   }
 }
 
@@ -226,12 +200,12 @@ auto uniform_type_name(bulin::uniform_type const& uniform) -> std::string_view
 }
 
 template<std::size_t Idx>
-void draw_select_uniform_type(context const& ctx, std::size_t selected_idx)
+void draw_select_uniform_type(app_context const& ctx, std::size_t selected_idx)
 {
   bulin::uniform_type uniform = uniform_idx_t<Idx> {};
   bool selected = Idx == selected_idx;
   ImGui::PushID(Idx);
-  if (ImGui::Selectable(std::format("{}", uniform_type_name(uniform), Idx).c_str(), selected == Idx)) {
+  if (ImGui::Selectable(std::format("{}", uniform_type_name(uniform), Idx).c_str(), selected)) {
     ctx.dispatch(bulin::changed_new_uniform {uniform});
   }
   if (selected) {
@@ -240,14 +214,13 @@ void draw_select_uniform_type(context const& ctx, std::size_t selected_idx)
   ImGui::PopID();
 }
 
-void draw_select_uniform_types(context const& ctx, std::size_t selected_idx)
+void draw_select_uniform_types(app_context const& ctx, std::size_t selected_idx)
 {
-  [&]<std::size_t... Idcs>(std::index_sequence<Idcs...>) {
-    (draw_select_uniform_type<Idcs>(ctx, selected_idx), ...);
-  }(std::make_index_sequence<std::variant_size_v<bulin::uniform_type>> {});
+  [&]<std::size_t... Idcs>(std::index_sequence<Idcs...>) { (draw_select_uniform_type<Idcs>(ctx, selected_idx), ...); }(
+      std::make_index_sequence<std::variant_size_v<bulin::uniform_type>> {});
 }
 
-void draw_add_uniform(context const& ctx, bulin::uniform_type const& new_uniform)
+void draw_add_uniform(app_context const& ctx, bulin::uniform_type const& new_uniform)
 {
   ImGui::TableSetColumnIndex(0);
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -285,7 +258,7 @@ auto draw_uniform_input(std::string_view name, bulin::uniform_type uniform) -> s
                       [&name](Magnum::Color4& v) { return ImGui::ColorEdit4(name.data(), v.data()); },
                       [&name](Magnum::Vector2i& v) { return ImGui::SliderInt2(name.data(), v.data(), -100, 100); },
                       [&name](Magnum::Vector3i& v) { return ImGui::SliderInt3(name.data(), v.data(), -100, 100); },
-                      [&name](Magnum::Vector4i& v) { return ImGui::SliderInt4(name.data(), v.data(), -100.F, 100.F); }},
+                      [&name](Magnum::Vector4i& v) { return ImGui::SliderInt4(name.data(), v.data(), -100, 100); }},
           uniform))
   {
     return uniform;
@@ -293,7 +266,7 @@ auto draw_uniform_input(std::string_view name, bulin::uniform_type uniform) -> s
   return std::nullopt;
 }
 
-void draw_uniform_info(context const& ctx, std::string const& name, bulin::uniform_type const& uniform)
+void draw_uniform_info(app_context const& ctx, std::string const& name, bulin::uniform_type const& uniform)
 {
   ImGui::TableNextRow();
   ImGui::TableSetColumnIndex(0);
@@ -302,8 +275,7 @@ void draw_uniform_info(context const& ctx, std::string const& name, bulin::unifo
 
   ImGui::TableSetColumnIndex(1);
   ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-  auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name).c_str(), uniform);
-  if (new_uniform) {
+  if (auto new_uniform = draw_uniform_input(std::format("##uniform_value_{}", name), uniform)) {
     ctx.dispatch(bulin::update_uniform {name, std::move(new_uniform).value()});
   }
 
@@ -313,7 +285,7 @@ void draw_uniform_info(context const& ctx, std::string const& name, bulin::unifo
   }
 }
 
-void draw_uniforms(context const& ctx,
+void draw_uniforms(app_context const& ctx,
                    bulin::model::uniform_map const& uniforms,
                    bulin::uniform_type const& new_uniform)
 {
@@ -340,8 +312,22 @@ void draw_uniforms(context const& ctx,
   ImGui::EndTable();
   ImGui::Separator();
 }
+}  // namespace
 
-void draw(context const& ctx, bulin::app const& app)
+namespace bulin
+{
+void process_key_events(app_context const& ctx, app const& app)
+{
+  bool const isCrtlDown = ImGui::IsKeyDown(ImGuiKey_LeftCtrl) || ImGui::IsKeyDown(ImGuiKey_RightCtrl);
+  bool const isShiftDown = ImGui::IsKeyDown(ImGuiKey_LeftShift) || ImGui::IsKeyDown(ImGuiKey_RightShift);
+  if (isCrtlDown && isShiftDown) {
+    process_key_project_event(ctx, app.path.string());
+  } else if (isCrtlDown) {
+    process_key_shader_event(ctx, app.doc.path);
+  }
+}
+
+void draw(app_context const& ctx, app const& app)
 {
   ImGui::Begin("Main shader input", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize);
 
@@ -375,154 +361,4 @@ void draw(context const& ctx, bulin::app const& app)
     ctx.dispatch(bulin::load_shader_action {app.doc.path});
   }
 }
-
-void init_imgui_dock_windows(ImGuiID const dockspace_id, ImGuiDockNodeFlags const dockspace_flags)
-{
-  // Start building the dockspace layout
-  ImGui::DockBuilderRemoveNode(dockspace_id);  // Clear any previous layout
-  ImGui::DockBuilderAddNode(dockspace_id,
-                            dockspace_flags | ImGuiDockNodeFlags_DockSpace);  // Create a new node
-  ImGui::DockBuilderSetNodeSize(dockspace_id,
-                                ImGui::GetMainViewport()->Size);  // Set size to match the viewport
-
-  // Split the central node into two (left and right)
-  ImGuiID left_node, right_node;
-  ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, editor_window_ratio, &left_node, &right_node);
-
-  // Dock "Window 1" in the left node
-  ImGui::DockBuilderDockWindow("Main shader input", left_node);
-  // Dock "Window 2" in the right node
-  ImGui::DockBuilderDockWindow("Shader output", right_node);
-  // Commit the layout
-  ImGui::DockBuilderFinish(dockspace_id);
-}
-
-int main()
-{
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
-    std::cerr << "Error initializing SDL: " << SDL_GetError() << std::endl;
-    return -1;
-  }
-
-  const char* glsl_version = "#version 300 es";
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-
-  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-  SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-  SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
-
-  auto* window =
-      SDL_CreateWindow("Bulin",
-                       SDL_WINDOWPOS_CENTERED,
-                       SDL_WINDOWPOS_CENTERED,
-                       window_width,
-                       window_height,
-                       SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN);
-  if (window == nullptr) {
-    std::cerr << "Error creating SDL window: " << SDL_GetError() << std::endl;
-    return -1;
-  }
-
-  auto gl_context = SDL_GL_CreateContext(window);
-  if (gl_context == nullptr) {
-    std::cerr << "Error creating GL context: " << SDL_GetError() << std::endl;
-    return -1;
-  }
-
-  IMGUI_CHECKVERSION();
-  ImGui::CreateContext();
-  auto& io = ImGui::GetIO();
-  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // Enable Docking
-  io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;  // Enable Viewports
-
-  ImGui::StyleColorsDark();
-
-  ImGuiStyle& style = ImGui::GetStyle();
-  if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
-    style.WindowRounding = 0.0F;
-    style.Colors[ImGuiCol_WindowBg].w = 1.0F;
-  }
-
-  ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
-  ImGui_ImplOpenGL3_Init(glsl_version);
-
-  bulin::shader_data shader_data {};
-  bulin::shader_model shader_model {};
-  bulin::texture texture {buffer_resolution_x, buffer_resolution_y};
-
-  ImGuiDockNodeFlags const dockspace_flags = ImGuiDockNodeFlags_NoUndocking;
-
-  auto loop = lager::sdl_event_loop {};
-  auto store = lager::make_store<bulin::app_action>(
-      bulin::app {},
-      lager::with_sdl_event_loop {loop},
-      lager::with_deps(std::ref(shader_data), std::ref(shader_model), std::ref(texture)));
-
-  loop.run(
-      [&](const SDL_Event& ev)
-      {
-        ImGui_ImplSDL2_ProcessEvent(&ev);
-        return ev.type != SDL_QUIT;
-      },
-      [&](auto)
-      {
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplSDL2_NewFrame();
-        ImGui::NewFrame();
-
-        // Docking space
-        ImGuiID const dockspace_id = ImGui::GetID("main_dockspace");
-        ImGui::DockSpaceOverViewport(dockspace_id, ImGui::GetMainViewport(), dockspace_flags);
-
-        for (static bool first = true; first; first = false) {
-          init_imgui_dock_windows(dockspace_id, dockspace_flags);
-        }
-
-        process_key_events(store, store.get());
-        draw(store, store.get());
-
-        // Rendering
-        ImGui::Render();
-        {
-          auto const scope = texture.make_render_scope();
-          shader_model.draw();
-        }
-
-        SDL_GL_MakeCurrent(window, gl_context);
-        auto size = ImGui::GetIO().DisplaySize;
-        glViewport(0, 0, static_cast<int>(size.x), static_cast<int>(size.y));
-        glClearColor(0, 0, 0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        // Update and Render additional Platform Windows
-        // (Platform functions may change the current OpenGL context, so we
-        // save/restore it to make it easier to paste this code elsewhere.
-        //  For this specific demo app we could also call
-        //  SDL_GL_MakeCurrent(window, gl_context) directly)
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-          SDL_Window* backup_current_window = SDL_GL_GetCurrentWindow();
-          SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
-          ImGui::UpdatePlatformWindows();
-          ImGui::RenderPlatformWindowsDefault();
-          SDL_GL_MakeCurrent(backup_current_window, backup_current_context);
-        }
-
-        SDL_GL_SwapWindow(window);
-        return true;
-      });
-
-  ImGui_ImplOpenGL3_Shutdown();
-  ImGui_ImplSDL2_Shutdown();
-  ImGui::DestroyContext();
-
-  SDL_GL_DeleteContext(gl_context);
-  SDL_DestroyWindow(window);
-  SDL_Quit();
-
-  return 0;
-}
+}  // namespace bulin

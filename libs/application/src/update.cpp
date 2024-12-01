@@ -1,22 +1,31 @@
 //
-// lager - library for functional interactive c++ programs
-// Copyright (C) 2017 Juan Pedro Bolivar Puente
-//
-// This file is part of lager.
-//
-// lager is free software: you can redistribute it and/or modify
-// it under the terms of the MIT License, as detailed in the LICENSE
-// file located at the root of this source code distribution,
-// or here: <https://github.com/arximboldi/lager/blob/master/LICENSE>
+// Created by nickel on 11/30/24.
 //
 
+#include <bulin/application/update.hpp>
 #include <bulin/application/app.hpp>
+
+#include <bulin/model/model.hpp>
+#include <bulin/model/cereal.hpp>
+#include <bulin/model/update.hpp>
 
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
 
+#include <lager/effect.hpp>
+#include <lager/deps.hpp>
+#include <lager/extra/struct.hpp>
+
 #include <iostream>
+
+LAGER_STRUCT(bulin, app, doc, path);
+
+namespace lager
+{
+template class deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>;
+template struct result<bulin::app, bulin::app_action, deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>>;
+}  // namespace lager
 
 namespace bulin
 {
@@ -25,10 +34,10 @@ app_result update(app app_state, app_action app_action)
   return lager::match(std::move(app_action))(
       [&](save_action&& save_action) -> app_result
       {
-        app_state.path = save_action.file.replace_extension("bulin");
+        app_state.path = std::move(save_action).file.replace_extension("bulin");
         auto eff = [model = app_state.doc, filepath = app_state.path](auto&&)
         {
-          std::cout << "saving file: " << filepath << std::endl;
+          std::cout << "saving file: " << filepath << '\n';
           save(filepath, model);
         };
         return {std::move(app_state), eff};
@@ -59,5 +68,4 @@ app_result update(app app_state, app_action app_action)
         return {std::move(app_state), eff};
       });
 }
-
 }  // namespace bulin

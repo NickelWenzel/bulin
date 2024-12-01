@@ -6,7 +6,6 @@
 #include <Magnum/Math/Vector4.h>
 #include <Magnum/Math/Color.h>
 #include <Magnum/GL/OpenGL.h>
-#include <Magnum/GL/TextureFormat.h>
 #include <variant>
 #include <map>
 #include <string>
