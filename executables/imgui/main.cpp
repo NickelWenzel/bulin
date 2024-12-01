@@ -2,7 +2,6 @@
 
 #include <bulin/application/app.hpp>
 #include <bulin/application/update.hpp>
-#include <bulin/model/model.hpp>
 
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
@@ -10,7 +9,6 @@
 #include <bulin/ui/imgui/draw.hpp>
 
 #include <SDL.h>
-#include <SDL_opengl.h>
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>

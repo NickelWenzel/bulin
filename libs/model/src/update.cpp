@@ -8,8 +8,6 @@
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 
-#include <lager/extra/struct.hpp>
-
 #include <fstream>
 #include <iostream>
 
@@ -116,7 +114,7 @@ auto update(model state, model_action model_action) -> model_result
         auto eff = [](auto&& ctx)
         {
           auto& start = lager::get<bulin::shader_data&>(ctx).start_time_point;
-          auto time = std::chrono::duration<GLfloat>(std::chrono::steady_clock::now() - start).count();
+          auto time = std::chrono::duration<Magnum::Float>(std::chrono::steady_clock::now() - start).count();
           ctx.dispatch(update_uniform {bulin::time_name, time});
         };
         return {std::move(state), eff};

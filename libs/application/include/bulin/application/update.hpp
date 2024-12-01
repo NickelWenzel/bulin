@@ -5,7 +5,6 @@
 #pragma once
 
 #include <bulin/application/app_fwd.hpp>
-#include <bulin/model/model_fwd.hpp>
 #include <bulin/application/export.hpp>
 
 namespace bulin

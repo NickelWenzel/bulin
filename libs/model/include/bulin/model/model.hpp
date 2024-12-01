@@ -17,7 +17,6 @@
 #include <bulin/model/model_fwd.hpp>
 
 #include <bulin/graphics/types.hpp>
-#include <bulin/graphics/graphics_fwd.hpp>
 
 #include <lager/extra/struct.hpp>
 #include <lager/effect.hpp>

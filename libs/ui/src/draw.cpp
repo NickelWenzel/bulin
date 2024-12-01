@@ -14,6 +14,8 @@
 #include <imgui.h>
 
 #include <ranges>
+#include <string>
+#include <vector>
 
 namespace
 {
