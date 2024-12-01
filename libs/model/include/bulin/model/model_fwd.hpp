@@ -6,6 +6,8 @@
 
 #include <bulin/graphics/graphics_fwd.hpp>
 
+#include <variant>
+
 namespace bulin
 {
 struct model;
@@ -23,12 +25,6 @@ struct add_uniform;
 struct remove_uniform;
 struct update_uniform;
 }  // namespace bulin
-
-namespace std
-{
-template<typename... Ts>
-class variant;
-}
 
 namespace lager
 {

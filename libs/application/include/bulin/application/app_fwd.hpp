@@ -7,11 +7,7 @@
 #include <bulin/graphics/graphics_fwd.hpp>
 #include <bulin/model/model_fwd.hpp>
 
-namespace std
-{
-template<typename... Ts>
-class variant;
-}
+#include <variant>
 
 namespace lager
 {
