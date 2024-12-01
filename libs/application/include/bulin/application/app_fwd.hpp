@@ -12,7 +12,7 @@
 namespace lager
 {
 template<typename... Deps>
-struct deps;
+class deps;
 template<typename Actions, typename Deps>
 struct context;
 template<typename Model, typename Action, typename Deps>

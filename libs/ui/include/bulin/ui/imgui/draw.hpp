@@ -9,6 +9,6 @@
 
 namespace bulin
 {
-void BULIN_UI_EXPORT process_key_events(app_context const& ctx, app const& app);
-void BULIN_UI_EXPORT draw(app_context const& ctx, app const& app);
+BULIN_UI_EXPORT void process_key_events(app_context const& ctx, app const& app);
+BULIN_UI_EXPORT void draw(app_context const& ctx, app const& app);
 }  // namespace bulin

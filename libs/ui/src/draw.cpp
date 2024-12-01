@@ -205,7 +205,7 @@ void draw_select_uniform_type(app_context const& ctx, std::size_t selected_idx)
   bulin::uniform_type uniform = uniform_idx_t<Idx> {};
   bool selected = Idx == selected_idx;
   ImGui::PushID(Idx);
-  if (ImGui::Selectable(std::format("{}", uniform_type_name(uniform), Idx).c_str(), selected == Idx)) {
+  if (ImGui::Selectable(std::format("{}", uniform_type_name(uniform), Idx).c_str(), selected)) {
     ctx.dispatch(bulin::changed_new_uniform {uniform});
   }
   if (selected) {
@@ -258,7 +258,7 @@ auto draw_uniform_input(std::string_view name, bulin::uniform_type uniform) -> s
                       [&name](Magnum::Color4& v) { return ImGui::ColorEdit4(name.data(), v.data()); },
                       [&name](Magnum::Vector2i& v) { return ImGui::SliderInt2(name.data(), v.data(), -100, 100); },
                       [&name](Magnum::Vector3i& v) { return ImGui::SliderInt3(name.data(), v.data(), -100, 100); },
-                      [&name](Magnum::Vector4i& v) { return ImGui::SliderInt4(name.data(), v.data(), -100.F, 100.F); }},
+                      [&name](Magnum::Vector4i& v) { return ImGui::SliderInt4(name.data(), v.data(), -100, 100); }},
           uniform))
   {
     return uniform;

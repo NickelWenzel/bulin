@@ -29,9 +29,7 @@ struct update_uniform;
 namespace lager
 {
 template<typename... Deps>
-struct deps;
-template<typename Actions, typename Deps>
-struct context;
+class deps;
 template<typename Model, typename Action, typename Deps>
 struct result;
 }  // namespace lager

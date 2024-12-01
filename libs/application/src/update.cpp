@@ -13,6 +13,8 @@
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
 
+#include <lager/effect.hpp>
+#include <lager/deps.hpp>
 #include <lager/extra/struct.hpp>
 
 #include <iostream>
@@ -21,7 +23,7 @@ LAGER_STRUCT(bulin, app, doc, path);
 
 namespace lager
 {
-template struct deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>;
+template class deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>;
 template struct result<bulin::app, bulin::app_action, deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>>;
 }  // namespace lager
 
