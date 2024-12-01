@@ -1,42 +1,39 @@
 //
-// lager - library for functional interactive c++ programs
-// Copyright (C) 2017 Juan Pedro Bolivar Puente
-//
-// This file is part of lager.
-//
-// lager is free software: you can redistribute it and/or modify
-// it under the terms of the MIT License, as detailed in the LICENSE
-// file located at the root of this source code distribution,
-// or here: <https://github.com/arximboldi/lager/blob/master/LICENSE>
+// Created by nickel on 12/1/24.
 //
 
+#include <bulin/model/update.hpp>
 #include <bulin/model/model.hpp>
-#include <bulin/model/cereal.hpp>
 
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 
-#include <lager/effect.hpp>
-#include <lager/extra/cereal/inline.hpp>
-#include <lager/extra/cereal/struct.hpp>
-#include <lager/extra/cereal/immer_map.hpp>
-#include <lager/extra/cereal/variant_with_name.hpp>
-#include <lager/util.hpp>
+#include <lager/extra/struct.hpp>
 
-#include <cereal/archives/json.hpp>
-#include <cereal/cereal.hpp>
-#include <cereal/types/optional.hpp>
-#include <cereal/types/string.hpp>
-#include "bulin/graphics/types.hpp"
-
-#include <algorithm>
 #include <fstream>
-#include <chrono>
-#include <utility>
+#include <iostream>
+
+namespace
+{
+void save_shader(std::filesystem::path const& filepath, std::string const& shader)
+{
+  auto stream = std::ofstream {filepath};
+  stream.exceptions(std::fstream::badbit | std::fstream::failbit);
+  stream << shader;
+}
+
+auto load_shader(std::filesystem::path const& filepath) -> std::string
+{
+  auto stream = std::ifstream {filepath};
+  stream.exceptions(std::fstream::badbit);
+  std::stringstream buffer;
+  buffer << stream.rdbuf();  // Read the file into a stringstream
+  return buffer.str();  // Convert to a single string
+}
+}
 
 namespace bulin
 {
-
 auto update(model state, model_action model_action) -> model_result
 {
   return lager::match(std::move(model_action))(
@@ -151,43 +148,4 @@ auto update(model state, model_action model_action) -> model_result
         return {std::move(state), eff};
       });
 }
-
-void save(std::filesystem::path const& fname, model state)
-{
-  auto stream = std::ofstream {fname};
-  stream.exceptions(std::fstream::badbit | std::fstream::failbit);
-  {
-    auto archive = cereal::JSONOutputArchive {stream};
-    save_inline(archive, state);
-  }
-}
-
-model load(std::filesystem::path const& fname)
-{
-  auto stream = std::ifstream {fname};
-  stream.exceptions(std::fstream::badbit);
-  auto loaded_state = model {};
-  {
-    auto archive = cereal::JSONInputArchive {stream};
-    load_inline(archive, loaded_state);
-  }
-  return loaded_state;
-}
-
-void save_shader(std::filesystem::path const& filepath, std::string const& shader)
-{
-  auto stream = std::ofstream {filepath};
-  stream.exceptions(std::fstream::badbit | std::fstream::failbit);
-  stream << shader;
-}
-
-auto load_shader(std::filesystem::path const& filepath) -> std::string
-{
-  auto stream = std::ifstream {filepath};
-  stream.exceptions(std::fstream::badbit);
-  std::stringstream buffer;
-  buffer << stream.rdbuf();  // Read the file into a stringstream
-  return buffer.str();  // Convert to a single string
-}
-
 }  // namespace bulin

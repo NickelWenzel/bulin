@@ -6,6 +6,7 @@
 
 namespace bulin
 {
+class flat_shader;
 struct shader_data;
 class shader_model;
 class texture;

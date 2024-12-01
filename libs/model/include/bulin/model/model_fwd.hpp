@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <variant>
+#include <bulin/graphics/graphics_fwd.hpp>
 
 namespace bulin
 {
@@ -22,7 +22,22 @@ struct tick_time;
 struct add_uniform;
 struct remove_uniform;
 struct update_uniform;
+}
 
+namespace std
+{
+template<typename... Ts> class variant;
+}
+
+namespace lager
+{
+template<typename... Deps> struct deps;
+template<typename Actions, typename Deps> struct context;
+template<typename Model, typename Action, typename Deps> struct result;
+}
+
+namespace bulin
+{
 using model_action = std::variant<set_shader_data,
                                   reset_shader_model,
                                   changed_shader_input,
@@ -36,4 +51,6 @@ using model_action = std::variant<set_shader_data,
                                   add_uniform,
                                   remove_uniform,
                                   update_uniform>;
+
+using model_result = lager::result<model, model_action, lager::deps<shader_data&, shader_model&>>;
 }

@@ -5,6 +5,10 @@
 #include <bulin/application/update.hpp>
 #include <bulin/application/app.hpp>
 
+#include <bulin/model/model.hpp>
+#include <bulin/model/cereal.hpp>
+#include <bulin/model/update.hpp>
+
 #include <bulin/graphics/shader_data.hpp>
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/texture.hpp>
@@ -14,6 +18,12 @@
 #include <iostream>
 
 LAGER_STRUCT(bulin, app, doc, path);
+
+namespace lager
+{
+template struct deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>;
+template struct result<bulin::app, bulin::app_action, deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>>;
+}
 
 namespace bulin
 {

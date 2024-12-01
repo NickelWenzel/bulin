@@ -12,7 +12,6 @@
 
 #pragma once
 
-#include <Magnum/GL/OpenGL.h>
 #include <bulin/model/export.hpp>
 
 #include <bulin/model/model_fwd.hpp>
@@ -24,7 +23,6 @@
 #include <lager/effect.hpp>
 
 #include <immer/map.hpp>
-#include <immer/box.hpp>
 
 #include <filesystem>
 #include <string>
@@ -102,17 +100,6 @@ struct BULIN_MODEL_EXPORT update_uniform
   std::string name;
   uniform_type value;
 };
-
-using model_result = lager::result<model, model_action, lager::deps<shader_data&, shader_model&>>;
-
-auto update(model state, model_action model_action) -> model_result;
-
-void save(std::filesystem::path const& fname, model state);
-auto load(std::filesystem::path const& fname) -> model;
-
-void save_shader(std::filesystem::path const& filepath, std::string const& shader);
-auto load_shader(std::filesystem::path const& filepath) -> std::string;
-
 }  // namespace bulin
 
 LAGER_STRUCT(bulin, model, uniforms, new_uniform, shader_input, path, shader_timestamp);

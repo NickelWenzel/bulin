@@ -3,7 +3,8 @@ cmake_minimum_required(VERSION 3.25)
 # ------- model -------
 add_library(
   bulin_model STATIC
-    src/model.cpp
+  src/update.cpp
+  src/cereal.cpp
 )
 
 set(BULIN_MODEL_EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/bulin/model/export.hpp)
@@ -18,6 +19,7 @@ target_sources(bulin_model
     ${CMAKE_CURRENT_BINARY_DIR}
   FILES
     include/bulin/model/cereal.hpp
+    include/bulin/model/update.hpp
     include/bulin/model/model.hpp
     include/bulin/model/model_fwd.hpp
     ${BULIN_MODEL_EXPORT_FILE_NAME}

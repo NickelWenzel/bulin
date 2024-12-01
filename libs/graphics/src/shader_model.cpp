@@ -1,5 +1,6 @@
 #include <bulin/graphics/shader_model.hpp>
 #include <bulin/graphics/shader_data.hpp>
+#include <bulin/graphics/flat_shader.hpp>
 #include <bulin/graphics/types.hpp>
 
 #include <Magnum/MeshTools/Compile.h>

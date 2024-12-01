@@ -4,25 +4,29 @@
 
 #pragma once
 
-#include "bulin/model/model.hpp"
-
 #include <bulin/graphics/graphics_fwd.hpp>
 #include <bulin/model/model_fwd.hpp>
 
-#include <lager/context.hpp>
-#include <lager/deps.hpp>
+namespace std
+{
+template<typename... Ts> class variant;
+}
 
-#include <variant>
+namespace lager
+{
+template<typename... Deps> struct deps;
+template<typename Actions, typename Deps> struct context;
+template<typename Model, typename Action, typename Deps> struct result;
+}
 
 namespace bulin
 {
-
 struct app;
 struct save_action;
 struct load_action;
 struct load_result_action;
 
-using app_action = std::variant<model_action, save_action, load_action, load_result_action>;
+using app_action  = std::variant<model_action, save_action, load_action, load_result_action>;
 using app_context = lager::context<app_action, lager::deps<shader_data&, texture&>>;
-
+using app_result  = lager::result<app, app_action, lager::deps<shader_data&, shader_model&, texture&>>;
 }  // namespace bulin
