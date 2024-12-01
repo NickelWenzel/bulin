@@ -216,9 +216,8 @@ void draw_select_uniform_type(app_context const& ctx, std::size_t selected_idx)
 
 void draw_select_uniform_types(app_context const& ctx, std::size_t selected_idx)
 {
-  [&]<std::size_t... Idcs>(std::index_sequence<Idcs...>) {
-    (draw_select_uniform_type<Idcs>(ctx, selected_idx), ...);
-  }(std::make_index_sequence<std::variant_size_v<bulin::uniform_type>> {});
+  [&]<std::size_t... Idcs>(std::index_sequence<Idcs...>) { (draw_select_uniform_type<Idcs>(ctx, selected_idx), ...); }(
+      std::make_index_sequence<std::variant_size_v<bulin::uniform_type>> {});
 }
 
 void draw_add_uniform(app_context const& ctx, bulin::uniform_type const& new_uniform)
@@ -313,7 +312,7 @@ void draw_uniforms(app_context const& ctx,
   ImGui::EndTable();
   ImGui::Separator();
 }
-}
+}  // namespace
 
 namespace bulin
 {
@@ -362,4 +361,4 @@ void draw(app_context const& ctx, app const& app)
     ctx.dispatch(bulin::load_shader_action {app.doc.path});
   }
 }
-}
+}  // namespace bulin

@@ -13,13 +13,13 @@ target_sources(bulin_application
   PUBLIC
   FILE_SET HEADERS
   BASE_DIRS
-    include
-    ${CMAKE_CURRENT_BINARY_DIR}
+  include
+  ${CMAKE_CURRENT_BINARY_DIR}
   FILES
-    include/bulin/application/app.hpp
-    include/bulin/application/app_fwd.hpp
-    include/bulin/application/update.hpp
-    ${BULIN_APPLICATION_EXPORT_FILE_NAME}
+  include/bulin/application/app.hpp
+  include/bulin/application/app_fwd.hpp
+  include/bulin/application/update.hpp
+  ${BULIN_APPLICATION_EXPORT_FILE_NAME}
 )
 
 add_library(bulin::application ALIAS bulin_application)
@@ -32,14 +32,14 @@ find_package(Lager REQUIRED)
 
 target_link_system_libraries(bulin_application
   PUBLIC
-    lager
-    immer
+  lager
+  immer
   PRIVATE
-    cereal::cereal
+  cereal::cereal
 )
 
 target_link_libraries(bulin_application
   PUBLIC
-    bulin::model
-    bulin::graphics
+  bulin::model
+  bulin::graphics
 )

@@ -17,15 +17,15 @@ endif()
 
 target_link_system_libraries(bulin_exe
   PRIVATE
-    OpenGL::GL
-    imgui::imgui
-    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
-    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+  OpenGL::GL
+  imgui::imgui
+  $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+  $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
 )
 
 target_link_libraries(bulin_exe
   PRIVATE
-    bulin::ui
-    bulin::graphics
-    bulin::application
+  bulin::ui
+  bulin::graphics
+  bulin::application
 )

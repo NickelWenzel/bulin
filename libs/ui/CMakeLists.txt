@@ -14,11 +14,11 @@ target_sources(bulin_ui
   PUBLIC
   FILE_SET HEADERS
   BASE_DIRS
-    include
-    ${CMAKE_CURRENT_BINARY_DIR}
+  include
+  ${CMAKE_CURRENT_BINARY_DIR}
   FILES
-    include/bulin/ui/imgui/draw.hpp
-    ${BULIN_UI_EXPORT_FILE_NAME}
+  include/bulin/ui/imgui/draw.hpp
+  ${BULIN_UI_EXPORT_FILE_NAME}
 )
 
 add_library(bulin::ui ALIAS bulin_ui)
@@ -29,11 +29,11 @@ find_package(imgui REQUIRED)
 
 target_link_system_libraries(bulin_ui
   PRIVATE
-    imgui::imgui
+  imgui::imgui
 )
 
 target_link_libraries(bulin_ui
   PUBLIC
-    bulin::model
-    bulin::application
+  bulin::model
+  bulin::application
 )

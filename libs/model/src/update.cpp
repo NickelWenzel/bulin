@@ -28,7 +28,7 @@ auto load_shader(std::filesystem::path const& filepath) -> std::string
   buffer << stream.rdbuf();  // Read the file into a stringstream
   return buffer.str();  // Convert to a single string
 }
-}
+}  // namespace
 
 namespace bulin
 {

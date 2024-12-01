@@ -22,19 +22,23 @@ struct tick_time;
 struct add_uniform;
 struct remove_uniform;
 struct update_uniform;
-}
+}  // namespace bulin
 
 namespace std
 {
-template<typename... Ts> class variant;
+template<typename... Ts>
+class variant;
 }
 
 namespace lager
 {
-template<typename... Deps> struct deps;
-template<typename Actions, typename Deps> struct context;
-template<typename Model, typename Action, typename Deps> struct result;
-}
+template<typename... Deps>
+struct deps;
+template<typename Actions, typename Deps>
+struct context;
+template<typename Model, typename Action, typename Deps>
+struct result;
+}  // namespace lager
 
 namespace bulin
 {
@@ -53,4 +57,4 @@ using model_action = std::variant<set_shader_data,
                                   update_uniform>;
 
 using model_result = lager::result<model, model_action, lager::deps<shader_data&, shader_model&>>;
-}
+}  // namespace bulin

@@ -23,7 +23,7 @@ namespace lager
 {
 template struct deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>;
 template struct result<bulin::app, bulin::app_action, deps<bulin::shader_data&, bulin::shader_model&, bulin::texture&>>;
-}
+}  // namespace lager
 
 namespace bulin
 {
@@ -66,4 +66,4 @@ app_result update(app app_state, app_action app_action)
         return {std::move(app_state), eff};
       });
 }
-}
+}  // namespace bulin

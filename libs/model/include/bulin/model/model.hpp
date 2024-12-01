@@ -39,13 +39,9 @@ struct BULIN_MODEL_EXPORT model
   std::size_t shader_timestamp;
 };
 
-struct BULIN_MODEL_EXPORT set_shader_data
-{
-};
+struct BULIN_MODEL_EXPORT set_shader_data {};
 
-struct BULIN_MODEL_EXPORT reset_shader_model
-{
-};
+struct BULIN_MODEL_EXPORT reset_shader_model {};
 
 struct BULIN_MODEL_EXPORT changed_shader_input
 {
@@ -67,21 +63,13 @@ struct BULIN_MODEL_EXPORT save_shader_action
   std::filesystem::path file;
 };
 
-struct BULIN_MODEL_EXPORT add_time
-{
-};
+struct BULIN_MODEL_EXPORT add_time {};
 
-struct BULIN_MODEL_EXPORT remove_time
-{
-};
+struct BULIN_MODEL_EXPORT remove_time {};
 
-struct BULIN_MODEL_EXPORT reset_time
-{
-};
+struct BULIN_MODEL_EXPORT reset_time {};
 
-struct BULIN_MODEL_EXPORT tick_time
-{
-};
+struct BULIN_MODEL_EXPORT tick_time {};
 
 struct BULIN_MODEL_EXPORT add_uniform
 {

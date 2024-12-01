@@ -17,8 +17,6 @@
 
 #include <filesystem>
 
-
-
 namespace bulin
 {
 struct BULIN_APPLICATION_EXPORT app

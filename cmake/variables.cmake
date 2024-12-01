@@ -17,9 +17,9 @@ endif()
 set(warning_guard "")
 if(NOT PROJECT_IS_TOP_LEVEL)
   option(
-      bulin_INCLUDES_WITH_SYSTEM
-      "Use SYSTEM modifier for bulin's includes, disabling warnings"
-      ON
+    bulin_INCLUDES_WITH_SYSTEM
+    "Use SYSTEM modifier for bulin's includes, disabling warnings"
+    ON
   )
   mark_as_advanced(bulin_INCLUDES_WITH_SYSTEM)
   if(bulin_INCLUDES_WITH_SYSTEM)

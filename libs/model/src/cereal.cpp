@@ -37,4 +37,4 @@ model load(std::filesystem::path const& fname)
   }
   return loaded_state;
 }
-}
+}  // namespace bulin

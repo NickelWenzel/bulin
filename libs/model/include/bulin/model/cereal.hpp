@@ -34,4 +34,4 @@ namespace bulin
 {
 void save(std::filesystem::path const& fname, model state);
 auto load(std::filesystem::path const& fname) -> model;
-}
+}  // namespace bulin

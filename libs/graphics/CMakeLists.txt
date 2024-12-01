@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.25)
 # -------- graphics ---------
 add_library(
   bulin_graphics STATIC
-    src/flat_shader.cpp
-    src/shader_model.cpp
-    src/texture.cpp
+  src/flat_shader.cpp
+  src/shader_model.cpp
+  src/texture.cpp
 )
 
 set(BULIN_GRAPHICS_EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/bulin/graphics/export.hpp)
@@ -16,16 +16,16 @@ target_sources(bulin_graphics
   PUBLIC
   FILE_SET HEADERS
   BASE_DIRS
-    include
-    ${CMAKE_CURRENT_BINARY_DIR}
+  include
+  ${CMAKE_CURRENT_BINARY_DIR}
   FILES
-    include/bulin/graphics/flat_shader.hpp
-    include/bulin/graphics/graphics_fwd.hpp
-    include/bulin/graphics/shader_data.hpp
-    include/bulin/graphics/shader_model.hpp
-    include/bulin/graphics/texture.hpp
-    include/bulin/graphics/types.hpp
-    ${BULIN_GRAPHICS_EXPORT_FILE_NAME}
+  include/bulin/graphics/flat_shader.hpp
+  include/bulin/graphics/graphics_fwd.hpp
+  include/bulin/graphics/shader_data.hpp
+  include/bulin/graphics/shader_model.hpp
+  include/bulin/graphics/texture.hpp
+  include/bulin/graphics/types.hpp
+  ${BULIN_GRAPHICS_EXPORT_FILE_NAME}
 )
 
 add_library(bulin::graphics ALIAS bulin_graphics)

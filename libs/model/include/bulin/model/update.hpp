@@ -11,5 +11,4 @@
 namespace bulin
 {
 BULIN_MODEL_EXPORT auto update(model state, model_action model_action) -> model_result;
-} // namespace bulin
-
+}  // namespace bulin
