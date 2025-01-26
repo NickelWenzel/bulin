@@ -4,3 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+iced = { version = "0.13.1", features = ["wgpu", "highlighter", "tokio", "debug", "image", "advanced"] }
+
+tokio = { version = "1.0", features = ["fs"] }
+iced_wgpu = "0.13.5"
+glam = { version = "0.25.0", features = ["bytemuck"] }
+bytemuck = "1.21.0"
+rfd = "0.13"
+rand = "0.8.5"
+image = "0.25.5"
