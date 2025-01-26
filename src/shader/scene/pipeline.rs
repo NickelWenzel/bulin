@@ -243,10 +243,8 @@ impl Pipeline {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: Some("vs_main"),
+                    entry_point: "vs_main",
                     buffers: &[Vertex::desc(), cube::Raw::desc()],
-                    compilation_options:
-                        wgpu::PipelineCompilationOptions::default(),
                 },
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: Some(wgpu::DepthStencilState {
@@ -263,7 +261,7 @@ impl Pipeline {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some("fs_main"),
+                    entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: Some(wgpu::BlendState {
@@ -280,11 +278,8 @@ impl Pipeline {
                         }),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    compilation_options:
-                        wgpu::PipelineCompilationOptions::default(),
                 }),
                 multiview: None,
-                cache: None,
             });
 
         let depth_pipeline = DepthPipeline::new(
@@ -495,10 +490,8 @@ impl DepthPipeline {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: Some("vs_main"),
+                    entry_point: "vs_main",
                     buffers: &[],
-                    compilation_options:
-                        wgpu::PipelineCompilationOptions::default(),
                 },
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: Some(wgpu::DepthStencilState {
@@ -511,17 +504,14 @@ impl DepthPipeline {
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some("fs_main"),
+                    entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    compilation_options:
-                        wgpu::PipelineCompilationOptions::default(),
                 }),
                 multiview: None,
-                cache: None,
             });
 
         Self {

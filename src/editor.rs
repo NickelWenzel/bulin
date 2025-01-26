@@ -11,11 +11,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub fn main() -> iced::Result {
-    iced::application("Editor - Iced", Editor::update, Editor::view)
-        .run_with(Editor::new)
-}
-
 pub struct Editor {
     file: Option<PathBuf>,
     content: text_editor::Content,
@@ -219,7 +214,7 @@ impl Editor {
         .into()
     }
 
-    fn theme(&self) -> Theme {
+    pub fn theme(&self) -> Theme {
         if self.theme.is_dark() {
             Theme::Dark
         } else {

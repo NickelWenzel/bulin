@@ -5,7 +5,7 @@ use scene::Scene;
 use iced::time::Instant;
 use iced::widget::{center, checkbox, column, row, shader, slider, text};
 use iced::window;
-use iced::{Center, Color, Element, Fill, Subscription};
+use iced::{Center, Color, Element, Fill, Subscription, Task};
 
 pub struct IcedCubes {
     start: Instant,
@@ -29,22 +29,27 @@ impl IcedCubes {
         }
     }
 
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::CubeAmountChanged(amount) => {
                 self.scene.change_amount(amount);
+                Task::none()
             }
             Message::CubeSizeChanged(size) => {
                 self.scene.size = size;
+                Task::none()
             }
             Message::Tick(time) => {
                 self.scene.update(time - self.start);
+                Task::none()
             }
             Message::ShowDepthBuffer(show) => {
                 self.scene.show_depth_buffer = show;
+                Task::none()
             }
             Message::LightColorChanged(color) => {
                 self.scene.light_color = color;
+                Task::none()
             }
         }
     }
