@@ -1,14 +1,15 @@
 use iced::Font;
+use bulin_rust::Application;
 
 fn main() -> iced::Result {
     iced::application(
-        "Custom Shader - Iced",
-        bulin_rust::Application::update,
-        bulin_rust::Application::view,
+        "Bulin",
+        Application::update,
+        Application::view,
     )
-    .theme(bulin_rust::Application::theme)
+    .theme(Application::theme)
     .font(include_bytes!("../fonts/icons.ttf").as_slice())
     .default_font(Font::MONOSPACE)
-    .subscription(bulin_rust::Application::subscription)
-    .run()
+    .subscription(Application::subscription)
+    .run_with(Application::new)
 }

@@ -123,7 +123,7 @@ impl IcedCubes {
         center(column![shader, controls].align_x(Center)).into()
     }
 
-    fn subscription(&self) -> Subscription<Message> {
+    pub fn subscription(&self) -> Subscription<Message> {
         window::frames().map(Message::Tick)
     }
 }
