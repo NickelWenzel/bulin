@@ -1,10 +1,9 @@
 mod editor;
 mod shader;
 
-use iced::time::Instant;
 use iced::widget::column;
 use iced::window;
-use iced::{Element, Subscription};
+use iced::{Element, Subscription, Task, Theme};
 
 pub struct Application {
     editor: editor::Editor,
@@ -13,7 +12,6 @@ pub struct Application {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Tick(Instant),
     Editor(editor::Message),
     Shader(shader::Message),
 }
@@ -26,7 +24,13 @@ impl Application {
         }
     }
 
-    pub fn update(&mut self, _message: Message) {}
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Editor(message) => self.editor.update(message).map(|m| Message::Editor(m)),
+            Message::Shader(message) => self.shader.update(message).map(|m| Message::Shader(m)),
+        }
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         column![
             self.editor.view().map(Message::Editor),
@@ -36,7 +40,13 @@ impl Application {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        window::frames().map(Message::Tick)
+        window::frames()
+            .map(shader::Message::Tick)
+            .map(Message::Shader)
+    }
+
+    pub fn theme(&self) -> Theme {
+        self.editor.theme()
     }
 }
 
