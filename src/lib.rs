@@ -1,18 +1,20 @@
 mod editor;
-mod shader;
+mod viewer;
 
 use iced::widget::row;
-use iced::{Element, Subscription, Task, Theme};
+use iced::{Element, Task, Theme};
+
+pub type FragmentShader = String;
 
 pub struct Application {
     editor: editor::Editor,
-    shader: shader::IcedCubes,
+    viewer: viewer::Viewer,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Editor(editor::Message),
-    Shader(shader::Message),
+    Viewer(viewer::Message),
 }
 
 impl Application {
@@ -21,7 +23,7 @@ impl Application {
         (
             Self {
                 editor,
-                shader: shader::IcedCubes::new(),
+                viewer: viewer::Viewer::new(),
             },
             editor_task.map(|m| Message::Editor(m)),
         )
@@ -29,21 +31,22 @@ impl Application {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Editor(message) => self.editor.update(message).map(|m| Message::Editor(m)),
-            Message::Shader(message) => self.shader.update(message).map(|m| Message::Shader(m)),
+            Message::Editor(message) => match message {
+                editor::Message::UpdatePipeline(shader) => self
+                    .viewer
+                    .update(viewer::Message::UpdatePipeline(shader)).map(|m| Message::Viewer(m)),
+                _ => self.editor.update(message).map(|m| Message::Editor(m)),
+            },
+            Message::Viewer(message) => self.viewer.update(message).map(|m| Message::Viewer(m)),
         }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
         row![
             self.editor.view().map(Message::Editor),
-            self.shader.view().map(Message::Shader),
+            self.viewer.view().map(Message::Viewer),
         ]
         .into()
-    }
-
-    pub fn subscription(&self) -> Subscription<Message> {
-        self.shader.subscription().map(|m| Message::Shader(m))
     }
 
     pub fn theme(&self) -> Theme {
