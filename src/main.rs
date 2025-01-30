@@ -10,6 +10,5 @@ fn main() -> iced::Result {
     .theme(Application::theme)
     .font(include_bytes!("../fonts/icons.ttf").as_slice())
     .default_font(Font::MONOSPACE)
-    .subscription(Application::subscription)
     .run_with(Application::new)
 }

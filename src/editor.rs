@@ -1,8 +1,8 @@
 use iced::highlighter;
 use iced::keyboard;
 use iced::widget::{
-    self, button, center, column, container, horizontal_space, pick_list,
-    row, text, text_editor, toggler, tooltip,
+    self, button, column, container, horizontal_space, pick_list, row, text, text_editor, toggler,
+    tooltip,
 };
 use iced::{Center, Element, Fill, Font, Task, Theme};
 
@@ -30,6 +30,7 @@ pub enum Message {
     FileOpened(Result<(PathBuf, Arc<String>), Error>),
     SaveFile,
     FileSaved(Result<PathBuf, Error>),
+    UpdatePipeline(Arc<String>),
 }
 
 impl Editor {
@@ -46,7 +47,7 @@ impl Editor {
             Task::batch([
                 Task::perform(
                     load_file(format!(
-                        "{}/src/main.rs",
+                        "{}/src/viewer/canvasscene/shaders/empty_frag.wgsl",
                         env!("CARGO_MANIFEST_DIR")
                     )),
                     Message::FileOpened,
@@ -59,11 +60,18 @@ impl Editor {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::ActionPerformed(action) => {
-                self.is_dirty = self.is_dirty || action.is_edit();
-
+                let is_edit = action.is_edit();
+                
                 self.content.perform(action);
 
-                Task::none()
+                if is_edit {
+                    self.is_dirty = true;
+                    Task::done(Message::UpdatePipeline(Arc::new(
+                        self.content.text().clone(),
+                    )))
+                } else {
+                    Task::none()
+                }
             }
             Message::ThemeSelected(theme) => {
                 self.theme = theme;
@@ -101,7 +109,9 @@ impl Editor {
                     self.content = text_editor::Content::with_text(&contents);
                 }
 
-                Task::none()
+                Task::done(Message::UpdatePipeline(Arc::new(
+                    self.content.text().clone(),
+                )))
             }
             Message::SaveFile => {
                 if self.is_loading {
@@ -125,6 +135,7 @@ impl Editor {
 
                 Task::none()
             }
+            Message::UpdatePipeline(_) => Task::none(),
         }
     }
 
@@ -197,12 +208,8 @@ impl Editor {
                 )
                 .key_binding(|key_press| {
                     match key_press.key.as_ref() {
-                        keyboard::Key::Character("s")
-                            if key_press.modifiers.command() =>
-                        {
-                            Some(text_editor::Binding::Custom(
-                                Message::SaveFile,
-                            ))
+                        keyboard::Key::Character("s") if key_press.modifiers.command() => {
+                            Some(text_editor::Binding::Custom(Message::SaveFile))
                         }
                         _ => text_editor::Binding::from_key_press(key_press),
                     }
@@ -239,9 +246,7 @@ async fn open_file() -> Result<(PathBuf, Arc<String>), Error> {
     load_file(picked_file).await
 }
 
-async fn load_file(
-    path: impl Into<PathBuf>,
-) -> Result<(PathBuf, Arc<String>), Error> {
+async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, Arc<String>), Error> {
     let path = path.into();
 
     let contents = tokio::fs::read_to_string(&path)
@@ -252,10 +257,7 @@ async fn load_file(
     Ok((path, contents))
 }
 
-async fn save_file(
-    path: Option<PathBuf>,
-    contents: String,
-) -> Result<PathBuf, Error> {
+async fn save_file(path: Option<PathBuf>, contents: String) -> Result<PathBuf, Error> {
     let path = if let Some(path) = path {
         path
     } else {
@@ -280,7 +282,7 @@ fn action<'a, Message: Clone + 'a>(
     label: &'a str,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    let action = button(center(content).width(30).align_x(Center));
+    let action = button(container(content).center_x(30));
 
     if let Some(on_press) = on_press {
         tooltip(
