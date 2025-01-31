@@ -1,4 +1,5 @@
-use iced::highlighter;
+mod highlighter;
+
 use iced::keyboard;
 use iced::widget::{
     self, button, column, container, horizontal_space, pick_list, row, text, text_editor, toggler,
@@ -61,7 +62,7 @@ impl Editor {
         match message {
             Message::ActionPerformed(action) => {
                 let is_edit = action.is_edit();
-                
+
                 self.content.perform(action);
 
                 if is_edit {
@@ -198,18 +199,26 @@ impl Editor {
                 } else {
                     text::Wrapping::None
                 })
-                .highlight(
-                    self.file
-                        .as_deref()
-                        .and_then(Path::extension)
-                        .and_then(ffi::OsStr::to_str)
-                        .unwrap_or("rs"),
-                    self.theme,
+                .highlight_with::<highlighter::Highlighter>(
+                    highlighter::Settings {
+                        theme: self.theme,
+                        token: self
+                            .file
+                            .as_deref()
+                            .and_then(Path::extension)
+                            .and_then(ffi::OsStr::to_str)
+                            .unwrap_or("wgsl")
+                            .to_owned(),
+                    },
+                    |highlight, _theme| highlight.to_format(),
                 )
                 .key_binding(|key_press| {
                     match key_press.key.as_ref() {
                         keyboard::Key::Character("s") if key_press.modifiers.command() => {
                             Some(text_editor::Binding::Custom(Message::SaveFile))
+                        }
+                        keyboard::Key::Named(keyboard::key::Named::Delete) => {
+                            Some(text_editor::Binding::Delete)
                         }
                         _ => text_editor::Binding::from_key_press(key_press),
                     }
