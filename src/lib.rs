@@ -1,20 +1,23 @@
 mod editor;
+mod layout;
 mod viewer;
 
-use iced::widget::row;
-use iced::{Element, Task, Theme};
+use iced::widget::container;
+use iced::{Element, Length, Task, Theme};
 
 pub type FragmentShader = String;
 
 pub struct Application {
     editor: editor::Editor,
     viewer: viewer::Viewer,
+    layout: layout::Layout,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Editor(editor::Message),
     Viewer(viewer::Message),
+    Layout(layout::Message),
 }
 
 impl Application {
@@ -24,6 +27,7 @@ impl Application {
             Self {
                 editor,
                 viewer: viewer::Viewer::new(),
+                layout: layout::Layout::new(),
             },
             editor_task.map(|m| Message::Editor(m)),
         )
@@ -34,19 +38,33 @@ impl Application {
             Message::Editor(message) => match message {
                 editor::Message::UpdatePipeline(shader) => self
                     .viewer
-                    .update(viewer::Message::UpdatePipeline(shader)).map(|m| Message::Viewer(m)),
+                    .update(viewer::Message::UpdatePipeline(shader))
+                    .map(Message::Viewer),
                 _ => self.editor.update(message).map(|m| Message::Editor(m)),
             },
-            Message::Viewer(message) => self.viewer.update(message).map(|m| Message::Viewer(m)),
+            Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
+            Message::Layout(message) => self.layout.update(message).map(Message::Layout),
         }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        row![
-            self.editor.view().map(Message::Editor),
-            self.viewer.view().map(Message::Viewer),
-        ]
-        .into()
+        let panes = self
+            .layout
+            .view(|_, pane, _| {
+                let element = match pane {
+                    layout::PaneContent::Editor => self.editor.view().map(Message::Editor),
+                    layout::PaneContent::Viewer => self.viewer.view().map(Message::Viewer),
+                };
+
+                element.into()
+            })
+            .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
+            .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
+
+        container(panes)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     pub fn theme(&self) -> Theme {
