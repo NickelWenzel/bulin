@@ -366,16 +366,14 @@ impl UndoHandler {
     }
 
     fn undo(&mut self) -> Option<text_editor::Action> {
-        self.undo.pop().map(|action| {
+        self.undo.pop().inspect(|action| {
             self.redo.push(action.clone());
-            action
         })
     }
 
     fn redo(&mut self) -> Option<text_editor::Action> {
-        self.redo.pop().map(|action| {
+        self.redo.pop().inspect(|action| {
             self.undo.push(action.clone());
-            action
         })
     }
 }
