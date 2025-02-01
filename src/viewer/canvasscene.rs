@@ -5,8 +5,6 @@ use crate::FragmentShader;
 
 use pipeline::Pipeline;
 
-use glam;
-
 use iced_wgpu::wgpu;
 
 use iced::mouse;
@@ -68,8 +66,8 @@ impl shader::Primitive for Primitive {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         storage: &mut shader::Storage,
-        _bounds: &Rectangle,
-        viewport: &Viewport,
+        bounds: &Rectangle,
+        _viewport: &Viewport,
     ) {
         let should_store = storage
             .get_mut::<Pipeline>()
@@ -94,13 +92,7 @@ impl shader::Primitive for Primitive {
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();
-
-        let size = viewport.logical_size();
-        let uniforms = uniforms::Uniforms {
-            resolution: glam::Vec2::new(size.width as f32, size.height as f32),
-        };
-
-        pipeline.update(queue, &uniforms.to_raw());
+        pipeline.update(queue, &uniforms::Uniforms::new(*bounds));
     }
 
     fn render(
@@ -114,6 +106,6 @@ impl shader::Primitive for Primitive {
         let pipeline = storage.get::<Pipeline>().unwrap();
 
         // Render primitive
-        pipeline.render(target, encoder, *clip_bounds);
+        pipeline.render(target, encoder, clip_bounds.clone());
     }
 }
