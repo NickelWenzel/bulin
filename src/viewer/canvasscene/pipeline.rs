@@ -16,7 +16,7 @@ impl Pipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, shader: &str, version: usize) -> Result<Self, wgpu::Error> {
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bulin_canvas.pipeline.uniforms"),
-            size: std::mem::size_of::<uniforms::Raw>() as u64,
+            size: std::mem::size_of::<uniforms::Uniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -103,7 +103,7 @@ impl Pipeline {
         })
     }
 
-    pub fn update(&mut self, queue: &wgpu::Queue, uniforms: &uniforms::Raw) {
+    pub fn update(&mut self, queue: &wgpu::Queue, uniforms: &uniforms::Uniforms) {
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(uniforms));
     }
 
@@ -137,6 +137,7 @@ impl Pipeline {
             0.0,
             1.0,
         );
+        //pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
         pass.set_bind_group(0, &self.uniform_bind_group, &[]);
 
         pass.draw(0..3, 0..1);

@@ -7,10 +7,9 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let flower_color = vec3<f32>(0.5, 0.1, 0.2);
     let test = vec3<f32>(0.1, 0.2, 0.5);
 
-    //let resolution = vec2<f32>(1000.0, 1000.0);
-    let st = position.xy / uniforms.scale;
+    let st = (position.xy - uniforms.position) / uniforms.resolution;
 
-    let d = 0.5; //0.25 + 0.5 * (0.5 + 0.5 * sin(2.0 * time));
+    let d = 0.25 + 0.5 * (0.5 + 0.5 * sin(2.0 * time));
     let pos = vec2<f32>(d) - st;
 
     let r = (2.0 + sin(9.0 * time)) / radius * length(pos) * 1.2;
