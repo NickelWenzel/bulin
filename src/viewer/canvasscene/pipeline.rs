@@ -50,6 +50,7 @@ impl Pipeline {
             push_constant_ranges: &[],
         });
 
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
         let vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bulin_canvas.pipeline.shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(concat!(
@@ -59,18 +60,12 @@ impl Pipeline {
             ))),
         });
 
-
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
         let fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bulin_canvas.pipeline.fragment_shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
                 format!("{}\n{}", include_str!("shaders/uniforms.wgsl"), shader).as_str(),
             )),
         });
-
-        if let Some(error) = block_on( device.pop_error_scope()) {
-            return Err(error);
-        }
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("bulin_canvas.pipeline.pipeline"),
@@ -95,12 +90,17 @@ impl Pipeline {
             multiview: None,
         });
 
-        Ok(Self {
-            pipeline,
-            uniforms,
-            uniform_bind_group,
-            version
-        })
+        if let Some(error) = block_on( device.pop_error_scope()) {
+            Err(error)
+        } else {
+            Ok(Self {
+                pipeline,
+                uniforms,
+                uniform_bind_group,
+                version
+            })
+        }
+
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue, uniforms: &uniforms::Uniforms) {

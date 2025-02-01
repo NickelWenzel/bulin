@@ -67,8 +67,8 @@ impl Editor {
             Message::ActionPerformed(action) => {
                 let is_edit = action.is_edit();
 
-                let reverted = self.reverted(&action.clone());
-                self.undo_handler.push(reverted);
+                let undo_actions = self.to_undo(&action);
+                self.undo_handler.push(undo_actions);
 
                 self.content.perform(action);
 
@@ -145,16 +145,22 @@ impl Editor {
             }
             Message::UpdatePipeline(_) => Task::none(),
             Message::Undo => {
-                if let Some(action) = self.undo_handler.undo() {
+                self.undo_handler.undo().into_iter().for_each(|action| {
                     self.content.perform(action);
-                }
-                Task::none()
+                });
+
+                Task::done(Message::UpdatePipeline(Arc::new(
+                    self.content.text().clone(),
+                )))
             }
             Message::Redo => {
-                if let Some(action) = self.undo_handler.redo() {
+                self.undo_handler.redo().into_iter().for_each(|action| {
                     self.content.perform(action);
-                }
-                Task::none()
+                });
+
+                Task::done(Message::UpdatePipeline(Arc::new(
+                    self.content.text().clone(),
+                )))
             }
         }
     }
@@ -236,8 +242,21 @@ impl Editor {
                         keyboard::Key::Character("s") if key_press.modifiers.command() => {
                             Some(text_editor::Binding::Custom(Message::SaveFile))
                         }
+                        keyboard::Key::Character("z") if key_press.modifiers.command() => {
+                            Some(text_editor::Binding::Custom(Message::Undo))
+                        }
+                        keyboard::Key::Character("y") if key_press.modifiers.command() => {
+                            Some(text_editor::Binding::Custom(Message::Redo))
+                        }
                         keyboard::Key::Named(keyboard::key::Named::Delete) => {
                             Some(text_editor::Binding::Delete)
+                        }
+                        keyboard::Key::Named(keyboard::key::Named::Tab) => {
+                            Some(text_editor::Binding::Custom(Message::ActionPerformed(
+                                text_editor::Action::Edit(text_editor::Edit::Paste(Arc::new(
+                                    String::from("  "),
+                                ))),
+                            )))
                         }
                         _ => text_editor::Binding::from_key_press(key_press),
                     }
@@ -257,8 +276,48 @@ impl Editor {
         }
     }
 
-    fn reverted(&mut self, action: &text_editor::Action) -> text_editor::Action {
-        action.clone()
+    fn to_undo(&mut self, action: &text_editor::Action) -> Vec<text_editor::Action> {
+        let mut ret = Vec::new();
+        match action {
+            text_editor::Action::Edit(edit) => {
+                let selection = self.content.selection().unwrap_or_default();
+                let has_selection = !selection.is_empty();
+                ret.push(text_editor::Action::Edit(text_editor::Edit::Paste(
+                    Arc::new(selection),
+                )));
+
+                let mut insert_add_offset_from_cursor = |offset: isize| {
+                    let (line, column) = self.content.cursor_position();
+                    if let Some(line) = self.content.line(line) {
+                        if let Some(char) = line.chars().nth((column as isize + offset) as usize) {
+                            ret.push(text_editor::Action::Edit(text_editor::Edit::Insert(char)));
+                        }
+                    }
+                };
+
+                match edit {
+                    text_editor::Edit::Enter | text_editor::Edit::Insert(_) => {
+                        ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
+                        ret.push(text_editor::Action::Select(text_editor::Motion::Left));
+                    }
+                    text_editor::Edit::Paste(str) => {
+                        if !str.is_empty() {
+                            ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
+                            str.chars().into_iter().for_each(|_| {
+                                ret.push(text_editor::Action::Select(text_editor::Motion::Left))
+                            });
+                        }
+                    }
+                    text_editor::Edit::Backspace if !has_selection => {
+                        insert_add_offset_from_cursor(-1)
+                    }
+                    text_editor::Edit::Delete if !has_selection => insert_add_offset_from_cursor(0),
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+        ret
     }
 }
 
@@ -348,32 +407,66 @@ fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
 }
 
 struct UndoHandler {
-    undo: Vec<text_editor::Action>,
-    redo: Vec<text_editor::Action>,
+    undo_actions: Vec<text_editor::Action>,
+    actions_per_undo: Vec<usize>,
+    redo_actions: Vec<text_editor::Action>,
+    actions_per_redo: Vec<usize>,
 }
 
 impl UndoHandler {
     fn new() -> Self {
         Self {
-            undo: Vec::new(),
-            redo: Vec::new(),
+            undo_actions: Vec::new(),
+            actions_per_undo: Vec::new(),
+            redo_actions: Vec::new(),
+            actions_per_redo: Vec::new(),
         }
     }
 
-    fn push(&mut self, action: text_editor::Action) {
-        self.undo.push(action);
-        self.redo.clear();
+    fn push(&mut self, actions: Vec<text_editor::Action>) {
+        self.actions_per_undo.push(actions.len());
+        self.undo_actions.extend(actions);
+        self.redo_actions.clear();
+        self.actions_per_redo.clear();
     }
 
-    fn undo(&mut self) -> Option<text_editor::Action> {
-        self.undo.pop().inspect(|action| {
-            self.redo.push(action.clone());
-        })
+    fn undo(&mut self) -> Vec<text_editor::Action> {
+        match self
+            .actions_per_undo
+            .pop()
+            .inspect(|n| self.actions_per_redo.push(*n))
+        {
+            None => return Vec::new(),
+            Some(action_count) => Self::transfer_and_return_tail(
+                &mut self.undo_actions,
+                &mut self.redo_actions,
+                action_count,
+            ),
+        }
     }
 
-    fn redo(&mut self) -> Option<text_editor::Action> {
-        self.redo.pop().inspect(|action| {
-            self.undo.push(action.clone());
-        })
+    fn redo(&mut self) -> Vec<text_editor::Action> {
+        match self
+            .actions_per_redo
+            .pop()
+            .inspect(|n| self.actions_per_undo.push(*n))
+        {
+            None => return Vec::new(),
+            Some(action_count) => Self::transfer_and_return_tail(
+                &mut self.redo_actions,
+                &mut self.undo_actions,
+                action_count,
+            ),
+        }
+    }
+
+    fn transfer_and_return_tail(
+        take_from: &mut Vec<text_editor::Action>,
+        add_to: &mut Vec<text_editor::Action>,
+        last_n: usize,
+    ) -> Vec<text_editor::Action> {
+        let actions: Vec<_> = take_from.drain(take_from.len() - last_n..).rev().collect();
+        add_to.extend(actions.iter().map(|a| a.clone()));
+        actions
     }
 }
