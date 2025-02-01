@@ -29,7 +29,7 @@ impl Application {
                 viewer: viewer::Viewer::new(),
                 layout: layout::Layout::new(),
             },
-            editor_task.map(|m| Message::Editor(m)),
+            editor_task.map(Message::Editor),
         )
     }
 
@@ -40,7 +40,7 @@ impl Application {
                     .viewer
                     .update(viewer::Message::UpdatePipeline(shader))
                     .map(Message::Viewer),
-                _ => self.editor.update(message).map(|m| Message::Editor(m)),
+                _ => self.editor.update(message).map(Message::Editor),
             },
             Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
             Message::Layout(message) => self.layout.update(message).map(Message::Layout),

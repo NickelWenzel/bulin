@@ -106,6 +106,6 @@ impl shader::Primitive for Primitive {
         let pipeline = storage.get::<Pipeline>().unwrap();
 
         // Render primitive
-        pipeline.render(target, encoder, clip_bounds.clone());
+        pipeline.render(target, encoder, *clip_bounds);
     }
 }
