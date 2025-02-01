@@ -1,5 +1,5 @@
-use iced::widget::pane_grid;
-use iced::widget::pane_grid::{Configuration, Content, Pane, State};
+use iced::widget::{pane_grid, text};
+use iced::widget::pane_grid::{Configuration, Content, Pane, State, TitleBar};
 use iced::widget::PaneGrid;
 use iced::Task;
 
@@ -60,7 +60,10 @@ impl Layout {
         &'a self,
         view: impl Fn(Pane, &PaneContent, bool) -> Content<'a, T>,
     ) -> PaneGrid<'a, T> {
-        PaneGrid::new(&self.panes, view)
+        PaneGrid::new(&self.panes, move |id, pane, maximized| {
+            view(id, pane, maximized)
+                .title_bar(TitleBar::new(text("sheesh")))
+        })
     }
 }
 

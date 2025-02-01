@@ -19,6 +19,7 @@ pub struct Editor {
     word_wrap: bool,
     is_loading: bool,
     is_dirty: bool,
+    undo_handler: UndoHandler,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,8 @@ pub enum Message {
     SaveFile,
     FileSaved(Result<PathBuf, Error>),
     UpdatePipeline(Arc<String>),
+    Undo,
+    Redo,
 }
 
 impl Editor {
@@ -44,6 +47,7 @@ impl Editor {
                 word_wrap: true,
                 is_loading: true,
                 is_dirty: false,
+                undo_handler: UndoHandler::new(),
             },
             Task::batch([
                 Task::perform(
@@ -62,6 +66,9 @@ impl Editor {
         match message {
             Message::ActionPerformed(action) => {
                 let is_edit = action.is_edit();
+
+                let reverted = self.reverted(&action.clone());
+                self.undo_handler.push(reverted);
 
                 self.content.perform(action);
 
@@ -137,6 +144,18 @@ impl Editor {
                 Task::none()
             }
             Message::UpdatePipeline(_) => Task::none(),
+            Message::Undo => {
+                if let Some(action) = self.undo_handler.undo() {
+                    self.content.perform(action);
+                }
+                Task::none()
+            }
+            Message::Redo => {
+                if let Some(action) = self.undo_handler.redo() {
+                    self.content.perform(action);
+                }
+                Task::none()
+            }
         }
     }
 
@@ -237,6 +256,10 @@ impl Editor {
             Theme::Light
         }
     }
+
+    fn reverted(&mut self, action: &text_editor::Action) -> text_editor::Action {
+        action.clone()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -322,4 +345,37 @@ fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
     const ICON_FONT: Font = Font::with_name("editor-icons");
 
     text(codepoint).font(ICON_FONT).into()
+}
+
+struct UndoHandler {
+    undo: Vec<text_editor::Action>,
+    redo: Vec<text_editor::Action>,
+}
+
+impl UndoHandler {
+    fn new() -> Self {
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, action: text_editor::Action) {
+        self.undo.push(action);
+        self.redo.clear();
+    }
+
+    fn undo(&mut self) -> Option<text_editor::Action> {
+        self.undo.pop().map(|action| {
+            self.redo.push(action.clone());
+            action
+        })
+    }
+
+    fn redo(&mut self) -> Option<text_editor::Action> {
+        self.redo.pop().map(|action| {
+            self.undo.push(action.clone());
+            action
+        })
+    }
 }

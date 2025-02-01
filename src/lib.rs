@@ -58,6 +58,7 @@ impl Application {
 
                 element.into()
             })
+            .on_click(|e| Message::Layout(layout::Message::Clicked(e)))
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
 
