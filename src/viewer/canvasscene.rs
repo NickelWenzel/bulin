@@ -72,15 +72,22 @@ impl shader::Primitive for Primitive {
         viewport: &Viewport,
     ) {
         let should_store = storage
-            .get::<Pipeline>()
-            .map(|pipeline| pipeline.version < self.version)
+            .get_mut::<Pipeline>()
+            .map(|pipeline| {
+                if pipeline.version < self.version {
+                    pipeline.version = self.version;
+                    true
+                } else {
+                    false
+                }
+            })
             .unwrap_or(true);
 
         if should_store {
             match Pipeline::new(device, format, &self.shader, self.version) {
                 Ok(pipeline) => storage.store(pipeline),
                 Err(error) => {
-                    println!("Failed to create pipeline:\n{:?}", error);
+                    println!("Failed to create pipeline:\n{error}");
                     return;
                 }
             }
