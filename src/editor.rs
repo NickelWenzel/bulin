@@ -1,4 +1,6 @@
 mod highlighter;
+mod visitor;
+use crate::util;
 
 use iced::keyboard;
 use iced::widget::{
@@ -7,10 +9,12 @@ use iced::widget::{
 };
 use iced::{Center, Element, Fill, Font, Task, Theme};
 
-use std::ffi;
-use std::io;
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::ffi;
 
 pub struct Editor {
     file: Option<PathBuf>,
@@ -29,9 +33,9 @@ pub enum Message {
     WordWrapToggled(bool),
     NewFile,
     OpenFile,
-    FileOpened(Result<(PathBuf, Arc<String>), Error>),
+    FileOpened(Result<(PathBuf, Arc<String>), util::Error>),
     SaveFile,
-    FileSaved(Result<PathBuf, Error>),
+    FileSaved(Result<PathBuf, util::Error>),
     UpdatePipeline(Arc<String>),
     Undo,
     Redo,
@@ -40,18 +44,10 @@ pub enum Message {
 impl Editor {
     pub fn new() -> (Self, Task<Message>) {
         (
-            Self {
-                file: None,
-                content: text_editor::Content::new(),
-                theme: highlighter::Theme::SolarizedDark,
-                word_wrap: true,
-                is_loading: true,
-                is_dirty: false,
-                undo_handler: UndoHandler::new(),
-            },
+            Editor::simple_new(),
             Task::batch([
                 Task::perform(
-                    load_file(format!(
+                    util::load_file(format!(
                         "{}/src/viewer/canvasscene/shaders/empty_frag.wgsl",
                         env!("CARGO_MANIFEST_DIR")
                     )),
@@ -62,21 +58,46 @@ impl Editor {
         )
     }
 
+    pub fn simple_new() -> Self {
+        Self {
+            file: None,
+            content: text_editor::Content::new(),
+            theme: highlighter::Theme::SolarizedDark,
+            word_wrap: true,
+            is_loading: true,
+            is_dirty: false,
+            undo_handler: UndoHandler::new(),
+        }
+    }
+
+    pub fn with_file(self, file: Option<PathBuf>) -> Self {
+        Self { file, ..self }
+    }
+
+    pub fn with_content(self, content: &str) -> Self {
+        Self {
+            content: text_editor::Content::with_text(content),
+            ..self
+        }
+    }
+
+    pub fn with_theme(self, theme: highlighter::Theme) -> Self {
+        Self { theme, ..self }
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::ActionPerformed(action) => {
                 let is_edit = action.is_edit();
 
-                let undo_actions = self.to_undo(&action);
+                let undo_actions = self.create_undo(&action);
                 self.undo_handler.push(undo_actions);
 
                 self.content.perform(action);
 
                 if is_edit {
                     self.is_dirty = true;
-                    Task::done(Message::UpdatePipeline(Arc::new(
-                        self.content.text().clone(),
-                    )))
+                    Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
                 } else {
                     Task::none()
                 }
@@ -105,7 +126,7 @@ impl Editor {
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(open_file(), Message::FileOpened)
+                    Task::perform(util::open_file(), Message::FileOpened)
                 }
             }
             Message::FileOpened(result) => {
@@ -117,9 +138,7 @@ impl Editor {
                     self.content = text_editor::Content::with_text(&contents);
                 }
 
-                Task::done(Message::UpdatePipeline(Arc::new(
-                    self.content.text().clone(),
-                )))
+                Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
             }
             Message::SaveFile => {
                 if self.is_loading {
@@ -128,7 +147,7 @@ impl Editor {
                     self.is_loading = true;
 
                     Task::perform(
-                        save_file(self.file.clone(), self.content.text()),
+                        util::save_file(self.file.clone(), self.content.text()),
                         Message::FileSaved,
                     )
                 }
@@ -149,18 +168,14 @@ impl Editor {
                     self.content.perform(action);
                 });
 
-                Task::done(Message::UpdatePipeline(Arc::new(
-                    self.content.text().clone(),
-                )))
+                Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
             }
             Message::Redo => {
                 self.undo_handler.redo().into_iter().for_each(|action| {
                     self.content.perform(action);
                 });
 
-                Task::done(Message::UpdatePipeline(Arc::new(
-                    self.content.text().clone(),
-                )))
+                Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
             }
         }
     }
@@ -192,27 +207,6 @@ impl Editor {
         ]
         .spacing(10)
         .align_y(Center);
-
-        let status = row![
-            text(if let Some(path) = &self.file {
-                let path = path.display().to_string();
-
-                if path.len() > 60 {
-                    format!("...{}", &path[path.len() - 40..])
-                } else {
-                    path
-                }
-            } else {
-                String::from("New file")
-            }),
-            horizontal_space(),
-            text({
-                let (line, column) = self.content.cursor_position();
-
-                format!("{}:{}", line + 1, column + 1)
-            })
-        ]
-        .spacing(10);
 
         column![
             controls,
@@ -261,7 +255,6 @@ impl Editor {
                         _ => text_editor::Binding::from_key_press(key_press),
                     }
                 }),
-            status,
         ]
         .spacing(10)
         .padding(10)
@@ -276,7 +269,21 @@ impl Editor {
         }
     }
 
-    fn to_undo(&mut self, action: &text_editor::Action) -> Vec<text_editor::Action> {
+    pub fn file_text(&self) -> String {
+        if let Some(path) = &self.file {
+            let path = path.display().to_string();
+
+            if path.len() > 60 {
+                format!("...{}", &path[path.len() - 40..])
+            } else {
+                path
+            }
+        } else {
+            String::from("New file")
+        }
+    }
+
+    fn create_undo(&mut self, action: &text_editor::Action) -> Vec<text_editor::Action> {
         let mut ret = Vec::new();
         match action {
             text_editor::Action::Edit(edit) => {
@@ -321,51 +328,28 @@ impl Editor {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Error {
-    DialogClosed,
-    IoError(io::ErrorKind),
+impl Serialize for Editor {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let content = self.content.text();
+
+        let mut state = serializer.serialize_struct("Editor", 3)?;
+        state.serialize_field("file", &self.file)?;
+        state.serialize_field("content", &content)?;
+        state.serialize_field("theme", &self.theme)?;
+        state.end()
+    }
 }
 
-async fn open_file() -> Result<(PathBuf, Arc<String>), Error> {
-    let picked_file = rfd::AsyncFileDialog::new()
-        .set_title("Open a text file...")
-        .pick_file()
-        .await
-        .ok_or(Error::DialogClosed)?;
-
-    load_file(picked_file).await
-}
-
-async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, Arc<String>), Error> {
-    let path = path.into();
-
-    let contents = tokio::fs::read_to_string(&path)
-        .await
-        .map(Arc::new)
-        .map_err(|error| Error::IoError(error.kind()))?;
-
-    Ok((path, contents))
-}
-
-async fn save_file(path: Option<PathBuf>, contents: String) -> Result<PathBuf, Error> {
-    let path = if let Some(path) = path {
-        path
-    } else {
-        rfd::AsyncFileDialog::new()
-            .save_file()
-            .await
-            .as_ref()
-            .map(rfd::FileHandle::path)
-            .map(Path::to_owned)
-            .ok_or(Error::DialogClosed)?
-    };
-
-    tokio::fs::write(&path, contents)
-        .await
-        .map_err(|error| Error::IoError(error.kind()))?;
-
-    Ok(path)
+impl<'de> Deserialize<'de> for Editor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_struct("Editor", &["file", "content", "theme"], visitor::EditorVisitor)
+    }
 }
 
 fn action<'a, Message: Clone + 'a>(
@@ -436,7 +420,7 @@ impl UndoHandler {
             .pop()
             .inspect(|n| self.actions_per_redo.push(*n))
         {
-            None => return Vec::new(),
+            None => Vec::new(),
             Some(action_count) => Self::transfer_and_return_tail(
                 &mut self.undo_actions,
                 &mut self.redo_actions,
@@ -451,7 +435,7 @@ impl UndoHandler {
             .pop()
             .inspect(|n| self.actions_per_undo.push(*n))
         {
-            None => return Vec::new(),
+            None => Vec::new(),
             Some(action_count) => Self::transfer_and_return_tail(
                 &mut self.redo_actions,
                 &mut self.undo_actions,
@@ -468,5 +452,16 @@ impl UndoHandler {
         let actions: Vec<_> = take_from.drain(take_from.len() - last_n..).rev().collect();
         add_to.extend(actions.iter().map(|a| a.clone()));
         actions
+    }
+}
+
+impl Default for UndoHandler {
+    fn default() -> Self {
+        Self {
+            undo_actions: Vec::new(),
+            actions_per_undo: Vec::new(),
+            redo_actions: Vec::new(),
+            actions_per_redo: Vec::new(),
+        }
     }
 }

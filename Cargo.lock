@@ -478,6 +478,8 @@ dependencies = [
  "once_cell",
  "rand",
  "rfd",
+ "serde",
+ "serde_json",
  "tokio",
  "two-face",
 ]

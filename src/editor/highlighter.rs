@@ -2,13 +2,16 @@
 use iced::advanced::text::highlighter::Format;
 use iced::{Color, Font};
 
-use once_cell::sync::Lazy;
-use std::ops::Range;
+use serde::{Serialize,Deserialize};
+
 use two_face::re_exports::syntect::highlighting;
 use two_face::re_exports::syntect::parsing;
 
-static SYNTAXES: Lazy<parsing::SyntaxSet> = Lazy::new(two_face::syntax::extra_newlines);
+use once_cell::sync::Lazy;
 
+use std::ops::Range;
+
+static SYNTAXES: Lazy<parsing::SyntaxSet> = Lazy::new(two_face::syntax::extra_newlines);
 static THEMES: Lazy<highlighting::ThemeSet> = Lazy::new(highlighting::ThemeSet::load_defaults);
 
 const LINES_PER_SNAPSHOT: usize = 50;
@@ -193,6 +196,7 @@ impl Highlight {
 /// A highlighting theme.
 #[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize)]
 pub enum Theme {
     SolarizedDark,
     Base16Mocha,

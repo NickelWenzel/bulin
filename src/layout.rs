@@ -58,11 +58,13 @@ impl Layout {
 
     pub fn view<'a, T>(
         &'a self,
-        view: impl Fn(Pane, &PaneContent, bool) -> Content<'a, T>,
+        view: impl Fn(Pane, &PaneContent, bool) -> (Content<'a, T>, Option<String>),
     ) -> PaneGrid<'a, T> {
         PaneGrid::new(&self.panes, move |id, pane, maximized| {
-            view(id, pane, maximized)
-                .title_bar(TitleBar::new(text("sheesh")))
+            match view(id, pane, maximized) {
+                (view, Some(title)) => view.title_bar(TitleBar::new(text(title))),
+                (view, _) => view
+            }
         })
     }
 }
