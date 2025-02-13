@@ -44,7 +44,10 @@ pub enum Message {
 impl Editor {
     pub fn new() -> (Self, Task<Message>) {
         (
-            Editor::simple_new(),
+            Self {
+                is_loading: true,
+                ..Editor::simple_new()
+            },
             Task::batch([
                 Task::perform(
                     util::load_file(format!(
@@ -64,7 +67,7 @@ impl Editor {
             content: text_editor::Content::new(),
             theme: highlighter::Theme::SolarizedDark,
             word_wrap: true,
-            is_loading: true,
+            is_loading: false,
             is_dirty: false,
             undo_handler: UndoHandler::new(),
         }
@@ -97,7 +100,7 @@ impl Editor {
 
                 if is_edit {
                     self.is_dirty = true;
-                    Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
+                    Task::done(Message::UpdatePipeline(Arc::new(self.content())))
                 } else {
                     Task::none()
                 }
@@ -138,7 +141,7 @@ impl Editor {
                     self.content = text_editor::Content::with_text(&contents);
                 }
 
-                Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
+                Task::done(Message::UpdatePipeline(Arc::new(self.content())))
             }
             Message::SaveFile => {
                 if self.is_loading {
@@ -147,7 +150,7 @@ impl Editor {
                     self.is_loading = true;
 
                     Task::perform(
-                        util::save_file(self.file.clone(), self.content.text()),
+                        util::save_file(self.file.clone(), self.content()),
                         Message::FileSaved,
                     )
                 }
@@ -168,14 +171,14 @@ impl Editor {
                     self.content.perform(action);
                 });
 
-                Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
+                Task::done(Message::UpdatePipeline(Arc::new(self.content())))
             }
             Message::Redo => {
                 self.undo_handler.redo().into_iter().for_each(|action| {
                     self.content.perform(action);
                 });
 
-                Task::done(Message::UpdatePipeline(Arc::new(self.content.text())))
+                Task::done(Message::UpdatePipeline(Arc::new(self.content())))
             }
         }
     }
@@ -269,18 +272,22 @@ impl Editor {
         }
     }
 
-    pub fn file_text(&self) -> String {
+    pub fn filename_display_text(&self) -> Option<String> {
         if let Some(path) = &self.file {
             let path = path.display().to_string();
 
             if path.len() > 60 {
-                format!("...{}", &path[path.len() - 40..])
+                Some(format!("...{}", &path[path.len() - 40..]))
             } else {
-                path
+                Some(path)
             }
         } else {
-            String::from("New file")
+            None
         }
+    }
+
+    pub fn content(&self) -> String {
+        self.content.text()
     }
 
     fn create_undo(&mut self, action: &text_editor::Action) -> Vec<text_editor::Action> {
@@ -333,7 +340,7 @@ impl Serialize for Editor {
     where
         S: Serializer,
     {
-        let content = self.content.text();
+        let content = self.content();
 
         let mut state = serializer.serialize_struct("Editor", 3)?;
         state.serialize_field("file", &self.file)?;

@@ -9,7 +9,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
 
     // Format a message stating what data this Visitor expects to receive.
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a very special map")
+        formatter.write_str("file, content and theme of an bulin editor")
     }
 
     fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
@@ -19,7 +19,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
         let file = seq
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-        let content = seq
+        let content: String = seq
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(1, &self))?;
         let theme = seq
@@ -28,7 +28,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
 
         Ok(Editor::simple_new()
             .with_file(file)
-            .with_content(content)
+            .with_content(&content)
             .with_theme(theme))
     }
     fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
@@ -36,7 +36,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
         M: MapAccess<'de>,
     {
         let mut file = None;
-        let mut content: Option<&str> = None;
+        let mut content: Option<String> = None;
         let mut theme = None;
 
         while let Some(key) = map.next_key()? {
@@ -54,7 +54,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
                     content = Some(map.next_value()?);
                 }
                 "theme" => {
-                    if content.is_some() {
+                    if theme.is_some() {
                         return Err(de::Error::duplicate_field("theme"));
                     }
                     theme = Some(map.next_value()?);
@@ -73,7 +73,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
 
         Ok(Editor::simple_new()
             .with_file(file)
-            .with_content(content)
+            .with_content(&content)
             .with_theme(theme))
     }
 }

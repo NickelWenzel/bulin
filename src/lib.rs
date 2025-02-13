@@ -1,9 +1,10 @@
 mod editor;
 mod layout;
+mod menu;
 mod util;
 mod viewer;
 
-use iced::widget::container;
+use iced::widget::{column, container};
 use iced::{Element, Length, Task, Theme};
 use util::Error;
 
@@ -25,6 +26,7 @@ pub enum Message {
     Editor(editor::Message),
     Viewer(viewer::Message),
     Layout(layout::Message),
+    Menu(menu::Message),
     OpenProject,
     ProjectOpened(Result<(PathBuf, Arc<String>), Error>),
     SaveProject,
@@ -57,6 +59,14 @@ impl Application {
             },
             Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
             Message::Layout(message) => self.layout.update(message).map(Message::Layout),
+            Message::Menu(message) => match message {
+                menu::Message::OpenProject => Task::done(Message::OpenProject),
+                menu::Message::SaveProject => Task::done(Message::SaveProject),
+                menu::Message::OpenFile => Task::done(Message::Editor(editor::Message::OpenFile)),
+                menu::Message::SaveFile => Task::done(Message::Editor(editor::Message::SaveFile)),
+                menu::Message::Undo => Task::done(Message::Editor(editor::Message::Undo)),
+                menu::Message::Redo => Task::done(Message::Editor(editor::Message::Redo)),
+            },
             Message::OpenProject => {
                 if self.is_loading {
                     Task::none()
@@ -74,7 +84,7 @@ impl Application {
                         self.file = Some(path);
                         self.editor = editor;
                         Task::done(viewer::Message::UpdatePipeline(Arc::new(
-                            self.editor.file_text(),
+                            self.editor.content(),
                         )))
                         .map(Message::Viewer)
                     } else {
@@ -115,7 +125,9 @@ impl Application {
             .view(|_, pane, _| match pane {
                 layout::PaneContent::Editor => (
                     self.editor.view().map(Message::Editor).into(),
-                    Some(self.editor.file_text()),
+                    self.editor
+                        .filename_display_text()
+                        .or(Some(String::from("New file"))),
                 ),
                 layout::PaneContent::Viewer => {
                     (self.viewer.view().map(Message::Viewer).into(), None)
@@ -125,10 +137,11 @@ impl Application {
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
 
-        container(panes)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        column!(
+            menu::view().map(Message::Menu),
+            container(panes).width(Length::Fill).height(Length::Fill)
+        )
+        .into()
     }
 
     pub fn theme(&self) -> Theme {
