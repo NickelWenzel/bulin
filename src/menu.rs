@@ -1,9 +1,9 @@
 use iced::widget::{button, text, Button};
 use iced::{Border, Color, Element, Length};
 
-use iced_aw::menu::{self, Item};
+use iced_aw::menu::Item;
 use iced_aw::style::menu_bar::primary;
-use iced_aw::{menu_bar, menu_items};
+use iced_aw::{menu_bar, menu};
 use iced_aw::{quad, widgets::InnerBounds};
 
 #[derive(Debug, Clone)]
@@ -16,25 +16,19 @@ pub enum Message {
     Redo,
 }
 
-#[rustfmt::skip]
 pub fn view() -> Element<'static, Message> {
-    let menu_template = |items| menu::Menu::new(items).max_width(180.0);
     menu_bar!(
-        (main_menu_item("File"), menu_template(
-            menu_items!(
-                (menu_item("Open File", Message::OpenFile))
-                (menu_item("Save File", Message::SaveFile))
-                (separator())
-                (menu_item("Open Project", Message::OpenProject))
-                (menu_item("Save Project", Message::SaveProject))
-            )
-        ))
-        (main_menu_item("Edit"), menu_template(
-            menu_items!(
-                (menu_item("Undo", Message::Undo))
-                (menu_item("Redo", Message::Redo))
-            )
-        ))
+        (main_menu_item("File"), menu!(
+            (menu_item("Open File", Message::OpenFile))
+            (menu_item("Save File", Message::SaveFile))
+            (separator())
+            (menu_item("Open Project", Message::OpenProject))
+            (menu_item("Save Project", Message::SaveProject))
+        ).max_width(180.0))
+        (main_menu_item("Edit"), menu!(
+            (menu_item("Undo", Message::Undo))
+            (menu_item("Redo", Message::Redo))
+        ).max_width(180.0))
     )
     .draw_path(menu::DrawPath::Backdrop)
     .style(primary).into()
