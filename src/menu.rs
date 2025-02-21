@@ -1,3 +1,6 @@
+use crate::editor;
+use crate::text_editor;
+
 use iced::widget::{button, text, Button};
 use iced::{Border, Color, Element, Length};
 
@@ -10,24 +13,21 @@ use iced_aw::{quad, widgets::InnerBounds};
 pub enum Message {
     OpenProject,
     SaveProject,
-    OpenFile,
-    SaveFile,
-    Undo,
-    Redo,
+    Editor(editor::Message),
 }
 
 pub fn view() -> Element<'static, Message> {
     menu_bar!(
         (main_menu_item("File"), menu!(
-            (menu_item("Open File", Message::OpenFile))
-            (menu_item("Save File", Message::SaveFile))
+            (menu_item("Open File", Message::Editor(editor::Message::TextEditor(text_editor::Message::OpenFile))))
+            (menu_item("Save File", Message::Editor(editor::Message::TextEditor(text_editor::Message::SaveFile))))
             (separator())
             (menu_item("Open Project", Message::OpenProject))
             (menu_item("Save Project", Message::SaveProject))
         ).max_width(180.0))
         (main_menu_item("Edit"), menu!(
-            (menu_item("Undo", Message::Undo))
-            (menu_item("Redo", Message::Redo))
+            (menu_item("Undo", Message::Editor(editor::Message::TextEditor(text_editor::Message::Undo))))
+            (menu_item("Redo", Message::Editor(editor::Message::TextEditor(text_editor::Message::Redo))))
         ).max_width(180.0))
     )
     .draw_path(menu::DrawPath::Backdrop)

@@ -1,6 +1,7 @@
 mod canvasscene;
 
-use crate::FragmentShader;
+use crate::pipeline_update::FragmentShader;
+use crate::pipeline_update::PipelineUpdate;
 
 use canvasscene::CanvasScene;
 
@@ -17,7 +18,7 @@ pub struct Viewer {
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick(Instant),
-    UpdatePipeline(Arc<FragmentShader>),
+    UpdatePipeline(PipelineUpdate),
 }
 
 impl Viewer {
@@ -29,10 +30,10 @@ impl Viewer {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::UpdatePipeline(shader) => {
+            Message::UpdatePipeline(PipelineUpdate::Shader(shader)) => {
                 self.scene.update(shader);
                 Task::none()
-            },
+            }
             _ => Task::none(),
         }
     }
