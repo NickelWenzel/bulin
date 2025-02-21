@@ -1,11 +1,11 @@
-use crate::editor::Editor;
+use crate::text_editor::TextEditor;
 use serde::de;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use std::fmt;
 
 pub struct EditorVisitor;
 impl<'de> Visitor<'de> for EditorVisitor {
-    type Value = Editor;
+    type Value = TextEditor;
 
     // Format a message stating what data this Visitor expects to receive.
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -26,7 +26,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
-        Ok(Editor::simple_new()
+        Ok(TextEditor::simple_new()
             .with_file(file)
             .with_content(&content)
             .with_theme(theme))
@@ -71,7 +71,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
         let content = content.ok_or_else(|| de::Error::missing_field("content"))?;
         let theme = theme.ok_or_else(|| de::Error::missing_field("theme"))?;
 
-        Ok(Editor::simple_new()
+        Ok(TextEditor::simple_new()
             .with_file(file)
             .with_content(&content)
             .with_theme(theme))

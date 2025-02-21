@@ -1,7 +1,7 @@
 mod pipeline;
 mod uniforms;
 
-use crate::FragmentShader;
+use crate::pipeline_update::FragmentShader;
 
 use pipeline::Pipeline;
 

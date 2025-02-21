@@ -1,8 +1,13 @@
 mod editor;
 mod layout;
 mod menu;
+mod pipeline_update;
+mod text_editor;
+mod uniforms_editor;
 mod util;
 mod viewer;
+
+use pipeline_update::PipelineUpdate;
 
 use iced::widget::{column, container};
 use iced::{Element, Length, Task, Theme};
@@ -10,8 +15,6 @@ use util::Error;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-
-pub type FragmentShader = String;
 
 pub struct Application {
     editor: editor::Editor,
@@ -51,9 +54,9 @@ impl Application {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Editor(message) => match message {
-                editor::Message::UpdatePipeline(shader) => self
+                editor::Message::UpdatePipeline(update) => self
                     .viewer
-                    .update(viewer::Message::UpdatePipeline(shader))
+                    .update(viewer::Message::UpdatePipeline(update))
                     .map(Message::Viewer),
                 _ => self.editor.update(message).map(Message::Editor),
             },
@@ -62,10 +65,7 @@ impl Application {
             Message::Menu(message) => match message {
                 menu::Message::OpenProject => Task::done(Message::OpenProject),
                 menu::Message::SaveProject => Task::done(Message::SaveProject),
-                menu::Message::OpenFile => Task::done(Message::Editor(editor::Message::OpenFile)),
-                menu::Message::SaveFile => Task::done(Message::Editor(editor::Message::SaveFile)),
-                menu::Message::Undo => Task::done(Message::Editor(editor::Message::Undo)),
-                menu::Message::Redo => Task::done(Message::Editor(editor::Message::Redo)),
+                menu::Message::Editor(message) => Task::done(Message::Editor(message)),
             },
             Message::OpenProject => {
                 if self.is_loading {
@@ -83,9 +83,10 @@ impl Application {
                     if let Ok(editor) = serde_json::from_str(&contents) {
                         self.file = Some(path);
                         self.editor = editor;
-                        Task::done(viewer::Message::UpdatePipeline(Arc::new(
-                            self.editor.content(),
+                        Task::done(PipelineUpdate::Shader(Arc::new(
+                            self.editor.text().content(),
                         )))
+                        .map(viewer::Message::UpdatePipeline)
                         .map(Message::Viewer)
                     } else {
                         Task::none()
@@ -126,6 +127,7 @@ impl Application {
                 layout::PaneContent::Editor => (
                     self.editor.view().map(Message::Editor).into(),
                     self.editor
+                        .text()
                         .filename_display_text()
                         .or(Some(String::from("New file"))),
                 ),
@@ -145,6 +147,6 @@ impl Application {
     }
 
     pub fn theme(&self) -> Theme {
-        self.editor.theme()
+        self.editor.text().theme()
     }
 }
