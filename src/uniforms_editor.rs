@@ -6,7 +6,7 @@ use std::time::Instant;
 use uniform::*;
 
 use iced::{
-    widget::{button, container, horizontal_space, row},
+    widget::{button, horizontal_space, row},
     Element, Task,
 };
 use serde::{Deserialize, Serialize};
@@ -109,19 +109,14 @@ impl UniformsEditor {
             add_candidate_button,
         ];
 
-        let uniforms = iced::widget::Column::from_vec(
-            self.uniforms
-                .iter()
-                .enumerate()
-                .map(|(idx, u)| {
-                    row![
-                        u.view().map(move |m| Message::Uniforms(idx as u32, m)),
-                        button("X").on_press(Message::RemoveUniform(idx as u32)),
-                    ]
-                    .into()
-                })
-                .collect(),
-        );
+        let uniforms =
+            iced::widget::Column::from_iter(self.uniforms.iter().enumerate().map(|(idx, u)| {
+                row![
+                    u.view().map(move |m| Message::Uniforms(idx as u32, m)),
+                    button("X").on_press(Message::RemoveUniform(idx as u32)),
+                ]
+                .into()
+            }));
         iced::widget::column![time, candidate, uniforms].into()
     }
 }
