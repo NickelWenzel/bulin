@@ -2,7 +2,7 @@
 use iced::advanced::text::highlighter::Format;
 use iced::{Color, Font};
 
-use serde::{Serialize,Deserialize};
+use serde::{Deserialize, Serialize};
 
 use two_face::re_exports::syntect::highlighting;
 use two_face::re_exports::syntect::parsing;
@@ -146,9 +146,9 @@ impl Highlight {
     ///
     /// If `None`, the original text color should be unchanged.
     pub fn color(&self) -> Option<Color> {
-        self.0.foreground.map(|color| {
-            Color::from_rgba8(color.r, color.g, color.b, color.a as f32 / 255.0)
-        })
+        self.0
+            .foreground
+            .map(|color| Color::from_rgba8(color.r, color.g, color.b, color.a as f32 / 255.0))
     }
 
     /// Returns the font of this [`Highlight`].
@@ -195,8 +195,7 @@ impl Highlight {
 
 /// A highlighting theme.
 #[allow(missing_docs)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Theme {
     SolarizedDark,
     Base16Mocha,
@@ -218,10 +217,9 @@ impl Theme {
     /// Returns `true` if the [`Theme`] is dark, and false otherwise.
     pub fn is_dark(self) -> bool {
         match self {
-            Self::SolarizedDark
-            | Self::Base16Mocha
-            | Self::Base16Ocean
-            | Self::Base16Eighties => true,
+            Self::SolarizedDark | Self::Base16Mocha | Self::Base16Ocean | Self::Base16Eighties => {
+                true
+            }
             Self::InspiredGitHub => false,
         }
     }
