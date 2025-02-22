@@ -3,6 +3,7 @@ use crate::text_editor;
 use crate::uniforms_editor;
 
 use iced::widget::container;
+use iced::Subscription;
 use iced::{Element, Task};
 use serde::{Deserialize, Serialize};
 
@@ -56,10 +57,17 @@ impl Editor {
         container(iced::widget::column![
             self.uniforms_editor.view().map(Message::UniformsEditor),
             self.text_editor.view().map(Message::TextEditor),
-        ]).into()
+        ])
+        .into()
     }
 
     pub fn text(&self) -> &text_editor::TextEditor {
         &self.text_editor
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        self.uniforms_editor
+            .subscription()
+            .map(Message::UniformsEditor)
     }
 }

@@ -10,7 +10,7 @@ mod viewer;
 use pipeline_update::PipelineUpdate;
 
 use iced::widget::{column, container};
-use iced::{Element, Length, Task, Theme};
+use iced::{Element, Length, Subscription, Task, Theme};
 use util::Error;
 
 use std::path::PathBuf;
@@ -148,5 +148,9 @@ impl Application {
 
     pub fn theme(&self) -> Theme {
         self.editor.text().theme()
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        self.editor.subscription().map(Message::Editor)
     }
 }

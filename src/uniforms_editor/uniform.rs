@@ -246,7 +246,7 @@ impl TryFrom<Candidate> for Uniform {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Candidate {
     types: combo_box::State<Type>,
     pub current_type: Option<Type>,
@@ -264,7 +264,7 @@ impl Candidate {
         Self {
             types: combo_box::State::new(Type::ALL.to_vec()),
             current_type: Some(Type::Float(0.0)),
-            name: String::from("Name"),
+            name: String::default(),
         }
     }
 

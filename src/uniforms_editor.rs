@@ -2,12 +2,11 @@ mod time;
 pub mod uniform;
 
 use crate::pipeline_update::*;
-use std::time::Instant;
 use uniform::*;
 
 use iced::{
     widget::{button, horizontal_space, row},
-    Element, Task,
+    Element, Subscription, Task,
 };
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
@@ -27,7 +26,7 @@ pub enum Message {
 #[derive(Serialize, Deserialize)]
 pub struct UniformsEditor {
     uniforms: Vec<Uniform>,
-    #[serde(skip, default = "Candidate::default")]
+    #[serde(skip, default = "Candidate::new")]
     candidate: Candidate,
     time: Option<time::Time>,
 }
@@ -44,9 +43,8 @@ impl UniformsEditor {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::AddTime => {
-                let now = Instant::now();
-                self.time = Some(time::Time::new(now));
-                Task::done(Message::Update(PipelineUpdate::Time(TimeUpdate::Add(now))))
+                self.time = Some(time::Time::new());
+                Task::done(Message::Update(PipelineUpdate::Time(TimeUpdate::Add)))
             }
             Message::RemoveTime => {
                 self.time = Option::None;
@@ -54,7 +52,16 @@ impl UniformsEditor {
             }
             Message::Time(message) => {
                 if let Some(time) = &mut self.time {
-                    time.update(message).map(Message::Time)
+                    let update_task = match message {
+                        time::Message::Reset => {
+                            Task::done(Message::Update(PipelineUpdate::Time(TimeUpdate::Add)))
+                        }
+                        time::Message::Tick(instant) => Task::done(Message::Update(
+                            PipelineUpdate::Time(TimeUpdate::Tick(instant.clone())),
+                        )),
+                        _ => Task::none(),
+                    };
+                    time.update(message).map(Message::Time).chain(update_task)
                 } else {
                     Task::none()
                 }
@@ -95,18 +102,16 @@ impl UniformsEditor {
                 button("X").on_press(Message::RemoveTime)
             ]
         } else {
-            row![horizontal_space(), button("+").on_press(Message::AddTime)]
-        };
-
-        let add_candidate_button = if let Ok(uniform) = self.candidate.clone().try_into() {
-            button("+").on_press(Message::AddUniform(uniform))
-        } else {
-            button("+")
+            row![horizontal_space(), button("Add time").on_press(Message::AddTime)]
         };
 
         let candidate = row![
             self.candidate.view().map(Message::Candidate),
-            add_candidate_button,
+            if let Ok(uniform) = self.candidate.clone().try_into() {
+                button("+").on_press(Message::AddUniform(uniform))
+            } else {
+                button("+")
+            },
         ];
 
         let uniforms =
@@ -118,5 +123,13 @@ impl UniformsEditor {
                 .into()
             }));
         iced::widget::column![time, candidate, uniforms].into()
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        if let Some(time) = &self.time {
+            time.subscription().map(Message::Time)
+        } else {
+            Subscription::none()
+        }
     }
 }

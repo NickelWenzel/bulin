@@ -22,7 +22,7 @@ pub enum UniformsUpdate {
 
 #[derive(Debug, Clone)]
 pub enum TimeUpdate {
-    Add(Instant),
+    Add,
     Remove,
-    Tick,
+    Tick(Instant),
 }
