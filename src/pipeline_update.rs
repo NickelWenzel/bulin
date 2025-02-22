@@ -2,8 +2,8 @@ use crate::uniforms_editor::uniform::*;
 
 pub type FragmentShader = String;
 
-use std::time::Instant;
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub enum PipelineUpdate {

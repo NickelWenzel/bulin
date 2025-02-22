@@ -10,10 +10,7 @@ impl Uniforms {
     pub fn new(bounds: Rectangle) -> Self {
         Self {
             position: [bounds.x, bounds.y],
-            resolution: [
-                bounds.width,
-                bounds.height,
-            ],
+            resolution: [bounds.width, bounds.height],
         }
     }
 }

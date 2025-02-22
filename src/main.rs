@@ -1,15 +1,11 @@
-use iced::Font;
 use bulin_rust::Application;
+use iced::Font;
 
 fn main() -> iced::Result {
-    iced::application(
-        "Bulin",
-        Application::update,
-        Application::view,
-    )
-    .subscription(Application::subscription)
-    .theme(Application::theme)
-    .font(include_bytes!("../fonts/icons.ttf").as_slice())
-    .default_font(Font::MONOSPACE)
-    .run_with(Application::new)
+    iced::application("Bulin", Application::update, Application::view)
+        .subscription(Application::subscription)
+        .theme(Application::theme)
+        .font(include_bytes!("../fonts/icons.ttf").as_slice())
+        .default_font(Font::MONOSPACE)
+        .run_with(Application::new)
 }

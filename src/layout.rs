@@ -1,6 +1,6 @@
-use iced::widget::{pane_grid, text};
 use iced::widget::pane_grid::{Configuration, Content, Pane, State, TitleBar};
 use iced::widget::PaneGrid;
+use iced::widget::{pane_grid, text};
 use iced::Task;
 
 pub struct Layout {
@@ -63,7 +63,7 @@ impl Layout {
         PaneGrid::new(&self.panes, move |id, pane, maximized| {
             match view(id, pane, maximized) {
                 (view, Some(title)) => view.title_bar(TitleBar::new(text(title))),
-                (view, _) => view
+                (view, _) => view,
             }
         })
     }

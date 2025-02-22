@@ -102,7 +102,10 @@ impl UniformsEditor {
                 button("X").on_press(Message::RemoveTime)
             ]
         } else {
-            row![horizontal_space(), button("Add time").on_press(Message::AddTime)]
+            row![
+                horizontal_space(),
+                button("Add time").on_press(Message::AddTime)
+            ]
         };
 
         let candidate = row![

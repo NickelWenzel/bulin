@@ -1,7 +1,7 @@
 mod highlighter;
 mod visitor;
-use crate::util;
 use crate::pipeline_update::FragmentShader;
+use crate::util;
 
 use iced::keyboard;
 use iced::widget::{
@@ -13,9 +13,9 @@ use iced::{Center, Element, Fill, Font, Task, Theme};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use std::ffi;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::ffi;
 
 pub struct TextEditor {
     file: Option<PathBuf>,
@@ -356,7 +356,11 @@ impl<'de> Deserialize<'de> for TextEditor {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_struct("Editor", &["file", "content", "theme"], visitor::EditorVisitor)
+        deserializer.deserialize_struct(
+            "Editor",
+            &["file", "content", "theme"],
+            visitor::EditorVisitor,
+        )
     }
 }
 

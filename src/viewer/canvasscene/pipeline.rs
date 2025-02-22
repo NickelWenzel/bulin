@@ -13,7 +13,12 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, shader: &str, version: usize) -> Result<Self, wgpu::Error> {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        shader: &str,
+        version: usize,
+    ) -> Result<Self, wgpu::Error> {
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bulin_canvas.pipeline.uniforms"),
             size: std::mem::size_of::<uniforms::Uniforms>() as u64,
@@ -90,17 +95,16 @@ impl Pipeline {
             multiview: None,
         });
 
-        if let Some(error) = block_on( device.pop_error_scope()) {
+        if let Some(error) = block_on(device.pop_error_scope()) {
             Err(error)
         } else {
             Ok(Self {
                 pipeline,
                 uniforms,
                 uniform_bind_group,
-                version
+                version,
             })
         }
-
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue, uniforms: &uniforms::Uniforms) {
