@@ -1,6 +1,5 @@
 mod canvasscene;
 
-use crate::pipeline_update::FragmentShader;
 use crate::pipeline_update::PipelineUpdate;
 
 use canvasscene::CanvasScene;
@@ -8,8 +7,6 @@ use canvasscene::CanvasScene;
 use iced::time::Instant;
 use iced::widget::shader;
 use iced::{Element, Fill, Task};
-
-use std::sync::Arc;
 
 pub struct Viewer {
     scene: CanvasScene,

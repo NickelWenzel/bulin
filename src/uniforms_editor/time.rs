@@ -7,15 +7,22 @@ pub enum Message {
     Pause,
     Resume,
     Reset,
+    Tick
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Time {
     #[serde(default = "Instant::now", skip)]
-    start: Instant,
+    pub start: Instant,
 }
 
 impl Time {
+    pub fn new(start: Instant) -> Self {
+        return Self {
+            start,
+        };
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         return Task::none();
     }
