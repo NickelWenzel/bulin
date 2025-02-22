@@ -476,6 +476,7 @@ dependencies = [
  "iced_aw",
  "iced_wgpu",
  "image 0.25.5",
+ "num-traits",
  "once_cell",
  "rand",
  "rfd",
@@ -1691,13 +1692,13 @@ dependencies = [
 [[package]]
 name = "iced_aw"
 version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca4a6c74757eb721f125ab40d0acfd43180807f907848b17e2ff60f3efff5d81"
 dependencies = [
  "cfg-if",
  "getrandom 0.3.1",
  "iced",
  "iced_fonts",
+ "num-format",
+ "num-traits",
  "web-time",
 ]
 
@@ -2384,6 +2385,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.96",
+]
+
+[[package]]
+name = "num-format"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a652d9771a63711fd3c3deb670acfbe5c30a4072e664d7a3bf5a9e1056ac72c3"
+dependencies = [
+ "arrayvec",
+ "itoa",
 ]
 
 [[package]]
