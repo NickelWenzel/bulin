@@ -7,6 +7,7 @@ fn main() -> iced::Result {
         Application::update,
         Application::view,
     )
+    .subscription(Application::subscription)
     .theme(Application::theme)
     .font(include_bytes!("../fonts/icons.ttf").as_slice())
     .default_font(Font::MONOSPACE)
