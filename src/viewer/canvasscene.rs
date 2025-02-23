@@ -82,7 +82,7 @@ impl shader::Primitive for Primitive {
             .unwrap_or(true);
 
         if should_store {
-            match Pipeline::new(device, format, &self.shader, self.version) {
+            match Pipeline::new(device, format, &self.shader, "", 0, self.version) {
                 Ok(pipeline) => storage.store(pipeline),
                 Err(error) => {
                     println!("Failed to create pipeline:\n{error}");
@@ -92,7 +92,8 @@ impl shader::Primitive for Primitive {
         }
 
         let pipeline = storage.get_mut::<Pipeline>().unwrap();
-        pipeline.update(queue, &uniforms::Uniforms::new(*bounds));
+        pipeline.update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()));
+        pipeline.update_custom_buffer(queue, &[]);
     }
 
     fn render(
