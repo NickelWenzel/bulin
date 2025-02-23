@@ -76,7 +76,7 @@ impl Time {
     pub fn subscription(&self) -> Subscription<Message> {
         match self.state {
             State::Idle => Subscription::none(),
-            State::Ticking { .. } => time::every(Duration::from_millis(10)).map(Message::Tick),
+            State::Ticking(_) => time::every(Duration::from_millis(10)).map(Message::Tick),
         }
     }
 }
