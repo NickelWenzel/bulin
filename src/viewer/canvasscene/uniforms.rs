@@ -2,15 +2,24 @@ use iced::Rectangle;
 
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct Uniforms {
+pub struct DefaultUniforms {
     pub position: [f32; 2],
     pub resolution: [f32; 2],
 }
-impl Uniforms {
-    pub fn new(bounds: Rectangle) -> Self {
+impl DefaultUniforms {
+    pub fn new(
+        Rectangle {
+            x,
+            y,
+            width,
+            height,
+        }: Rectangle,
+    ) -> Self {
         Self {
-            position: [bounds.x, bounds.y],
-            resolution: [bounds.width, bounds.height],
+            position: [x, y],
+            resolution: [width, height],
         }
     }
 }
+
+pub type CustomUniforms = [u8];
