@@ -141,7 +141,7 @@ impl Application {
 
         column!(
             menu::view().map(Message::Menu),
-            container(panes).width(Length::Fill).height(Length::Fill)
+            container(panes).width(Length::Fill).height(Length::Fill),
         )
         .into()
     }
