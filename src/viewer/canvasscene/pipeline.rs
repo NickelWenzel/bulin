@@ -1,29 +1,35 @@
 use crate::viewer::canvasscene::uniforms;
 
-use iced::{futures::executor::block_on, Rectangle};
+use iced::Rectangle;
 use iced_wgpu::wgpu;
 
 use std::borrow::Cow;
 
+use super::{VersionedShader, VersionedUniformRenderData};
+
 pub struct Pipeline {
-    pipeline: wgpu::RenderPipeline,
-    default_uniforms: wgpu::Buffer,
-    custom_uniforms: Option<wgpu::Buffer>,
-    uniform_bind_group: wgpu::BindGroup,
-    custom_uniform_bind_group: Option<wgpu::BindGroup>,
-    pub version: usize,
+    pipeline: Option<wgpu::RenderPipeline>,
+    default_data: BufferData,
+    custom_data: CustomBufferData,
+    vertex_shader: wgpu::ShaderModule,
+    fragment_shader: Option<wgpu::ShaderModule>,
+}
+
+pub struct BufferData {
+    pub buffer: wgpu::Buffer,
+    pub layout: wgpu::BindGroupLayout,
+    pub bind_group: wgpu::BindGroup,
+}
+
+pub struct CustomBufferData {
+    pub buffer_data: Option<BufferData>,
+    pub shader_version: usize,
+    pub uniforms_version: usize,
 }
 
 impl Pipeline {
-    pub fn new(
-        device: &wgpu::Device,
-        format: wgpu::TextureFormat,
-        shader: &str,
-        custom_uniform_definition: &str,
-        custom_uniforms_size: u64,
-        version: usize,
-    ) -> Result<Self, wgpu::Error> {
-        let default_uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bulin_canvas.pipeline.uniforms"),
             size: std::mem::size_of::<uniforms::DefaultUniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -44,23 +50,142 @@ impl Pipeline {
             }],
         });
 
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bulin_canvas.pipeline.uniform_bind_group"),
             layout: &layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::Buffer(
-                    default_uniforms.as_entire_buffer_binding(),
-                ),
+                resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
             }],
         });
 
-        let (custom_uniforms, custom_layout, custom_uniform_bind_group) = if custom_uniforms_size
+        let vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bulin_canvas.pipeline.shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(concat!(
+                include_str!("shaders/uniforms.wgsl"),
+                "\n",
+                include_str!("shaders/vertex_shader.wgsl"),
+            ))),
+        });
+
+        Self {
+            pipeline: None,
+            default_data: BufferData {
+                buffer,
+                layout,
+                bind_group,
+            },
+            custom_data: CustomBufferData {
+                buffer_data: None,
+                shader_version: 0,
+                uniforms_version: 0,
+            },
+            vertex_shader,
+            fragment_shader: None,
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        shader: &VersionedShader,
+        uniforms: &VersionedUniformRenderData,
+    ) -> &mut Self {
+        if self.update_custom_uniforms(device, uniforms)
+            || self.update_fragment_shader(device, shader, uniforms)
+        {
+            if let Some(fragment_shader) = &self.fragment_shader {
+                let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
+                    label: Some("bulin_canvas.pipeline.layout"),
+                    bind_group_layouts: if let Some(BufferData {
+                        buffer: _,
+                        layout: custom_layout,
+                        bind_group: _,
+                    }) = &self.custom_data.buffer_data
+                    {
+                        &[&self.default_data.layout, custom_layout]
+                    } else {
+                        &[&self.default_data.layout]
+                    },
+                    push_constant_ranges: &[],
+                };
+
+                let pipeline_layout = device.create_pipeline_layout(&pipeline_layout_descriptor);
+
+                self.pipeline = Some(device.create_render_pipeline(
+                    &wgpu::RenderPipelineDescriptor {
+                        label: Some("bulin_canvas.pipeline.pipeline"),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &self.vertex_shader,
+                            entry_point: "vs_main",
+                            buffers: &[],
+                        },
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: None,
+                        multisample: Default::default(),
+                        fragment: Some(wgpu::FragmentState {
+                            module: fragment_shader,
+                            entry_point: "fs_main",
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format,
+                                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        multiview: None,
+                    },
+                ))
+            }
+        }
+        self
+    }
+
+    fn update_fragment_shader(
+        &mut self,
+        device: &wgpu::Device,
+        shader: &VersionedShader,
+        uniforms: &VersionedUniformRenderData,
+    ) -> bool {
+        if self.custom_data.uniforms_version >= uniforms.version
+            || self.custom_data.shader_version >= shader.version
+        {
+            return false;
+        }
+
+        self.fragment_shader = Some(
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("bulin_canvas.pipeline.fragment_shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
+                    format!(
+                        "{}\n{}\n{}",
+                        include_str!("shaders/uniforms.wgsl"),
+                        uniforms.data.uniforms_str,
+                        shader.data
+                    )
+                    .as_str(),
+                )),
+            }),
+        );
+        true
+    }
+
+    fn update_custom_uniforms(
+        &mut self,
+        device: &wgpu::Device,
+        uniforms: &VersionedUniformRenderData,
+    ) -> bool {
+        if self.custom_data.uniforms_version >= uniforms.version {
+            return false;
+        }
+
+        self.custom_data.buffer_data = if uniforms.data.uniforms_size
             > 0
         {
             let custom_uniforms = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("bulin_canvas.pipeline.custom"),
-                size: custom_uniforms_size,
+                size: uniforms.data.uniforms_size as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -87,111 +212,44 @@ impl Pipeline {
                     ),
                 }],
             });
-            (
-                Some(custom_uniforms),
-                Some(custom_layout),
-                Some(custom_uniform_bind_group),
-            )
-        } else {
-            (None, None, None)
-        };
-
-        let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
-            label: Some("bulin_canvas.pipeline.layout"),
-            bind_group_layouts: if let Some(custom_layout) = &custom_layout {
-                &[&layout, custom_layout]
-            } else {
-                &[&layout]
-            },
-            push_constant_ranges: &[],
-        };
-
-        let pipeline_layout = device.create_pipeline_layout(&pipeline_layout_descriptor);
-
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bulin_canvas.pipeline.shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(concat!(
-                include_str!("shaders/uniforms.wgsl"),
-                "\n",
-                include_str!("shaders/vertex_shader.wgsl"),
-            ))),
-        });
-
-        let fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bulin_canvas.pipeline.fragment_shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
-                format!(
-                    "{}\n{}\n{}",
-                    include_str!("shaders/uniforms.wgsl"),
-                    custom_uniform_definition,
-                    shader
-                )
-                .as_str(),
-            )),
-        });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bulin_canvas.pipeline.pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &vertex_shader,
-                entry_point: "vs_main",
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment_shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
-
-        if let Some(error) = block_on(device.pop_error_scope()) {
-            Err(error)
-        } else {
-            Ok(Self {
-                pipeline,
-                default_uniforms,
-                custom_uniforms,
-                uniform_bind_group,
-                custom_uniform_bind_group,
-                version,
+            Some(BufferData {
+                buffer: custom_uniforms,
+                layout: custom_layout,
+                bind_group: custom_uniform_bind_group,
             })
-        }
+        } else {
+            None
+        };
+
+        true
     }
 
     pub fn update_default_buffer(
-        &mut self,
+        &self,
         queue: &wgpu::Queue,
         default_uniforms: &uniforms::DefaultUniforms,
-    ) {
+    ) -> &Self {
         queue.write_buffer(
-            &self.default_uniforms,
+            &self.default_data.buffer,
             0,
             bytemuck::bytes_of(default_uniforms),
         );
+        self
     }
 
     pub fn update_custom_buffer(
-        &mut self,
+        &self,
         queue: &wgpu::Queue,
         custom_uniforms: &uniforms::CustomUniforms,
-    ) {
-        if let Some(custom_uniforms_buffer) = &self.custom_uniforms {
+    ) -> &Self {
+        if let Some(custom_data) = &self.custom_data.buffer_data {
             queue.write_buffer(
-                custom_uniforms_buffer,
+                &custom_data.buffer,
                 0,
                 bytemuck::cast_slice(custom_uniforms),
             );
         }
+        self
     }
 
     pub fn render(
@@ -214,8 +272,10 @@ impl Pipeline {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-
-        pass.set_pipeline(&self.pipeline);
+        
+        if let Some(pipeline) = &self.pipeline {
+            pass.set_pipeline(pipeline);
+        }
         pass.set_viewport(
             viewport.x as f32,
             viewport.y as f32,
@@ -225,9 +285,9 @@ impl Pipeline {
             1.0,
         );
 
-        pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-        if let Some(custom_uniform_bind_group) = &self.custom_uniform_bind_group {
-            pass.set_bind_group(1, custom_uniform_bind_group, &[]);
+        pass.set_bind_group(0, &self.default_data.bind_group, &[]);
+        if let Some(custom_buffer_data) = &self.custom_data.buffer_data {
+            pass.set_bind_group(1, &custom_buffer_data.bind_group, &[]);
         }
 
         pass.draw(0..3, 0..1);

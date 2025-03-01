@@ -27,8 +27,8 @@ impl Viewer {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::UpdatePipeline(PipelineUpdate::Shader(shader)) => {
-                self.scene.update(shader);
+            Message::UpdatePipeline(message) => {
+                self.scene.update(message);
                 Task::none()
             }
             _ => Task::none(),

@@ -37,7 +37,7 @@ pub enum Message {
     FileOpened(Result<(PathBuf, Arc<String>), util::Error>),
     SaveFile,
     FileSaved(Result<PathBuf, util::Error>),
-    UpdatePipeline(Arc<FragmentShader>),
+    UpdatePipeline(FragmentShader),
     Undo,
     Redo,
 }
@@ -101,7 +101,7 @@ impl TextEditor {
 
                 if is_edit {
                     self.is_dirty = true;
-                    Task::done(Message::UpdatePipeline(Arc::new(self.content())))
+                    Task::done(Message::UpdatePipeline(self.content()))
                 } else {
                     Task::none()
                 }
@@ -142,7 +142,7 @@ impl TextEditor {
                     self.content = text_editor::Content::with_text(&contents);
                 }
 
-                Task::done(Message::UpdatePipeline(Arc::new(self.content())))
+                Task::done(Message::UpdatePipeline(self.content()))
             }
             Message::SaveFile => {
                 if self.is_loading {
@@ -172,14 +172,14 @@ impl TextEditor {
                     self.content.perform(action);
                 });
 
-                Task::done(Message::UpdatePipeline(Arc::new(self.content())))
+                Task::done(Message::UpdatePipeline(self.content()))
             }
             Message::Redo => {
                 self.undo_handler.redo().into_iter().for_each(|action| {
                     self.content.perform(action);
                 });
 
-                Task::done(Message::UpdatePipeline(Arc::new(self.content())))
+                Task::done(Message::UpdatePipeline(self.content()))
             }
         }
     }
