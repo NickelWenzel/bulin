@@ -83,11 +83,9 @@ impl Application {
                     if let Ok(editor) = serde_json::from_str(&contents) {
                         self.file = Some(path);
                         self.editor = editor;
-                        Task::done(PipelineUpdate::Shader(Arc::new(
-                            self.editor.text().content(),
-                        )))
-                        .map(viewer::Message::UpdatePipeline)
-                        .map(Message::Viewer)
+                        Task::done(PipelineUpdate::Shader(self.editor.text().content()))
+                            .map(viewer::Message::UpdatePipeline)
+                            .map(Message::Viewer)
                     } else {
                         Task::none()
                     }

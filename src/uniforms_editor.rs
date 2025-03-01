@@ -73,7 +73,7 @@ impl UniformsEditor {
                 )))
             }
             Message::RemoveUniform(idx) => {
-                self.uniforms.swap_remove(idx as usize);
+                self.uniforms.remove(idx as usize);
                 Task::done(Message::Update(PipelineUpdate::Uniforms(
                     UniformsUpdate::Remove(idx),
                 )))
