@@ -62,7 +62,7 @@ impl Time {
     pub fn view(&self) -> Element<Message> {
         row![
             text("uTime").width(Length::Fill),
-            text(format!("{:.2} s", self.duration.as_secs_f32())),
+            text(format!("{:.2} s", self.duration())),
             button("R").on_press(Message::Reset),
             button(match &self.state {
                 State::Idle => "S",
@@ -78,6 +78,10 @@ impl Time {
             State::Idle => Subscription::none(),
             State::Ticking(_) => time::every(Duration::from_millis(10)).map(Message::Tick),
         }
+    }
+
+    pub fn duration(&self) -> f32 {
+        self.duration.as_secs_f32()
     }
 }
 
