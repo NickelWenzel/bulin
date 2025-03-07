@@ -44,24 +44,32 @@ impl UniformsEditor {
         match message {
             Message::AddTime => {
                 self.time = Some(time::Time::new());
-                Task::done(Message::Update(PipelineUpdate::Time(TimeUpdate::Add)))
+                Task::done(Message::Update(PipelineUpdate::Uniforms(
+                    UniformsUpdate::Add(Uniform {
+                        value: Type::Float(0.0),
+                        name: String::from("time"),
+                    }),
+                )))
             }
             Message::RemoveTime => {
                 self.time = Option::None;
-                Task::done(Message::Update(PipelineUpdate::Time(TimeUpdate::Remove)))
+                Task::done(Message::Update(PipelineUpdate::Uniforms(
+                    UniformsUpdate::Remove(String::from("time")),
+                )))
             }
             Message::Time(message) => {
                 if let Some(time) = &mut self.time {
-                    let update_task = match message {
-                        time::Message::Reset => {
-                            Task::done(Message::Update(PipelineUpdate::Time(TimeUpdate::Add)))
-                        }
-                        time::Message::Tick(instant) => Task::done(Message::Update(
-                            PipelineUpdate::Time(TimeUpdate::Tick(instant.clone())),
-                        )),
-                        _ => Task::none(),
-                    };
-                    time.update(message).map(Message::Time).chain(update_task)
+                    time.update(message)
+                        .map(Message::Time)
+                        .chain(Task::done(Message::Update(PipelineUpdate::Uniforms(
+                            UniformsUpdate::Update(
+                                String::from("time"),
+                                Uniform {
+                                    value: Type::Float(time.duration() as f64),
+                                    name: String::from("time"),
+                                },
+                            ),
+                        ))))
                 } else {
                     Task::none()
                 }
@@ -73,18 +81,23 @@ impl UniformsEditor {
                 )))
             }
             Message::RemoveUniform(idx) => {
-                self.uniforms.remove(idx as usize);
-                Task::done(Message::Update(PipelineUpdate::Uniforms(
-                    UniformsUpdate::Remove(idx),
-                )))
+                if let Some(name) = self.get_name(idx) {
+                    self.uniforms.remove(idx as usize);
+                    Task::done(Message::Update(PipelineUpdate::Uniforms(
+                        UniformsUpdate::Remove(name),
+                    )))
+                } else {
+                    return Task::none();
+                }
             }
             Message::Uniforms(idx, message) => {
                 if let Some(uniform) = self.uniforms.get_mut(idx as usize) {
+                    let name = uniform.name.clone();
                     uniform
                         .update(message)
                         .map(move |m| Message::Uniforms(idx, m))
                         .chain(Task::done(Message::Update(PipelineUpdate::Uniforms(
-                            UniformsUpdate::Update(idx, uniform.clone()),
+                            UniformsUpdate::Update(name, uniform.clone()),
                         ))))
                 } else {
                     Task::none()
@@ -93,6 +106,10 @@ impl UniformsEditor {
             Message::Candidate(message) => self.candidate.update(message).map(Message::Candidate),
             Message::Update(_) => Task::none(),
         }
+    }
+
+    fn get_name(&self, idx: u32) -> Option<String> {
+        self.uniforms.get(idx as usize).map(|u| u.name.clone())
     }
 
     pub fn view(&self) -> Element<Message> {
