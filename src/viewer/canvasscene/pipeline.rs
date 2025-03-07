@@ -89,11 +89,11 @@ impl Pipeline {
         &mut self,
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
-        shader: &VersionedShader,
-        uniforms: &VersionedUniformRenderData,
+        fragment_shader: &VersionedShader,
+        custom_uniforms: &VersionedUniformRenderData,
     ) -> &mut Self {
-        if self.update_custom_uniforms(device, uniforms)
-            || self.update_fragment_shader(device, shader, uniforms)
+        if self.update_custom_uniforms(device, custom_uniforms)
+            || self.update_fragment_shader(device, fragment_shader, custom_uniforms)
         {
             if let Some(fragment_shader) = &self.fragment_shader {
                 let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
@@ -145,11 +145,11 @@ impl Pipeline {
     fn update_fragment_shader(
         &mut self,
         device: &wgpu::Device,
-        shader: &VersionedShader,
-        uniforms: &VersionedUniformRenderData,
+        fragment_shader: &VersionedShader,
+        custom_uniforms: &VersionedUniformRenderData,
     ) -> bool {
-        if self.custom_data.uniforms_version >= uniforms.version
-            || self.custom_data.shader_version >= shader.version
+        if self.custom_data.uniforms_version >= custom_uniforms.version
+            || self.custom_data.shader_version >= fragment_shader.version
         {
             return false;
         }
@@ -161,8 +161,8 @@ impl Pipeline {
                     format!(
                         "{}\n{}\n{}",
                         include_str!("shaders/uniforms.wgsl"),
-                        uniforms.data.uniforms_str,
-                        shader.data
+                        custom_uniforms.data.uniforms_str,
+                        fragment_shader.data
                     )
                     .as_str(),
                 )),
@@ -174,18 +174,18 @@ impl Pipeline {
     fn update_custom_uniforms(
         &mut self,
         device: &wgpu::Device,
-        uniforms: &VersionedUniformRenderData,
+        custom_uniforms: &VersionedUniformRenderData,
     ) -> bool {
-        if self.custom_data.uniforms_version >= uniforms.version {
+        if self.custom_data.uniforms_version >= custom_uniforms.version {
             return false;
         }
 
-        self.custom_data.buffer_data = if uniforms.data.uniforms_size
+        self.custom_data.buffer_data = if custom_uniforms.data.uniforms_size
             > 0
         {
             let custom_uniforms = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("bulin_canvas.pipeline.custom"),
-                size: uniforms.data.uniforms_size as u64,
+                size: custom_uniforms.data.uniforms_size as u64,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
