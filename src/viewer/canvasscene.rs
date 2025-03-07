@@ -1,10 +1,9 @@
 mod pipeline;
 mod uniforms;
 
-use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use crate::pipeline_update::{PipelineUpdate, TimeUpdate, UniformsUpdate};
+use crate::pipeline_update::{PipelineUpdate, UniformsUpdate};
 use crate::uniforms_editor::uniform::Uniform;
 
 use iced::futures::executor::block_on;
@@ -30,7 +29,7 @@ impl CanvasScene {
                 version: 0,
             },
             uniforms: VersionedUniforms {
-                data: Vec::new(),
+                data: Arc::new(RwLock::new(Vec::new())),
                 version: 0,
             },
         }
@@ -40,7 +39,6 @@ impl CanvasScene {
         match message {
             PipelineUpdate::Shader(shader) => self.update_shader(shader),
             PipelineUpdate::Uniforms(uniforms) => self.update_uniforms(uniforms),
-            PipelineUpdate::Time(time) => self.update_time(time),
         }
     }
 
@@ -52,32 +50,33 @@ impl CanvasScene {
     fn update_uniforms(&mut self, uniforms: UniformsUpdate) {
         match uniforms {
             UniformsUpdate::Add(uniform) => {
-                self.uniforms.data.push(uniform);
+                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
+                    uniforms.push(uniform);
+                }
                 self.uniforms.version += 1;
             }
-            UniformsUpdate::Update(idx, uniform) => {
-                if let Some(item) = self.uniforms.data.get_mut(idx as usize) {
-                    *item = uniform;
+            UniformsUpdate::Update(name, uniform) => {
+                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
+                    if let Some(item) = uniforms.iter_mut().find(|e| e.name == name) {
+                        *item = uniform;
+                    }
                 }
             }
-            UniformsUpdate::Remove(idx) => {
-                self.uniforms.data.remove(idx as usize);
-                self.uniforms.version += 1;
+            UniformsUpdate::Remove(name) => {
+                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
+                    if let Some(idx) = uniforms.iter_mut().position(|e| e.name == name) {
+                        uniforms.remove(idx);
+                        self.uniforms.version += 1;
+                    }
+                }
             }
             UniformsUpdate::Clear => {
-                self.uniforms.data.clear();
+                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
+                    uniforms.clear();
+                }
                 self.uniforms.version += 1;
             }
         }
-    }
-
-    fn update_time(&mut self, time: TimeUpdate) {
-        match time {
-            TimeUpdate::Add => todo!(),
-            TimeUpdate::Remove => todo!(),
-            TimeUpdate::Tick(instant) => todo!(),
-        }
-        self.uniforms.version += 1;
     }
 }
 
@@ -102,7 +101,7 @@ pub struct VersionedData<T> {
 }
 
 type VersionedShader = VersionedData<Arc<String>>;
-type VersionedUniforms = VersionedData<Vec<Uniform>>;
+type VersionedUniforms = VersionedData<Arc<RwLock<Vec<Uniform>>>>;
 
 #[derive(Debug)]
 pub struct Primitive {
@@ -112,17 +111,18 @@ pub struct Primitive {
 
 impl Primitive {
     pub fn new(shader: VersionedShader, uniforms: &VersionedUniforms) -> Self {
+        let version = uniforms.version;
+        let uniforms = uniforms.data.read().unwrap();
         Self {
             shader,
             uniforms: VersionedUniformRenderData {
                 data: UniformRenderData {
-                    uniforms_str: to_uniforms_string(&uniforms.data),
-                    uniforms_bytes: to_uniforms_bytes(&uniforms.data),
-                    uniforms_size: uniforms.data.len(),
-
+                    uniforms_str: to_uniforms_string(&uniforms),
+                    uniforms_bytes: to_uniforms_bytes(&uniforms),
+                    uniforms_size: uniforms.len(),
                 },
-                version: uniforms.version,
-            }
+                version,
+            },
         }
     }
 }
@@ -136,12 +136,27 @@ pub struct UniformRenderData {
 
 type VersionedUniformRenderData = VersionedData<UniformRenderData>;
 
-fn to_uniforms_bytes(data: &Vec<Uniform>) -> Vec<u8> {
+fn to_uniforms_bytes(data: &[Uniform]) -> Vec<u8> {
     todo!()
 }
 
-fn to_uniforms_string(data: &Vec<Uniform>) -> String {
-    todo!()
+fn to_uniforms_string(data: &[Uniform]) -> String {
+    if data.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        r#"
+struct Customs {{
+    {},
+}}
+
+@group(1) @binding(0) var<uniform> customs: Customs;"#,
+        data.iter()
+            .map(|u| u.to_shader_line())
+            .collect::<Vec<_>>()
+            .join(",\n")
+    )
 }
 
 impl shader::Primitive for Primitive {

@@ -65,7 +65,7 @@ impl UniformsEditor {
                             UniformsUpdate::Update(
                                 String::from("time"),
                                 Uniform {
-                                    value: Type::Float(time.duration() as f64),
+                                    value: Type::Float(time.duration()),
                                     name: String::from("time"),
                                 },
                             ),
