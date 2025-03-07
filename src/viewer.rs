@@ -4,7 +4,6 @@ use crate::pipeline_update::PipelineUpdate;
 
 use canvasscene::CanvasScene;
 
-use iced::time::Instant;
 use iced::widget::shader;
 use iced::{Element, Fill, Task};
 
@@ -14,7 +13,6 @@ pub struct Viewer {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Tick(Instant),
     UpdatePipeline(PipelineUpdate),
 }
 
@@ -31,7 +29,6 @@ impl Viewer {
                 self.scene.update(message);
                 Task::none()
             }
-            _ => Task::none(),
         }
     }
 

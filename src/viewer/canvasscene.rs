@@ -4,7 +4,7 @@ mod uniforms;
 use std::sync::{Arc, RwLock};
 
 use crate::pipeline_update::{PipelineUpdate, UniformsUpdate};
-use crate::uniforms_editor::uniform::Uniform;
+use crate::uniforms_editor::uniform::{Type, Uniform};
 
 use iced::futures::executor::block_on;
 use pipeline::Pipeline;
@@ -18,7 +18,8 @@ use iced::Rectangle;
 #[derive(Clone)]
 pub struct CanvasScene {
     shader: VersionedShader,
-    uniforms: VersionedUniforms,
+    uniforms: Vec<Uniform>,
+    uniforms_render_data: VersionedUniformRenderData,
 }
 
 impl CanvasScene {
@@ -28,8 +29,13 @@ impl CanvasScene {
                 data: Arc::new(include_str!("canvasscene/shaders/empty_frag.wgsl").to_string()),
                 version: 0,
             },
-            uniforms: VersionedUniforms {
-                data: Arc::new(RwLock::new(Vec::new())),
+            uniforms: Vec::new(),
+            uniforms_render_data: VersionedUniformRenderData {
+                data: UniformRenderData {
+                    uniforms_str: Arc::new(String::new()),
+                    uniforms_bytes: Arc::new(RwLock::new(Vec::new())),
+                    uniforms_size: 0,
+                },
                 version: 0,
             },
         }
@@ -50,31 +56,52 @@ impl CanvasScene {
     fn update_uniforms(&mut self, uniforms: UniformsUpdate) {
         match uniforms {
             UniformsUpdate::Add(uniform) => {
-                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
-                    uniforms.push(uniform);
+                if let Ok(mut uniform_bytes) =
+                    self.uniforms_render_data.data.uniforms_bytes.try_write()
+                {
+                    self.uniforms.push(uniform);
+                    self.uniforms_render_data.data.uniforms_str =
+                        Arc::new(to_uniforms_string(&self.uniforms));
+                    *uniform_bytes = to_uniforms_bytes(&self.uniforms);
+                    self.uniforms_render_data.data.uniforms_size += 1;
+                    self.uniforms_render_data.version += 1;
                 }
-                self.uniforms.version += 1;
             }
             UniformsUpdate::Update(name, uniform) => {
-                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
-                    if let Some(item) = uniforms.iter_mut().find(|e| e.name == name) {
+                if let Ok(mut uniform_bytes) =
+                    self.uniforms_render_data.data.uniforms_bytes.try_write()
+                {
+                    if let Some(item) = self.uniforms.iter_mut().find(|e| e.name == name) {
                         *item = uniform;
+                        *uniform_bytes = to_uniforms_bytes(&self.uniforms);
                     }
                 }
             }
             UniformsUpdate::Remove(name) => {
-                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
-                    if let Some(idx) = uniforms.iter_mut().position(|e| e.name == name) {
-                        uniforms.remove(idx);
-                        self.uniforms.version += 1;
+                if let Ok(mut uniform_bytes) =
+                    self.uniforms_render_data.data.uniforms_bytes.try_write()
+                {
+                    if let Some(idx) = self.uniforms.iter().position(|e| e.name == name) {
+                        self.uniforms.remove(idx);
+                        self.uniforms_render_data.data.uniforms_str =
+                            Arc::new(to_uniforms_string(&self.uniforms));
+                        *uniform_bytes = to_uniforms_bytes(&self.uniforms);
+                        self.uniforms_render_data.data.uniforms_size -= 1;
+                        self.uniforms_render_data.version += 1;
                     }
                 }
             }
             UniformsUpdate::Clear => {
-                if let Ok(mut uniforms) = self.uniforms.data.try_write() {
-                    uniforms.clear();
+                if let Ok(mut uniform_bytes) =
+                    self.uniforms_render_data.data.uniforms_bytes.try_write()
+                {
+                    self.uniforms.clear();
+                    self.uniforms_render_data.data.uniforms_str =
+                        Arc::new(to_uniforms_string(&self.uniforms));
+                    *uniform_bytes = to_uniforms_bytes(&self.uniforms);
+                    self.uniforms_render_data.data.uniforms_size = 0;
+                    self.uniforms_render_data.version += 1;
                 }
-                self.uniforms.version += 1;
             }
         }
     }
@@ -90,7 +117,7 @@ impl<Message> shader::Program<Message> for CanvasScene {
         _cursor: mouse::Cursor,
         _bounds: Rectangle,
     ) -> Self::Primitive {
-        Primitive::new(self.shader.clone(), &self.uniforms)
+        Primitive::new(self.shader.clone(), self.uniforms_render_data.clone())
     }
 }
 
@@ -101,7 +128,6 @@ pub struct VersionedData<T> {
 }
 
 type VersionedShader = VersionedData<Arc<String>>;
-type VersionedUniforms = VersionedData<Arc<RwLock<Vec<Uniform>>>>;
 
 #[derive(Debug)]
 pub struct Primitive {
@@ -110,34 +136,80 @@ pub struct Primitive {
 }
 
 impl Primitive {
-    pub fn new(shader: VersionedShader, uniforms: &VersionedUniforms) -> Self {
-        let version = uniforms.version;
-        let uniforms = uniforms.data.read().unwrap();
-        Self {
-            shader,
-            uniforms: VersionedUniformRenderData {
-                data: UniformRenderData {
-                    uniforms_str: to_uniforms_string(&uniforms),
-                    uniforms_bytes: to_uniforms_bytes(&uniforms),
-                    uniforms_size: uniforms.len(),
-                },
-                version,
-            },
-        }
+    pub fn new(shader: VersionedShader, uniforms: VersionedUniformRenderData) -> Self {
+        Self { shader, uniforms }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UniformRenderData {
-    uniforms_str: String,
-    uniforms_bytes: Vec<u8>,
+    uniforms_str: Arc<String>,
+    uniforms_bytes: Arc<RwLock<Vec<u8>>>,
     uniforms_size: usize,
 }
 
 type VersionedUniformRenderData = VersionedData<UniformRenderData>;
 
 fn to_uniforms_bytes(data: &[Uniform]) -> Vec<u8> {
-    todo!()
+    let mut bytes = Vec::new();
+    bytes.reserve(data.iter().fold(0, |acc, e| {
+        acc + match e.value {
+            Type::Int(_) | Type::Float(_) => 4,
+            Type::VecFloat2(_) | Type::VecInt2(_) => 8,
+            Type::VecFloat3(_) | Type::Col3(_) | Type::VecInt3(_) => 12,
+            Type::VecFloat4(_) | Type::Col4(_) | Type::VecInt4(_) => 16,
+        }
+    }));
+
+    for uniform in data {
+        match uniform.value {
+            Type::Int(value) => bytes.extend_from_slice(&value.to_ne_bytes()),
+            Type::Float(value) => bytes.extend_from_slice(&value.to_ne_bytes()),
+            Type::VecFloat2(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+            }
+            Type::VecFloat3(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+                bytes.extend_from_slice(&value.2.to_ne_bytes());
+            }
+            Type::VecFloat4(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+                bytes.extend_from_slice(&value.2.to_ne_bytes());
+                bytes.extend_from_slice(&value.3.to_ne_bytes());
+            }
+            Type::Col3(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+                bytes.extend_from_slice(&value.2.to_ne_bytes());
+            }
+            Type::Col4(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+                bytes.extend_from_slice(&value.2.to_ne_bytes());
+                bytes.extend_from_slice(&value.3.to_ne_bytes());
+            }
+            Type::VecInt2(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+            }
+            Type::VecInt3(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+                bytes.extend_from_slice(&value.2.to_ne_bytes());
+            }
+            Type::VecInt4(value) => {
+                bytes.extend_from_slice(&value.0.to_ne_bytes());
+                bytes.extend_from_slice(&value.1.to_ne_bytes());
+                bytes.extend_from_slice(&value.2.to_ne_bytes());
+                bytes.extend_from_slice(&value.3.to_ne_bytes());
+            }
+        }
+    }
+
+    bytes
 }
 
 fn to_uniforms_string(data: &[Uniform]) -> String {
@@ -181,7 +253,7 @@ impl shader::Primitive for Primitive {
         pipeline
             .update(device, format, &self.shader, &self.uniforms)
             .update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()))
-            .update_custom_buffer(queue, &self.uniforms.data.uniforms_bytes);
+            .update_custom_buffer(queue, &self.uniforms.data.uniforms_bytes.read().unwrap());
 
         if let Some(error) = block_on(device.pop_error_scope()) {
             println!("Failed to create pipeline:\n{error}");
