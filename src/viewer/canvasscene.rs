@@ -231,6 +231,11 @@ struct Customs {{
     )
 }
 
+enum PipelineState {
+    Valid,
+    Invalid,
+}
+
 impl shader::Primitive for Primitive {
     fn prepare(
         &self,
@@ -250,13 +255,18 @@ impl shader::Primitive for Primitive {
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
 
+        let update_state = pipeline.update(device, format, &self.shader, &self.uniforms);
         pipeline
-            .update(device, format, &self.shader, &self.uniforms)
             .update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()))
             .update_custom_buffer(queue, &self.uniforms.data.uniforms_bytes.read().unwrap());
 
-        if let Some(error) = block_on(device.pop_error_scope()) {
-            println!("Failed to create pipeline:\n{error}");
+        if update_state {
+            if let Some(error) = block_on(device.pop_error_scope()) {
+                storage.store(PipelineState::Invalid);
+                println!("Failed to create pipeline:\n{error}");
+            } else {
+                storage.store(PipelineState::Valid);
+            }
         }
     }
 
@@ -268,7 +278,9 @@ impl shader::Primitive for Primitive {
         clip_bounds: &Rectangle<u32>,
     ) {
         // At this point our pipeline should always be initialized
-        if let Some(pipeline) = storage.get::<Pipeline>() {
+        if let (Some(PipelineState::Valid), Some(pipeline)) =
+            (storage.get::<PipelineState>(), storage.get::<Pipeline>())
+        {
             // Render primitive
             pipeline.render(target, encoder, *clip_bounds);
         }

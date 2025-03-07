@@ -91,10 +91,12 @@ impl Pipeline {
         format: wgpu::TextureFormat,
         fragment_shader: &VersionedShader,
         custom_uniforms: &VersionedUniformRenderData,
-    ) -> &mut Self {
-        if self.update_custom_uniforms(device, custom_uniforms)
-            || self.update_fragment_shader(device, fragment_shader, custom_uniforms)
+    ) -> bool {
+        if !self.update_custom_uniforms(device, custom_uniforms)
+            && !self.update_fragment_shader(device, fragment_shader, custom_uniforms)
         {
+            false
+        } else {
             if let Some(fragment_shader) = &self.fragment_shader {
                 let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
                     label: Some("bulin_canvas.pipeline.layout"),
@@ -138,8 +140,10 @@ impl Pipeline {
                     },
                 ))
             }
+            self.custom_data.uniforms_version = custom_uniforms.version;
+            self.custom_data.shader_version = fragment_shader.version;
+            true
         }
-        self
     }
 
     fn update_fragment_shader(
@@ -149,7 +153,7 @@ impl Pipeline {
         custom_uniforms: &VersionedUniformRenderData,
     ) -> bool {
         if self.custom_data.uniforms_version >= custom_uniforms.version
-            || self.custom_data.shader_version >= fragment_shader.version
+            && self.custom_data.shader_version >= fragment_shader.version
         {
             return false;
         }
@@ -275,21 +279,21 @@ impl Pipeline {
 
         if let Some(pipeline) = &self.pipeline {
             pass.set_pipeline(pipeline);
-        }
-        pass.set_viewport(
-            viewport.x as f32,
-            viewport.y as f32,
-            viewport.width as f32,
-            viewport.height as f32,
-            0.0,
-            1.0,
-        );
+            pass.set_viewport(
+                viewport.x as f32,
+                viewport.y as f32,
+                viewport.width as f32,
+                viewport.height as f32,
+                0.0,
+                1.0,
+            );
 
-        pass.set_bind_group(0, &self.default_data.bind_group, &[]);
-        if let Some(custom_buffer_data) = &self.custom_data.buffer_data {
-            pass.set_bind_group(1, &custom_buffer_data.bind_group, &[]);
-        }
+            pass.set_bind_group(0, &self.default_data.bind_group, &[]);
+            if let Some(custom_buffer_data) = &self.custom_data.buffer_data {
+                pass.set_bind_group(1, &custom_buffer_data.bind_group, &[]);
+            }
 
-        pass.draw(0..3, 0..1);
+            pass.draw(0..3, 0..1);
+        }
     }
 }
