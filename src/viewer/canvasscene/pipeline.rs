@@ -180,12 +180,12 @@ impl Pipeline {
             return false;
         }
 
-        self.custom_data.buffer_data = if custom_uniforms.data.uniforms_size
-            > 0
-        {
+        let buffer_size = custom_uniforms.data.uniforms_bytes.read().unwrap().len() as u64;
+
+        self.custom_data.buffer_data = if buffer_size > 0 {
             let custom_uniforms = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("bulin_canvas.pipeline.custom"),
-                size: custom_uniforms.data.uniforms_size as u64,
+                size: buffer_size,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -272,7 +272,7 @@ impl Pipeline {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        
+
         if let Some(pipeline) = &self.pipeline {
             pass.set_pipeline(pipeline);
         }
