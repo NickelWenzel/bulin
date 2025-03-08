@@ -6,7 +6,6 @@ use std::sync::{Arc, RwLock};
 use crate::pipeline_update::{PipelineUpdate, UniformsUpdate};
 use crate::uniforms_editor::uniform::{Type, Uniform};
 
-use iced::futures::executor::block_on;
 use pipeline::Pipeline;
 
 use iced_wgpu::wgpu;
@@ -169,23 +168,12 @@ fn to_uniforms_bytes(data: &[Uniform]) -> Vec<u8> {
                 bytes.extend_from_slice(&value.0.to_ne_bytes());
                 bytes.extend_from_slice(&value.1.to_ne_bytes());
             }
-            Type::VecFloat3(value) => {
+            Type::VecFloat3(value) | Type::Col3(value) => {
                 bytes.extend_from_slice(&value.0.to_ne_bytes());
                 bytes.extend_from_slice(&value.1.to_ne_bytes());
                 bytes.extend_from_slice(&value.2.to_ne_bytes());
             }
-            Type::VecFloat4(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-                bytes.extend_from_slice(&value.2.to_ne_bytes());
-                bytes.extend_from_slice(&value.3.to_ne_bytes());
-            }
-            Type::Col3(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-                bytes.extend_from_slice(&value.2.to_ne_bytes());
-            }
-            Type::Col4(value) => {
+            Type::VecFloat4(value) | Type::Col4(value) => {
                 bytes.extend_from_slice(&value.0.to_ne_bytes());
                 bytes.extend_from_slice(&value.1.to_ne_bytes());
                 bytes.extend_from_slice(&value.2.to_ne_bytes());
@@ -231,11 +219,6 @@ struct Customs {{
     )
 }
 
-enum PipelineState {
-    Valid,
-    Invalid,
-}
-
 impl shader::Primitive for Primitive {
     fn prepare(
         &self,
@@ -253,20 +236,16 @@ impl shader::Primitive for Primitive {
             return println!("Failed to create pipeline:\n");
         };
 
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
-
-        let update_state = pipeline.update(device, format, &self.shader, &self.uniforms);
-        pipeline
-            .update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()))
-            .update_custom_buffer(queue, &self.uniforms.data.uniforms_bytes.read().unwrap());
-
-        if update_state {
-            if let Some(error) = block_on(device.pop_error_scope()) {
-                storage.store(PipelineState::Invalid);
-                println!("Failed to create pipeline:\n{error}");
-            } else {
-                storage.store(PipelineState::Valid);
+        match pipeline.update(device, format, &self.shader, &self.uniforms) {
+            Ok(pipeline) => {
+                pipeline
+                    .update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()))
+                    .update_custom_buffer(
+                        queue,
+                        &self.uniforms.data.uniforms_bytes.read().unwrap(),
+                    );
             }
+            Err(error) => println!("Failed to create pipeline:\n{}", error),
         }
     }
 
@@ -278,9 +257,7 @@ impl shader::Primitive for Primitive {
         clip_bounds: &Rectangle<u32>,
     ) {
         // At this point our pipeline should always be initialized
-        if let (Some(PipelineState::Valid), Some(pipeline)) =
-            (storage.get::<PipelineState>(), storage.get::<Pipeline>())
-        {
+        if let Some(pipeline) = storage.get::<Pipeline>() {
             // Render primitive
             pipeline.render(target, encoder, *clip_bounds);
         }
