@@ -1,6 +1,6 @@
 use crate::viewer::canvasscene::uniforms;
 
-use iced::Rectangle;
+use iced::{futures::executor::block_on, Rectangle};
 use iced_wgpu::wgpu;
 
 use std::borrow::Cow;
@@ -91,58 +91,69 @@ impl Pipeline {
         format: wgpu::TextureFormat,
         fragment_shader: &VersionedShader,
         custom_uniforms: &VersionedUniformRenderData,
-    ) -> bool {
-        if !self.update_custom_uniforms(device, custom_uniforms)
-            && !self.update_fragment_shader(device, fragment_shader, custom_uniforms)
-        {
-            false
-        } else {
-            if let Some(fragment_shader) = &self.fragment_shader {
-                let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
-                    label: Some("bulin_canvas.pipeline.layout"),
-                    bind_group_layouts: if let Some(BufferData {
-                        buffer: _,
-                        layout: custom_layout,
-                        bind_group: _,
-                    }) = &self.custom_data.buffer_data
-                    {
-                        &[&self.default_data.layout, custom_layout]
-                    } else {
-                        &[&self.default_data.layout]
-                    },
-                    push_constant_ranges: &[],
-                };
+    ) -> Result<&mut Self, String> {
+        match (
+            self.update_custom_uniforms(device, custom_uniforms),
+            self.update_fragment_shader(device, fragment_shader, custom_uniforms),
+        ) {
+            (Err(error), _) | (_, Err(error)) => Err(error),
+            (Ok(u1), Ok(u2)) => {
+                if u1 || u2 {
+                    device.push_error_scope(wgpu::ErrorFilter::Validation);
+                    if let Some(fragment_shader) = &self.fragment_shader {
+                        let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
+                            label: Some("bulin_canvas.pipeline.layout"),
+                            bind_group_layouts: if let Some(BufferData {
+                                buffer: _,
+                                layout: custom_layout,
+                                bind_group: _,
+                            }) = &self.custom_data.buffer_data
+                            {
+                                &[&self.default_data.layout, custom_layout]
+                            } else {
+                                &[&self.default_data.layout]
+                            },
+                            push_constant_ranges: &[],
+                        };
 
-                let pipeline_layout = device.create_pipeline_layout(&pipeline_layout_descriptor);
+                        let pipeline_layout =
+                            device.create_pipeline_layout(&pipeline_layout_descriptor);
 
-                self.pipeline = Some(device.create_render_pipeline(
-                    &wgpu::RenderPipelineDescriptor {
-                        label: Some("bulin_canvas.pipeline.pipeline"),
-                        layout: Some(&pipeline_layout),
-                        vertex: wgpu::VertexState {
-                            module: &self.vertex_shader,
-                            entry_point: "vs_main",
-                            buffers: &[],
-                        },
-                        primitive: wgpu::PrimitiveState::default(),
-                        depth_stencil: None,
-                        multisample: Default::default(),
-                        fragment: Some(wgpu::FragmentState {
-                            module: fragment_shader,
-                            entry_point: "fs_main",
-                            targets: &[Some(wgpu::ColorTargetState {
-                                format,
-                                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            })],
-                        }),
-                        multiview: None,
-                    },
-                ))
+                        let pipeline =
+                            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                                label: Some("bulin_canvas.pipeline.pipeline"),
+                                layout: Some(&pipeline_layout),
+                                vertex: wgpu::VertexState {
+                                    module: &self.vertex_shader,
+                                    entry_point: "vs_main",
+                                    buffers: &[],
+                                },
+                                primitive: wgpu::PrimitiveState::default(),
+                                depth_stencil: None,
+                                multisample: Default::default(),
+                                fragment: Some(wgpu::FragmentState {
+                                    module: fragment_shader,
+                                    entry_point: "fs_main",
+                                    targets: &[Some(wgpu::ColorTargetState {
+                                        format,
+                                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                                        write_mask: wgpu::ColorWrites::ALL,
+                                    })],
+                                }),
+                                multiview: None,
+                            });
+
+                        if let Some(error) = block_on(device.pop_error_scope()) {
+                            return Err(error.to_string());
+                        } else {
+                            self.pipeline = Some(pipeline);
+                        }
+                    }
+                    self.custom_data.uniforms_version = custom_uniforms.version;
+                    self.custom_data.shader_version = fragment_shader.version;
+                }
+                Ok(self)
             }
-            self.custom_data.uniforms_version = custom_uniforms.version;
-            self.custom_data.shader_version = fragment_shader.version;
-            true
         }
     }
 
@@ -151,42 +162,47 @@ impl Pipeline {
         device: &wgpu::Device,
         fragment_shader: &VersionedShader,
         custom_uniforms: &VersionedUniformRenderData,
-    ) -> bool {
+    ) -> Result<bool, String> {
         if self.custom_data.uniforms_version >= custom_uniforms.version
             && self.custom_data.shader_version >= fragment_shader.version
         {
-            return false;
+            return Ok(false);
         }
 
-        self.fragment_shader = Some(
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("bulin_canvas.pipeline.fragment_shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
-                    format!(
-                        "{}\n{}\n{}",
-                        include_str!("shaders/uniforms.wgsl"),
-                        custom_uniforms.data.uniforms_str,
-                        fragment_shader.data
-                    )
-                    .as_str(),
-                )),
-            }),
-        );
-        true
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bulin_canvas.pipeline.fragment_shader"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(
+                format!(
+                    "{}\n{}\n{}",
+                    include_str!("shaders/uniforms.wgsl"),
+                    custom_uniforms.data.uniforms_str,
+                    fragment_shader.data
+                )
+                .as_str(),
+            )),
+        });
+        if let Some(error) = block_on(device.pop_error_scope()) {
+            return Err(error.to_string());
+        } else {
+            self.fragment_shader = Some(fragment_shader);
+            Ok(true)
+        }
     }
 
     fn update_custom_uniforms(
         &mut self,
         device: &wgpu::Device,
         custom_uniforms: &VersionedUniformRenderData,
-    ) -> bool {
+    ) -> Result<bool, String> {
         if self.custom_data.uniforms_version >= custom_uniforms.version {
-            return false;
+            return Ok(false);
         }
 
         let buffer_size = custom_uniforms.data.uniforms_bytes.read().unwrap().len() as u64;
 
         self.custom_data.buffer_data = if buffer_size > 0 {
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
             let custom_uniforms = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("bulin_canvas.pipeline.custom"),
                 size: buffer_size,
@@ -216,16 +232,20 @@ impl Pipeline {
                     ),
                 }],
             });
-            Some(BufferData {
-                buffer: custom_uniforms,
-                layout: custom_layout,
-                bind_group: custom_uniform_bind_group,
-            })
+
+            if let Some(error) = block_on(device.pop_error_scope()) {
+                return Err(error.to_string());
+            } else {
+                Some(BufferData {
+                    buffer: custom_uniforms,
+                    layout: custom_layout,
+                    bind_group: custom_uniform_bind_group,
+                })
+            }
         } else {
             None
         };
-
-        true
+        Ok(true)
     }
 
     pub fn update_default_buffer(
