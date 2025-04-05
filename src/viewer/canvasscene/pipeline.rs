@@ -94,9 +94,16 @@ impl Pipeline {
     ) -> Result<&mut Self, String> {
         match (
             self.update_custom_uniforms(device, versioned_custom_uniforms),
-            self.update_fragment_shader(device, versioned_fragment_shader, versioned_custom_uniforms),
+            self.update_fragment_shader(
+                device,
+                versioned_fragment_shader,
+                versioned_custom_uniforms,
+            ),
         ) {
-            (Err(error), _) | (_, Err(error)) => Err(error),
+            (Err(error), _) | (_, Err(error)) => {
+                self.pipeline = None;
+                return Err(error.to_string());
+            }
             _ => {
                 device.push_error_scope(wgpu::ErrorFilter::Validation);
                 if let Some(fragment_shader) = &self.fragment_shader {
@@ -279,39 +286,39 @@ impl Pipeline {
         encoder: &mut wgpu::CommandEncoder,
         viewport: Rectangle<u32>,
     ) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("fill color test"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
         if let Some(pipeline) = &self.pipeline {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("fill color test"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
             pass.set_pipeline(pipeline);
+
+            pass.set_viewport(
+                viewport.x as f32,
+                viewport.y as f32,
+                viewport.width as f32,
+                viewport.height as f32,
+                0.0,
+                1.0,
+            );
+
+            pass.set_bind_group(0, &self.default_data.bind_group, &[]);
+            if let Some(custom_buffer_data) = &self.custom_data.buffer_data {
+                pass.set_bind_group(1, &custom_buffer_data.bind_group, &[]);
+            }
+
+            pass.draw(0..3, 0..1);
         }
-
-        pass.set_viewport(
-            viewport.x as f32,
-            viewport.y as f32,
-            viewport.width as f32,
-            viewport.height as f32,
-            0.0,
-            1.0,
-        );
-
-        pass.set_bind_group(0, &self.default_data.bind_group, &[]);
-        if let Some(custom_buffer_data) = &self.custom_data.buffer_data {
-            pass.set_bind_group(1, &custom_buffer_data.bind_group, &[]);
-        }
-
-        pass.draw(0..3, 0..1);
     }
 }

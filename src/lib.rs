@@ -7,8 +7,6 @@ mod uniforms_editor;
 mod util;
 mod viewer;
 
-use pipeline_update::PipelineUpdate;
-
 use iced::widget::{column, container};
 use iced::{Element, Length, Subscription, Task, Theme};
 use util::Error;
@@ -83,9 +81,7 @@ impl Application {
                     if let Ok(editor) = serde_json::from_str(&contents) {
                         self.file = Some(path);
                         self.editor = editor;
-                        Task::done(PipelineUpdate::Shader(self.editor.text().content()))
-                            .map(viewer::Message::UpdatePipeline)
-                            .map(Message::Viewer)
+                        self.editor.update(editor::Message::ProjectOpened).map(Message::Editor)
                     } else {
                         Task::none()
                     }

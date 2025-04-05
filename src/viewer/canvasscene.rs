@@ -55,53 +55,43 @@ impl CanvasScene {
     fn update_uniforms(&mut self, uniforms: UniformsUpdate) {
         match uniforms {
             UniformsUpdate::Add(uniform) => {
-                if let Ok(mut uniform_bytes) =
-                    self.uniforms_render_data.data.uniforms_bytes.try_write()
-                {
-                    self.uniforms.push(uniform);
-                    self.uniforms_render_data.data.uniforms_str =
-                        Arc::new(to_uniforms_string(&self.uniforms));
-                    *uniform_bytes = to_uniforms_bytes(&self.uniforms);
-                    self.uniforms_render_data.data.uniforms_size += 1;
-                    self.uniforms_render_data.version += 1;
-                }
+                self.uniforms.push(uniform);
+                let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
+                self.update_uniforms_impl(uniforms.as_slice());
             }
             UniformsUpdate::Update(name, uniform) => {
-                if let Ok(mut uniform_bytes) =
-                    self.uniforms_render_data.data.uniforms_bytes.try_write()
-                {
-                    if let Some(item) = self.uniforms.iter_mut().find(|e| e.name == name) {
-                        *item = uniform;
-                        *uniform_bytes = to_uniforms_bytes(&self.uniforms);
-                    }
+                if let Some(item) = self.uniforms.iter_mut().find(|e| e.name == name) {
+                    *item = uniform;
+                    let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
+                    self.update_uniforms_impl(uniforms.as_slice());
                 }
             }
             UniformsUpdate::Remove(name) => {
-                if let Ok(mut uniform_bytes) =
-                    self.uniforms_render_data.data.uniforms_bytes.try_write()
-                {
-                    if let Some(idx) = self.uniforms.iter().position(|e| e.name == name) {
-                        self.uniforms.remove(idx);
-                        self.uniforms_render_data.data.uniforms_str =
-                            Arc::new(to_uniforms_string(&self.uniforms));
-                        *uniform_bytes = to_uniforms_bytes(&self.uniforms);
-                        self.uniforms_render_data.data.uniforms_size -= 1;
-                        self.uniforms_render_data.version += 1;
-                    }
+                if let Some(idx) = self.uniforms.iter().position(|e| e.name == name) {
+                    self.uniforms.remove(idx);
+                    let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
+                    self.update_uniforms_impl(uniforms.as_slice());
                 }
             }
             UniformsUpdate::Clear => {
-                if let Ok(mut uniform_bytes) =
-                    self.uniforms_render_data.data.uniforms_bytes.try_write()
-                {
-                    self.uniforms.clear();
-                    self.uniforms_render_data.data.uniforms_str =
-                        Arc::new(to_uniforms_string(&self.uniforms));
-                    *uniform_bytes = to_uniforms_bytes(&self.uniforms);
-                    self.uniforms_render_data.data.uniforms_size = 0;
-                    self.uniforms_render_data.version += 1;
-                }
+                self.uniforms.clear();
+                let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
+                self.update_uniforms_impl(uniforms.as_slice());
             }
+            UniformsUpdate::Reset(uniforms) => {
+                self.update_uniforms_impl(uniforms.as_slice());
+            }
+        }
+    }
+
+    fn update_uniforms_impl(&mut self, uniforms: &[Uniform]) {
+        if let Ok(mut uniform_bytes) = self.uniforms_render_data.data.uniforms_bytes.try_write() {
+            self.uniforms = uniforms.to_vec();
+            self.uniforms_render_data.data.uniforms_str =
+                Arc::new(to_uniforms_string(&self.uniforms));
+            *uniform_bytes = to_uniforms_bytes(uniforms);
+            self.uniforms_render_data.data.uniforms_size = self.uniforms.len();
+            self.uniforms_render_data.version += 1;
         }
     }
 }

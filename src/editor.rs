@@ -12,6 +12,7 @@ pub enum Message {
     TextEditor(text_editor::Message),
     UniformsEditor(uniforms_editor::Message),
     UpdatePipeline(PipelineUpdate),
+    ProjectOpened,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,6 +51,12 @@ impl Editor {
                     .map(Message::UniformsEditor),
             },
             Message::UpdatePipeline(_) => Task::none(),
+            Message::ProjectOpened => Task::done(Message::UpdatePipeline(PipelineUpdate::Shader(
+                self.text_editor.content(),
+            )))
+            .chain(Task::done(Message::UpdatePipeline(
+                PipelineUpdate::Uniforms(crate::pipeline_update::UniformsUpdate::Reset(self.uniforms_editor.uniforms())),
+            ))),
         }
     }
 
