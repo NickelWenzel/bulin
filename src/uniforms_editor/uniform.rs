@@ -141,15 +141,15 @@ impl Uniform {
     }
 }
 
-fn number_input2<'a, T, F>(
-    (v0, v1): &'a (T, T),
+fn number_input2<T, F>(
+    (v0, v1): &(T, T),
     bounds: impl RangeBounds<T> + Clone,
     step: T,
     on_change: F,
-) -> Element<'a, Message>
+) -> Element<Message>
 where
-    F: 'a + Fn((T, T)) -> Message + Copy,
-    T: 'a
+    F: 'static + Fn((T, T)) -> Message + Copy,
+    T: 'static
         + num_traits::Num
         + num_traits::NumAssignOps
         + PartialOrd
@@ -158,22 +158,24 @@ where
         + Copy
         + Bounded,
 {
+    let (v0_c, v1_c) = (*v0, *v1);
+
     row![
-        number_input(v0, bounds.clone(), move |v| on_change((v, *v1))).step(step),
-        number_input(v1, bounds, move |v| on_change((*v0, v))).step(step),
+        number_input(v0, bounds.clone(), move |v| on_change((v, v1_c))).step(step),
+        number_input(v1, bounds, move |v| on_change((v0_c, v))).step(step),
     ]
     .into()
 }
 
-fn number_input3<'a, T, F>(
-    (v0, v1, v2): &'a (T, T, T),
+fn number_input3<T, F>(
+    (v0, v1, v2): &(T, T, T),
     bounds: impl RangeBounds<T> + Clone,
     step: T,
     on_change: F,
-) -> Element<'a, Message>
+) -> Element<Message>
 where
-    F: 'a + Fn((T, T, T)) -> Message + Copy,
-    T: 'a
+    F: 'static + Fn((T, T, T)) -> Message + Copy,
+    T: 'static
         + num_traits::Num
         + num_traits::NumAssignOps
         + PartialOrd
@@ -182,33 +184,24 @@ where
         + Copy
         + Bounded,
 {
+    let (v0_c, v1_c, v2_c) = (*v0, *v1, *v2);
     row![
-        number_input(v0, bounds.clone(), move |v| on_change((
-            v,
-            v1.clone(),
-            v2.clone()
-        )))
-        .step(step),
-        number_input(v1, bounds.clone(), move |v| on_change((
-            v0.clone(),
-            v,
-            v2.clone()
-        )))
-        .step(step),
-        number_input(v2, bounds, move |v| on_change((v0.clone(), v1.clone(), v))).step(step),
+        number_input(v0, bounds.clone(), move |v| on_change((v, v1_c, v2_c))).step(step),
+        number_input(v1, bounds.clone(), move |v| on_change((v0_c, v, v2_c))).step(step),
+        number_input(v2, bounds, move |v| on_change((v0_c, v1_c, v))).step(step),
     ]
     .into()
 }
 
-fn number_input4<'a, T, F>(
-    (v0, v1, v2, v3): &'a (T, T, T, T),
+fn number_input4<T, F>(
+    (v0, v1, v2, v3): &(T, T, T, T),
     bounds: impl RangeBounds<T> + Clone,
     step: T,
     on_change: F,
-) -> Element<'a, Message>
+) -> Element<Message>
 where
-    F: 'a + Fn((T, T, T, T)) -> Message + Copy,
-    T: 'a
+    F: 'static + Fn((T, T, T, T)) -> Message + Copy,
+    T: 'static
         + num_traits::Num
         + num_traits::NumAssignOps
         + PartialOrd
@@ -217,35 +210,21 @@ where
         + Copy
         + Bounded,
 {
+    let (v0_c, v1_c, v2_c, v3_c) = (*v0, *v1, *v2, *v3);
     row![
         number_input(v0, bounds.clone(), move |v| on_change((
-            v,
-            v1.clone(),
-            v2.clone(),
-            v3.clone()
+            v, v1_c, v2_c, v3_c
         )))
         .step(step),
         number_input(v1, bounds.clone(), move |v| on_change((
-            v0.clone(),
-            v,
-            v2.clone(),
-            v3.clone()
+            v0_c, v, v2_c, v3_c
         )))
         .step(step),
         number_input(v1, bounds.clone(), move |v| on_change((
-            v0.clone(),
-            v1.clone(),
-            v,
-            v3.clone()
+            v0_c, v1_c, v, v3_c
         )))
         .step(step),
-        number_input(v2, bounds, move |v| on_change((
-            v0.clone(),
-            v1.clone(),
-            v2.clone(),
-            v
-        )))
-        .step(step),
+        number_input(v2, bounds, move |v| on_change((v0_c, v1_c, v2_c, v))).step(step),
     ]
     .into()
 }

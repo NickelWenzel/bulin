@@ -13,5 +13,6 @@ pub enum UniformsUpdate {
     Add(Uniform),
     Update(String, Uniform),
     Remove(String),
+    Reset(Vec<Uniform>),
     Clear,
 }
