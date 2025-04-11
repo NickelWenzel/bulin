@@ -11,8 +11,10 @@ use iced_aw::{quad, widgets::InnerBounds};
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    NewProject,
     OpenProject,
     SaveProject,
+    SaveProjectAs,
     Editor(editor::Message),
 }
 
@@ -23,12 +25,22 @@ pub fn view() -> Element<'static, Message> {
             "Open File",
             Message::Editor(editor::Message::TextEditor(text_editor::Message::OpenFile))
         ))(menu_item(
+            "New File",
+            Message::Editor(editor::Message::TextEditor(text_editor::Message::NewFile))
+        ))(menu_item(
             "Save File",
             Message::Editor(editor::Message::TextEditor(text_editor::Message::SaveFile))
+        ))(menu_item(
+            "Save File as",
+            Message::Editor(editor::Message::TextEditor(text_editor::Message::SaveFileAs))
         ))(separator())(menu_item(
             "Open Project",
             Message::OpenProject
-        ))(menu_item("Save Project", Message::SaveProject)))
+        ))(separator())(menu_item(
+            "New Project",
+            Message::NewProject
+        ))(menu_item("Save Project", Message::SaveProject))
+        (menu_item("Save Project as", Message::SaveProjectAs)))
         .max_width(180.0)
     )(
         main_menu_item("Edit"),

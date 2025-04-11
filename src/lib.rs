@@ -29,38 +29,39 @@ pub enum Message {
     Layout(layout::Message),
     Menu(menu::Message),
     OpenProject,
+    NewProject,
     ProjectOpened(Result<(PathBuf, Arc<String>), Error>),
     SaveProject,
+    SaveProjectAs,
     ProjectSaved(Result<PathBuf, Error>),
 }
 
 impl Application {
-    pub fn new() -> (Self, Task<Message>) {
-        let (editor, editor_task) = editor::Editor::new();
-        (
-            Self {
-                editor,
-                viewer: viewer::Viewer::new(),
-                layout: layout::Layout::new(),
-                file: None,
-                is_loading: false,
-            },
-            editor_task.map(Message::Editor),
-        )
+    pub fn new() -> Self {
+        Self {
+            editor: editor::Editor::new(),
+            viewer: viewer::Viewer::new(),
+            layout: layout::Layout::new(),
+            file: None,
+            is_loading: false,
+        }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Editor(message) => match message {
-                editor::Message::UpdatePipeline(update) =>
-                    Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update))),
+                editor::Message::UpdatePipeline(update) => {
+                    Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
+                }
                 _ => self.editor.update(message).map(Message::Editor),
             },
             Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
             Message::Layout(message) => self.layout.update(message).map(Message::Layout),
             Message::Menu(message) => match message {
                 menu::Message::OpenProject => Task::done(Message::OpenProject),
+                menu::Message::NewProject => Task::done(Message::NewProject),
                 menu::Message::SaveProject => Task::done(Message::SaveProject),
+                menu::Message::SaveProjectAs => Task::done(Message::SaveProjectAs),
                 menu::Message::Editor(message) => Task::done(Message::Editor(message)),
             },
             Message::OpenProject => {
@@ -72,6 +73,16 @@ impl Application {
                     Task::perform(util::open_file(), Message::ProjectOpened)
                 }
             }
+            Message::NewProject => {
+                if !self.is_loading {
+                    self.file = None;
+                    self.editor = editor::Editor::new();
+                }
+
+                self.editor
+                    .update(editor::Message::ProjectOpened)
+                    .map(Message::Editor)
+            }
             Message::ProjectOpened(result) => {
                 self.is_loading = false;
 
@@ -79,7 +90,9 @@ impl Application {
                     if let Ok(editor) = serde_json::from_str(&contents) {
                         self.file = Some(path);
                         self.editor = editor;
-                        self.editor.update(editor::Message::ProjectOpened).map(Message::Editor)
+                        self.editor
+                            .update(editor::Message::ProjectOpened)
+                            .map(Message::Editor)
                     } else {
                         Task::none()
                     }
@@ -96,6 +109,16 @@ impl Application {
                         util::save_file(self.file.clone(), content),
                         Message::ProjectSaved,
                     )
+                } else {
+                    Task::none()
+                }
+            }
+            Message::SaveProjectAs => {
+                if self.is_loading {
+                    Task::none()
+                } else if let Ok(content) = serde_json::to_string(&self.editor) {
+                    self.is_loading = true;
+                    Task::perform(util::save_file(None, content), Message::ProjectSaved)
                 } else {
                     Task::none()
                 }
@@ -144,5 +167,11 @@ impl Application {
 
     pub fn subscription(&self) -> Subscription<Message> {
         self.editor.subscription().map(Message::Editor)
+    }
+}
+
+impl Default for Application {
+    fn default() -> Self {
+        Self::new()
     }
 }

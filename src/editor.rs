@@ -22,15 +22,11 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new() -> (Self, Task<Message>) {
-        let (text_editor, text_editor_task) = text_editor::TextEditor::new();
-        (
-            Self {
-                text_editor,
+    pub fn new() -> Self {
+        Self {
+                text_editor: text_editor::TextEditor::new(),
                 uniforms_editor: uniforms_editor::UniformsEditor::new(),
-            },
-            text_editor_task.map(Message::TextEditor),
-        )
+            }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
