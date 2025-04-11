@@ -291,44 +291,41 @@ impl TextEditor {
 
     fn create_undo(&mut self, action: &text_editor::Action) -> Vec<text_editor::Action> {
         let mut ret = Vec::new();
-        match action {
-            text_editor::Action::Edit(edit) => {
-                let selection = self.content.selection().unwrap_or_default();
-                let has_selection = !selection.is_empty();
-                ret.push(text_editor::Action::Edit(text_editor::Edit::Paste(
-                    Arc::new(selection),
-                )));
+        if let text_editor::Action::Edit(edit) = action {
+            let selection = self.content.selection().unwrap_or_default();
+            let has_selection = !selection.is_empty();
+            ret.push(text_editor::Action::Edit(text_editor::Edit::Paste(
+                Arc::new(selection),
+            )));
 
-                let mut insert_add_offset_from_cursor = |offset: isize| {
-                    let (line, column) = self.content.cursor_position();
-                    if let Some(line) = self.content.line(line) {
-                        if let Some(char) = line.chars().nth((column as isize + offset) as usize) {
-                            ret.push(text_editor::Action::Edit(text_editor::Edit::Insert(char)));
-                        }
+            let mut insert_add_offset_from_cursor = |offset: isize| {
+                let (line, column) = self.content.cursor_position();
+                if let Some(line) = self.content.line(line) {
+                    if let Some(char) = line.chars().nth((column as isize + offset) as usize) {
+                        ret.push(text_editor::Action::Edit(text_editor::Edit::Insert(char)));
                     }
-                };
-
-                match edit {
-                    text_editor::Edit::Enter | text_editor::Edit::Insert(_) => {
-                        ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
-                        ret.push(text_editor::Action::Select(text_editor::Motion::Left));
-                    }
-                    text_editor::Edit::Paste(str) => {
-                        if !str.is_empty() {
-                            ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
-                            str.chars().into_iter().for_each(|_| {
-                                ret.push(text_editor::Action::Select(text_editor::Motion::Left))
-                            });
-                        }
-                    }
-                    text_editor::Edit::Backspace if !has_selection => {
-                        insert_add_offset_from_cursor(-1)
-                    }
-                    text_editor::Edit::Delete if !has_selection => insert_add_offset_from_cursor(0),
-                    _ => (),
                 }
+            };
+
+            match edit {
+                text_editor::Edit::Enter | text_editor::Edit::Insert(_) => {
+                    ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
+                    ret.push(text_editor::Action::Select(text_editor::Motion::Left));
+                }
+                text_editor::Edit::Paste(str) => {
+                    if !str.is_empty() {
+                        ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
+                        str.chars().into_iter().for_each(|_| {
+                            ret.push(text_editor::Action::Select(text_editor::Motion::Left))
+                        });
+                    }
+                }
+                text_editor::Edit::Backspace if !has_selection => {
+                    insert_add_offset_from_cursor(-1)
+                }
+                text_editor::Edit::Delete if !has_selection => insert_add_offset_from_cursor(0),
+                _ => (),
             }
-            _ => (),
         }
         ret
     }
