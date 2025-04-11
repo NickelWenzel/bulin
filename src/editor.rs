@@ -50,13 +50,13 @@ impl Editor {
                     .update(message)
                     .map(Message::UniformsEditor),
             },
-            Message::UpdatePipeline(_) => Task::none(),
             Message::ProjectOpened => Task::done(Message::UpdatePipeline(PipelineUpdate::Shader(
                 self.text_editor.content(),
             )))
             .chain(Task::done(Message::UpdatePipeline(
                 PipelineUpdate::Uniforms(crate::pipeline_update::UniformsUpdate::Reset(self.uniforms_editor.uniforms())),
             ))),
+            Message::UpdatePipeline(_) => Task::none(),
         }
     }
 

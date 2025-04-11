@@ -52,10 +52,8 @@ impl Application {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Editor(message) => match message {
-                editor::Message::UpdatePipeline(update) => self
-                    .viewer
-                    .update(viewer::Message::UpdatePipeline(update))
-                    .map(Message::Viewer),
+                editor::Message::UpdatePipeline(update) =>
+                    Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update))),
                 _ => self.editor.update(message).map(Message::Editor),
             },
             Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),

@@ -166,7 +166,6 @@ impl TextEditor {
 
                 Task::none()
             }
-            Message::UpdatePipeline(_) => Task::none(),
             Message::Undo => {
                 self.undo_handler.undo().into_iter().for_each(|action| {
                     self.content.perform(action);
@@ -181,6 +180,7 @@ impl TextEditor {
 
                 Task::done(Message::UpdatePipeline(self.content()))
             }
+            Message::UpdatePipeline(_) => Task::none(),
         }
     }
 
