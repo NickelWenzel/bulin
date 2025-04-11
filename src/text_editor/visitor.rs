@@ -26,7 +26,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
-        Ok(TextEditor::simple_new()
+        Ok(TextEditor::new()
             .with_file(file)
             .with_content(&content)
             .with_theme(theme))
@@ -71,7 +71,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
         let content = content.ok_or_else(|| de::Error::missing_field("content"))?;
         let theme = theme.ok_or_else(|| de::Error::missing_field("theme"))?;
 
-        Ok(TextEditor::simple_new()
+        Ok(TextEditor::new()
             .with_file(file)
             .with_content(&content)
             .with_theme(theme))

@@ -5,7 +5,7 @@ use crate::util;
 
 use iced::keyboard;
 use iced::widget::{
-    self, button, column, container, horizontal_space, pick_list, row, text, text_editor, toggler,
+    button, column, container, horizontal_space, pick_list, row, text, text_editor, toggler,
     tooltip,
 };
 use iced::{Center, Element, Fill, Font, Task, Theme};
@@ -36,6 +36,7 @@ pub enum Message {
     OpenFile,
     FileOpened(Result<(PathBuf, Arc<String>), util::Error>),
     SaveFile,
+    SaveFileAs,
     FileSaved(Result<PathBuf, util::Error>),
     UpdatePipeline(FragmentShader),
     Undo,
@@ -43,26 +44,7 @@ pub enum Message {
 }
 
 impl TextEditor {
-    pub fn new() -> (Self, Task<Message>) {
-        (
-            Self {
-                is_loading: true,
-                ..TextEditor::simple_new()
-            },
-            Task::batch([
-                Task::perform(
-                    util::load_file(format!(
-                        "{}/src/viewer/canvasscene/shaders/empty_frag.wgsl",
-                        env!("CARGO_MANIFEST_DIR")
-                    )),
-                    Message::FileOpened,
-                ),
-                widget::focus_next(),
-            ]),
-        )
-    }
-
-    pub fn simple_new() -> Self {
+    pub fn new() -> Self {
         Self {
             file: None,
             content: text_editor::Content::new(),
@@ -122,7 +104,7 @@ impl TextEditor {
                     self.content = text_editor::Content::new();
                 }
 
-                Task::none()
+                Task::done(Message::UpdatePipeline(self.content()))
             }
             Message::OpenFile => {
                 if self.is_loading {
@@ -152,6 +134,18 @@ impl TextEditor {
 
                     Task::perform(
                         util::save_file(self.file.clone(), self.content()),
+                        Message::FileSaved,
+                    )
+                }
+            }
+            Message::SaveFileAs => {
+                if self.is_loading {
+                    Task::none()
+                } else {
+                    self.is_loading = true;
+
+                    Task::perform(
+                        util::save_file(None, self.content()),
                         Message::FileSaved,
                     )
                 }
@@ -275,13 +269,17 @@ impl TextEditor {
 
     pub fn filename_display_text(&self) -> Option<String> {
         if let Some(path) = &self.file {
-            let path = path.display().to_string();
+            let mut path = path.display().to_string();
 
             if path.len() > 60 {
-                Some(format!("...{}", &path[path.len() - 40..]))
-            } else {
-                Some(path)
+                path = format!("...{}", &path[path.len() - 40..]);
             }
+
+            if self.is_dirty {
+                path = format!("{} •", path);
+            }
+
+            Some(path)
         } else {
             None
         }
