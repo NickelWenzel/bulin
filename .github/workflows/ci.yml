@@ -1,0 +1,50 @@
+name: Rust CI
+
+on:
+  push:
+    branches:
+      - bulin_rust
+  pull_request:
+    branches:
+      - bulin_rust
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build in debug mode
+        run: cargo build
+
+      - name: Run tests in debug mode
+        run: cargo test --all
+
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85
+          
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build in release mode
+        run: cargo build --release
+
+      - name: Run tests in release mode
+        run: cargo test --all --release
