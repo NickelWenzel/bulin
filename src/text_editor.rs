@@ -144,10 +144,7 @@ impl TextEditor {
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(
-                        util::save_file(None, self.content()),
-                        Message::FileSaved,
-                    )
+                    Task::perform(util::save_file(None, self.content()), Message::FileSaved)
                 }
             }
             Message::FileSaved(result) => {
@@ -320,9 +317,7 @@ impl TextEditor {
                         });
                     }
                 }
-                text_editor::Edit::Backspace if !has_selection => {
-                    insert_add_offset_from_cursor(-1)
-                }
+                text_editor::Edit::Backspace if !has_selection => insert_add_offset_from_cursor(-1),
                 text_editor::Edit::Delete if !has_selection => insert_add_offset_from_cursor(0),
                 _ => (),
             }

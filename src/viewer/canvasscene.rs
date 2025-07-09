@@ -60,10 +60,12 @@ impl CanvasScene {
                 self.update_uniforms_impl(uniforms.as_slice());
             }
             UniformsUpdate::Update(name, uniform) => {
-                if let Some(item) = self.uniforms.iter_mut().find(|e| e.name == name) {
+                if let (Some(item), Ok(mut uniform_bytes)) = (
+                    self.uniforms.iter_mut().find(|e| e.name == name),
+                    self.uniforms_render_data.data.uniforms_bytes.try_write(),
+                ) {
                     *item = uniform;
-                    let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
-                    self.update_uniforms_impl(uniforms.as_slice());
+                    *uniform_bytes = to_uniforms_bytes(&self.uniforms);
                 }
             }
             UniformsUpdate::Remove(name) => {
@@ -222,21 +224,17 @@ impl shader::Primitive for Primitive {
         if !storage.has::<Pipeline>() {
             storage.store(Pipeline::new(device));
         }
-        let Some(pipeline) = storage.get_mut::<Pipeline>() else {
-            return println!("Failed to create pipeline:\n");
-        };
 
-        match pipeline.update(device, format, &self.shader, &self.uniforms) {
-            Ok(pipeline) => {
-                pipeline
-                    .update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()))
-                    .update_custom_buffer(
-                        queue,
-                        &self.uniforms.data.uniforms_bytes.read().unwrap(),
-                    );
-            }
-            Err(error) => println!("Failed to create pipeline:\n{}", error),
-        }
+        if let Ok(pipeline) = storage
+            .get_mut::<Pipeline>()
+            .ok_or(String::new())
+            .and_then(|pipeline| pipeline.update(device, format, &self.shader, &self.uniforms))
+            .inspect_err(|e| println!("Failed to create pipeline:\n{}", e))
+        {
+            pipeline
+                .update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()))
+                .update_custom_buffer(queue, &self.uniforms.data.uniforms_bytes.read().unwrap());
+        };
     }
 
     fn render(
