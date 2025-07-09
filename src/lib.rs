@@ -1,7 +1,7 @@
 mod editor;
 mod layout;
 mod menu;
-mod pipeline_update;
+mod shader_update;
 mod text_editor;
 mod uniforms_editor;
 mod util;
@@ -50,8 +50,10 @@ impl Application {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Editor(message) => match message {
-                editor::Message::UpdatePipeline(update) => {
-                    Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
+                editor::Message::UpdatePipeline(_update) => {
+                    //TODO: Handle the update in the viewer
+                    //Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
+                    Task::none()
                 }
                 _ => self.editor.update(message).map(Message::Editor),
             },

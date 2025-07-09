@@ -3,7 +3,7 @@ use crate::uniforms_editor::uniform::*;
 pub type FragmentShader = String;
 
 #[derive(Debug, Clone)]
-pub enum PipelineUpdate {
+pub enum ShaderUpdate {
     Shader(FragmentShader),
     Uniforms(UniformsUpdate),
 }

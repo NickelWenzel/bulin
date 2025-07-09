@@ -1,6 +1,6 @@
 mod highlighter;
 mod visitor;
-use crate::pipeline_update::FragmentShader;
+use crate::shader_update::FragmentShader;
 use crate::util;
 
 use iced::keyboard;

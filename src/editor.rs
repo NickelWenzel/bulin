@@ -1,4 +1,4 @@
-use crate::pipeline_update::PipelineUpdate;
+use crate::shader_update::ShaderUpdate;
 use crate::text_editor;
 use crate::uniforms_editor;
 
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 pub enum Message {
     TextEditor(text_editor::Message),
     UniformsEditor(uniforms_editor::Message),
-    UpdatePipeline(PipelineUpdate),
+    UpdatePipeline(ShaderUpdate),
     ProjectOpened,
 }
 
@@ -24,16 +24,16 @@ pub struct Editor {
 impl Editor {
     pub fn new() -> Self {
         Self {
-                text_editor: text_editor::TextEditor::new(),
-                uniforms_editor: uniforms_editor::UniformsEditor::new(),
-            }
+            text_editor: text_editor::TextEditor::new(),
+            uniforms_editor: uniforms_editor::UniformsEditor::new(),
+        }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::TextEditor(message) => match message {
                 text_editor::Message::UpdatePipeline(shader) => {
-                    Task::done(Message::UpdatePipeline(PipelineUpdate::Shader(shader)))
+                    Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(shader)))
                 }
                 _ => self.text_editor.update(message).map(Message::TextEditor),
             },
@@ -46,12 +46,12 @@ impl Editor {
                     .update(message)
                     .map(Message::UniformsEditor),
             },
-            Message::ProjectOpened => Task::done(Message::UpdatePipeline(PipelineUpdate::Shader(
+            Message::ProjectOpened => Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(
                 self.text_editor.content(),
             )))
-            .chain(Task::done(Message::UpdatePipeline(
-                PipelineUpdate::Uniforms(crate::pipeline_update::UniformsUpdate::Reset(self.uniforms_editor.uniforms())),
-            ))),
+            .chain(Task::done(Message::UpdatePipeline(ShaderUpdate::Uniforms(
+                crate::shader_update::UniformsUpdate::Reset(self.uniforms_editor.uniforms()),
+            )))),
             Message::UpdatePipeline(_) => Task::none(),
         }
     }
