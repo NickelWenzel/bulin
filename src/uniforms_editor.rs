@@ -1,7 +1,7 @@
 mod time;
 pub mod uniform;
 
-use crate::pipeline_update::*;
+use crate::shader_update::*;
 use uniform::*;
 
 use iced::{
@@ -16,7 +16,7 @@ pub enum Message {
     Time(time::Message),
     Uniforms(String, uniform::Message),
     Candidate(uniform::CandidateMessage),
-    Update(PipelineUpdate),
+    Update(ShaderUpdate),
     AddTime,
     RemoveTime,
     AddUniform(EditorUniform),
@@ -66,7 +66,7 @@ impl UniformsEditor {
                 if let Some(time) = &mut self.time {
                     time.update(message)
                         .map(Message::Time)
-                        .chain(Task::done(Message::Update(PipelineUpdate::Uniforms(
+                        .chain(Task::done(Message::Update(ShaderUpdate::Uniforms(
                             UniformsUpdate::Update(
                                 "time".to_string(),
                                 Uniform {
@@ -81,18 +81,14 @@ impl UniformsEditor {
             }
             Message::AddUniform(uniform) => {
                 self.uniforms.push(uniform.clone());
-                Task::done(Message::Update(PipelineUpdate::Uniforms(
+                Task::done(Message::Update(ShaderUpdate::Uniforms(
                     UniformsUpdate::Add(uniform.value),
                 )))
             }
             Message::RemoveUniform(name) => {
-                if let Some(idx) = self
-                    .uniforms
-                    .iter()
-                    .position(|u| u.value.name == name)
-                {
+                if let Some(idx) = self.uniforms.iter().position(|u| u.value.name == name) {
                     self.uniforms.remove(idx);
-                    Task::done(Message::Update(PipelineUpdate::Uniforms(
+                    Task::done(Message::Update(ShaderUpdate::Uniforms(
                         UniformsUpdate::Remove(name),
                     )))
                 } else {
@@ -106,7 +102,7 @@ impl UniformsEditor {
                         .value
                         .update(message)
                         .map(move |m| Message::Uniforms(name.clone(), m))
-                        .chain(Task::done(Message::Update(PipelineUpdate::Uniforms(
+                        .chain(Task::done(Message::Update(ShaderUpdate::Uniforms(
                             UniformsUpdate::Update(name_c, uniform.value.clone()),
                         ))))
                 } else {
@@ -143,31 +139,26 @@ impl UniformsEditor {
             },
         ];
 
-        let uniforms = iced::widget::Column::from_iter(
-            self.uniforms.iter().filter_map(|u| {
-                if u.visible {
-                    Some(
-                        row![
-                            u.value
-                                .view()
-                                .map(|m| Message::Uniforms(u.value.name.clone(), m)),
-                            button("X").on_press(Message::RemoveUniform(u.value.name.clone())),
-                        ]
-                        .into(),
-                    )
-                } else {
-                    None
-                }
-            }),
-        );
+        let uniforms = iced::widget::Column::from_iter(self.uniforms.iter().filter_map(|u| {
+            if u.visible {
+                Some(
+                    row![
+                        u.value
+                            .view()
+                            .map(|m| Message::Uniforms(u.value.name.clone(), m)),
+                        button("X").on_press(Message::RemoveUniform(u.value.name.clone())),
+                    ]
+                    .into(),
+                )
+            } else {
+                None
+            }
+        }));
         iced::widget::column![time, candidate, uniforms].into()
     }
 
     pub fn uniforms(&self) -> Vec<Uniform> {
-        self.uniforms
-            .iter()
-            .map(|u| u.value.clone())
-            .collect()
+        self.uniforms.iter().map(|u| u.value.clone()).collect()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

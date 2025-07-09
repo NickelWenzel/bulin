@@ -1,6 +1,6 @@
 mod canvasscene;
 
-use crate::pipeline_update::PipelineUpdate;
+use crate::viewer::canvasscene::PipelineUpdate;
 
 use canvasscene::CanvasScene;
 
