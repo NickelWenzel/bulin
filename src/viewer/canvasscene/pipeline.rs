@@ -105,6 +105,7 @@ impl Pipeline {
         if !(custom_uniforms_need_update || shader_needs_update) {
             return Ok(self);
         }
+        std::thread::sleep(std::time::Duration::from_secs(30));
 
         if custom_uniforms_need_update {
             match Pipeline::create_custom_uniforms(device, &versioned_custom_uniforms.data) {
@@ -134,9 +135,8 @@ impl Pipeline {
         let pipeline_layout_descriptor = wgpu::PipelineLayoutDescriptor {
             label: Some("bulin_canvas.pipeline.layout"),
             bind_group_layouts: if let Some(BufferData {
-                buffer: _,
                 layout: custom_layout,
-                bind_group: _,
+                ..
             }) = &self.custom_data.buffer_data
             {
                 &[&self.default_data.layout, custom_layout]
@@ -302,39 +302,40 @@ impl Pipeline {
         encoder: &mut wgpu::CommandEncoder,
         viewport: Rectangle<u32>,
     ) {
-        if let Some(pipeline) = &self.pipeline {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("fill color test"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let Some(pipeline) = &self.pipeline else {
+            return;
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("fill color test"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
-            pass.set_pipeline(pipeline);
+        pass.set_pipeline(pipeline);
 
-            pass.set_viewport(
-                viewport.x as f32,
-                viewport.y as f32,
-                viewport.width as f32,
-                viewport.height as f32,
-                0.0,
-                1.0,
-            );
+        pass.set_viewport(
+            viewport.x as f32,
+            viewport.y as f32,
+            viewport.width as f32,
+            viewport.height as f32,
+            0.0,
+            1.0,
+        );
 
-            pass.set_bind_group(0, &self.default_data.bind_group, &[]);
-            if let Some(custom_buffer_data) = &self.custom_data.buffer_data {
-                pass.set_bind_group(1, &custom_buffer_data.bind_group, &[]);
-            }
-
-            pass.draw(0..3, 0..1);
+        pass.set_bind_group(0, &self.default_data.bind_group, &[]);
+        if let Some(custom_buffer_data) = &self.custom_data.buffer_data {
+            pass.set_bind_group(1, &custom_buffer_data.bind_group, &[]);
         }
+
+        pass.draw(0..3, 0..1);
     }
 }
