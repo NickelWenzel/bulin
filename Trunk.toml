@@ -1,0 +1,12 @@
+[build]
+target = "static/index.html"
+dist = "dist"
+public_url = "/"
+
+[watch]
+ignore = ["dist"]
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8080
+open = true
