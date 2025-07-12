@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Native",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/native",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Build Native (Debug)"
+        },
+        {
+            "name": "Debug Tests",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/deps/bulin-${env:CARGO_PKG_NAME}",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Run Tests"
+        }
+    ]
+}

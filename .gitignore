@@ -1,2 +1,22 @@
+# Rust
 /target
+
+# Trunk/WASM
 /dist
+
+# IDE (but keep .vscode for project setup)
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/

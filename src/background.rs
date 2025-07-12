@@ -1,33 +1,40 @@
-use tokio::time::{sleep, Duration};
 use anyhow::Result;
+use tokio::sync::mpsc;
+use tokio::time::{Duration, sleep};
 
 pub struct BackgroundTask {
     pub counter: u32,
     pub is_running: bool,
+    pub sender: mpsc::UnboundedSender<String>,
 }
 
 impl BackgroundTask {
-    pub fn new() -> Self {
+    pub fn new(sender: mpsc::UnboundedSender<String>) -> Self {
         Self {
             counter: 0,
             is_running: false,
+            sender,
         }
     }
 
     pub async fn start(&mut self) -> Result<()> {
         self.is_running = true;
-        
+
         while self.is_running {
             // Simulate some background work
             sleep(Duration::from_secs(1)).await;
             self.counter += 1;
-            
-            // Log progress
+
+            // Send progress updates
             if self.counter % 10 == 0 {
-                println!("Background task counter: {}", self.counter);
+                let message = format!("Background task counter: {}", self.counter);
+                if self.sender.send(message).is_err() {
+                    // Channel closed, stop the task
+                    break;
+                }
             }
         }
-        
+
         Ok(())
     }
 
@@ -49,7 +56,7 @@ pub async fn fetch_data() -> Result<String> {
 pub async fn process_data(data: String) -> Result<String> {
     // Simulate async data processing
     sleep(Duration::from_millis(200)).await;
-    Ok(format!("Processed: {}", data))
+    Ok(format!("Processed: {data}"))
 }
 
 #[cfg(test)]

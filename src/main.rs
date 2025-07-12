@@ -4,13 +4,32 @@
 use bulin::App;
 use eframe::egui;
 
-fn main() -> Result<(), eframe::Error> {
+#[tokio::main]
+async fn main() -> Result<(), eframe::Error> {
+    // Set up logging
+    env_logger::init();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 300.0])
-            .with_min_inner_size([300.0, 220.0]),
+            .with_inner_size([800.0, 600.0])
+            .with_min_inner_size([600.0, 400.0]),
         ..Default::default()
     };
 
-    eframe::run_native("My App", options, Box::new(|_cc| Ok(Box::new(App::new()))))
+    eframe::run_native(
+        "Bulin Cross-Platform GUI App",
+        options,
+        Box::new(|_cc| {
+            let mut app = App::new();
+            // Initialize async components in a blocking context
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    if let Err(e) = app.initialize().await {
+                        eprintln!("Failed to initialize app: {e}");
+                    }
+                });
+            });
+            Ok(Box::new(app))
+        }),
+    )
 }

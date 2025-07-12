@@ -15,10 +15,11 @@ impl Renderer {
     /// Create a new renderer instance
     pub async fn new() -> Result<Self, AppError> {
         // Initialize wgpu
-        let instance = Instance::new(&InstanceDescriptor {
+        let instance = Instance::new(InstanceDescriptor {
             backends: Backends::all(),
             flags: InstanceFlags::default(),
-            ..Default::default()
+            dx12_shader_compiler: Dx12Compiler::default(),
+            gles_minor_version: Gles3MinorVersion::Automatic,
         });
 
         let adapter = instance
@@ -31,13 +32,14 @@ impl Renderer {
             .context("Failed to find an appropriate adapter")?;
 
         let (device, queue) = adapter
-            .request_device(&DeviceDescriptor {
-                label: None,
-                required_features: Features::empty(),
-                required_limits: Limits::default(),
-                memory_hints: MemoryHints::default(),
-                trace: wgpu::Trace::Off,
-            })
+            .request_device(
+                &DeviceDescriptor {
+                    label: None,
+                    required_features: Features::empty(),
+                    required_limits: Limits::default(),
+                },
+                None,
+            )
             .await
             .context("Failed to create device")?;
 
@@ -92,13 +94,13 @@ impl Renderer {
                 layout: Some(&render_pipeline_layout),
                 vertex: VertexState {
                     module: &shader,
-                    entry_point: Some("vs_main"),
+                    entry_point: "vs_main",
                     buffers: &[],
                     compilation_options: PipelineCompilationOptions::default(),
                 },
                 fragment: Some(FragmentState {
                     module: &shader,
-                    entry_point: Some("fs_main"),
+                    entry_point: "fs_main",
                     targets: &[Some(ColorTargetState {
                         format: TextureFormat::Rgba8UnormSrgb,
                         blend: Some(BlendState::REPLACE),
@@ -109,8 +111,6 @@ impl Renderer {
                 primitive: PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: MultisampleState::default(),
-                cache: None,
-                multiview: None,
             });
 
         self.render_pipeline = Some(render_pipeline);

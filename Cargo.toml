@@ -12,13 +12,19 @@ targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 anyhow = "1.0.98"
 eframe = { version = "0.32.0", features = ["wgpu"] }
 egui = { version = "0.32.0", features = ["callstack", "default", "log"] }
+egui_code_editor = "0.2"
 thiserror = "2.0.12"
-tokio = { version = "1.46.1", features = ["time"] }
 # Same version as egui
 wgpu = { version = "25.0", features = ["vulkan", "webgl"] }
 
+# Platform-specific dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.46.1", features = ["time", "rt", "rt-multi-thread", "macros", "sync"] }
+env_logger = "0.10"
+
 # WebAssembly dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1.46.1", features = ["time", "rt", "macros", "sync"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"

@@ -1,0 +1,144 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Native (Debug)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"build",
+				"--bin",
+				"native"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared"
+			}
+		},
+		{
+			"label": "Build Native (Release)",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"build",
+				"--release",
+				"--bin",
+				"native"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "Run Native",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"run",
+				"--bin",
+				"native"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"dependsOn": "Build Native (Debug)"
+		},
+		{
+			"label": "Build WASM (Debug)",
+			"type": "shell",
+			"command": "trunk",
+			"args": [
+				"build"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "Build WASM (Release)",
+			"type": "shell",
+			"command": "trunk",
+			"args": [
+				"build",
+				"--release"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "Serve WASM (Development)",
+			"type": "shell",
+			"command": "trunk",
+			"args": [
+				"serve",
+				"--open"
+			],
+			"group": "build",
+			"isBackground": true,
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "Run Tests",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"test"
+			],
+			"group": "test",
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "Check Code",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "Clippy",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"clippy",
+				"--all-targets",
+				"--all-features",
+				"--",
+				"-D",
+				"warnings"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "Format Code",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"fmt"
+			],
+			"group": "build"
+		}
+	]
+}
