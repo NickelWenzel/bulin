@@ -8,9 +8,22 @@ edition = "2024"
 all-features = true
 targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
+# Linting configuration
+[lints.clippy]
+# Ignore clippy warnings in dependencies
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+# Don't check dependencies
+cargo = "allow"
+
+[lints.rust]
+# Suppress warnings from dependencies
+warnings = "warn"
+
 [dependencies]
 anyhow = "1.0.98"
-eframe = { version = "0.32.0", features = ["wgpu"] }
+eframe = { version = "0.32.0", default-features = false, features = ["wgpu"] }
 egui = { version = "0.32.0", features = ["callstack", "default", "log"] }
 egui_code_editor = "0.2"
 thiserror = "2.0.12"
@@ -19,8 +32,14 @@ wgpu = { version = "25.0", features = ["vulkan", "webgl"] }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.46.1", features = ["time", "rt", "rt-multi-thread", "macros", "sync"] }
-env_logger = "0.10"
+tokio = { version = "1.46.1", features = [
+    "time",
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "sync",
+] }
+env_logger = "0.11"
 
 # WebAssembly dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -36,15 +55,19 @@ tracing-wasm = "0.2.1"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "native"
+name = "bulin_app"
 path = "src/main.rs"
-
-[[bin]]
-name = "web"
-path = "src/web.rs"
 
 [profile.release]
 opt-level = 2 # fast and small wasm
+debug = true  # Keep debug symbols in release builds
+strip = false # Don't strip debug symbols
+
+# Custom profile for debugging optimized builds
+[profile.release-debug]
+inherits = "release"
+debug = true
+strip = false
 
 # Optimize all dependencies even in debug builds:
 [profile.dev.package."*"]

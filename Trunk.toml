@@ -1,6 +1,5 @@
 [build]
 target = "static/index.html"
-filehash = false
 
 [watch]
 ignore = ["dist"]
