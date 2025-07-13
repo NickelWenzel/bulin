@@ -3,6 +3,7 @@ target = "static/index.html"
 
 [watch]
 ignore = ["dist"]
+watch = ["."]
 
 [serve]
 open = true

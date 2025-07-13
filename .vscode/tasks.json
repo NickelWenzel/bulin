@@ -7,8 +7,6 @@
 			"command": "cargo",
 			"args": [
 				"build",
-				"--bin",
-				"native"
 			],
 			"group": "build",
 			"problemMatcher": [
@@ -28,8 +26,6 @@
 			"args": [
 				"build",
 				"--release",
-				"--bin",
-				"native"
 			],
 			"group": "build",
 			"problemMatcher": [
@@ -42,8 +38,6 @@
 			"command": "cargo",
 			"args": [
 				"run",
-				"--bin",
-				"native"
 			],
 			"group": "build",
 			"problemMatcher": [

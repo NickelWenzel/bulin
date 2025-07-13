@@ -23,12 +23,16 @@ warnings = "warn"
 
 [dependencies]
 anyhow = "1.0.98"
-eframe = { version = "0.32.0", default-features = false, features = ["wgpu"] }
+eframe = { version = "0.32.0", default-features = false, features = [
+    "x11",
+    "wgpu",
+] }
 egui = { version = "0.32.0", features = ["callstack", "default", "log"] }
 egui_code_editor = "0.2"
 thiserror = "2.0.12"
 # Same version as egui
 wgpu = { version = "25.0", features = ["vulkan", "webgl"] }
+bytemuck = "1.12.0"
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -40,6 +44,7 @@ tokio = { version = "1.46.1", features = [
     "sync",
 ] }
 env_logger = "0.11"
+pollster = "0.2.0"
 
 # WebAssembly dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -26,10 +26,7 @@ async fn main() -> eframe::Result<()> {
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("WGPU render state is not available"))?;
 
-            Ok(Box::new(App::new(
-                wgpu_render_state.device.clone(),
-                wgpu_render_state.queue.clone(),
-            )))
+            Ok(Box::new(App::new(wgpu_render_state)))
         }),
     )
 }
@@ -59,14 +56,10 @@ fn main() {
                 eframe::WebOptions::default(),
                 Box::new(|cc| {
                     let wgpu_render_state = cc
-                        .wgpu_render_state
-                        .as_ref()
+                        .wgpu_render_state()
                         .ok_or_else(|| anyhow::anyhow!("WGPU render state is not available"))?;
 
-                    Ok(Box::new(bulin::App::new(
-                        wgpu_render_state.device.clone(),
-                        wgpu_render_state.queue.clone(),
-                    )))
+                    Ok(Box::new(bulin::App::new(wgpu_render_state)))
                 }),
             )
             .await;
