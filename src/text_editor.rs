@@ -298,7 +298,7 @@ impl TextEditor {
             let mut insert_add_offset_from_cursor = |offset: isize| {
                 let (line, column) = self.content.cursor_position();
                 if let Some(line) = self.content.line(line) {
-                    if let Some(char) = line.chars().nth((column as isize + offset) as usize) {
+                    if let Some(char) = line.text.chars().nth((column as isize + offset) as usize) {
                         ret.push(text_editor::Action::Edit(text_editor::Edit::Insert(char)));
                     }
                 }

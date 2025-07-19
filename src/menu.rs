@@ -32,15 +32,18 @@ pub fn view() -> Element<'static, Message> {
             Message::Editor(editor::Message::TextEditor(text_editor::Message::SaveFile))
         ))(menu_item(
             "Save File as",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::SaveFileAs))
+            Message::Editor(editor::Message::TextEditor(
+                text_editor::Message::SaveFileAs
+            ))
         ))(separator())(menu_item(
             "Open Project",
             Message::OpenProject
         ))(separator())(menu_item(
             "New Project",
             Message::NewProject
-        ))(menu_item("Save Project", Message::SaveProject))
-        (menu_item("Save Project as", Message::SaveProjectAs)))
+        ))(menu_item("Save Project", Message::SaveProject))(
+            menu_item("Save Project as", Message::SaveProjectAs)
+        ))
         .max_width(180.0)
     )(
         main_menu_item("Edit"),
