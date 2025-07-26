@@ -16,10 +16,8 @@ iced = { git = "https://github.com/NickelWenzel/iced", default-features = false,
 ] }
 
 iced_wgpu = { git = "https://github.com/NickelWenzel/iced" }
-iced_aw = { path = "../../github/iced_aw", default-features = false, features = [
-    "menu",
+iced_aw = { git = "https://github.com/NickelWenzel/iced_aw", default-features = false, features = [
     "number_input",
-    "quad",
 ] }
 bytemuck = "1.23"
 rfd = "0.15.4"

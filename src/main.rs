@@ -1,5 +1,4 @@
 use bulin::Application;
-use iced::Font;
 
 fn main() -> iced::Result {
     #[cfg(target_arch = "wasm32")]
