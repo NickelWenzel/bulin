@@ -4,19 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-iced = { git = "https://github.com/NickelWenzel/iced", branch = "fix_wasm_custom_shaders", default-features = false, features = [
+iced = { git = "https://github.com/NickelWenzel/iced", default-features = false, features = [
     "wgpu",
     "webgl",
-    #"highlighter",
+    "highlighter",
     "tokio",
     "debug",
     "image",
     "advanced",
-
+    "fira-sans",
 ] }
 
-tokio = { version = "1.0" }
-iced_wgpu = { git = "https://github.com/NickelWenzel/iced", branch = "fix_wasm_custom_shaders" }
+iced_wgpu = { git = "https://github.com/NickelWenzel/iced" }
 iced_aw = { path = "../../github/iced_aw", default-features = false, features = [
     "menu",
     "number_input",
@@ -31,17 +30,17 @@ two-face = { version = "0.4.3", default-features = false, features = [
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.137"
 num-traits = "0.2.19"
-getrandom = { version = "0.3", features = ["wasm_js"] }
 wasmtimer = { version = "0.4" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tracing-subscriber = "0.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 
 [patch.crates-io]
-iced = { git = "https://github.com/NickelWenzel/iced", branch = "fix_wasm_custom_shaders" }
-iced_core = { git = "https://github.com/NickelWenzel/iced", branch = "fix_wasm_custom_shaders" }
-iced_widget = { git = "https://github.com/NickelWenzel/iced", branch = "fix_wasm_custom_shaders" }
+iced = { git = "https://github.com/NickelWenzel/iced" }
+iced_core = { git = "https://github.com/NickelWenzel/iced" }
+iced_widget = { git = "https://github.com/NickelWenzel/iced" }

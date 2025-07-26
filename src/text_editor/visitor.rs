@@ -26,10 +26,7 @@ impl<'de> Visitor<'de> for EditorVisitor {
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(1, &self))?;
 
-        Ok(TextEditor::new()
-            .with_file(file)
-            .with_content(&content)
-            .with_theme(theme))
+        Ok(TextEditor::new(&content).with_file(file).with_theme(theme))
     }
     fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
     where
@@ -71,9 +68,6 @@ impl<'de> Visitor<'de> for EditorVisitor {
         let content = content.ok_or_else(|| de::Error::missing_field("content"))?;
         let theme = theme.ok_or_else(|| de::Error::missing_field("theme"))?;
 
-        Ok(TextEditor::new()
-            .with_file(file)
-            .with_content(&content)
-            .with_theme(theme))
+        Ok(TextEditor::new(&content).with_file(file).with_theme(theme))
     }
 }

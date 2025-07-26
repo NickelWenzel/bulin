@@ -1,11 +1,11 @@
 mod canvasscene;
 
-use crate::viewer::canvasscene::PipelineUpdate;
-
 use canvasscene::CanvasScene;
 
 use iced::widget::shader;
 use iced::{Element, Fill, Task};
+
+use crate::shader_update::ShaderUpdate;
 
 pub struct Viewer {
     scene: CanvasScene,
@@ -13,13 +13,13 @@ pub struct Viewer {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    UpdatePipeline(PipelineUpdate),
+    UpdatePipeline(ShaderUpdate),
 }
 
 impl Viewer {
-    pub fn new() -> Self {
+    pub fn new(shader: String) -> Self {
         Self {
-            scene: CanvasScene::new(),
+            scene: CanvasScene::new(shader),
         }
     }
 
@@ -34,11 +34,5 @@ impl Viewer {
 
     pub fn view(&self) -> Element<'_, Message> {
         shader(&self.scene).width(Fill).height(Fill).into()
-    }
-}
-
-impl Default for Viewer {
-    fn default() -> Self {
-        Self::new()
     }
 }

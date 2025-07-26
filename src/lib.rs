@@ -7,8 +7,9 @@ mod uniforms_editor;
 mod util;
 mod viewer;
 
-use iced::widget::{column, container};
-use iced::{Element, Length, Subscription, Task, Theme};
+use iced::keyboard::key;
+use iced::widget::{button, center, column, container, mouse_area, opaque, stack, text};
+use iced::{keyboard, Color, Element, Event, Font, Length, Subscription, Task, Theme};
 use util::Error;
 
 use std::path::PathBuf;
@@ -20,6 +21,7 @@ pub struct Application {
     layout: layout::Layout,
     file: Option<PathBuf>,
     is_loading: bool,
+    show_menu: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +29,8 @@ pub enum Message {
     Editor(editor::Message),
     Viewer(viewer::Message),
     Layout(layout::Message),
+    ShowMenu,
+    CloseMenu,
     Menu(menu::Message),
     OpenProject,
     NewProject,
@@ -34,31 +38,39 @@ pub enum Message {
     SaveProject,
     SaveProjectAs,
     ProjectSaved(Result<PathBuf, Error>),
+    Event(Event),
 }
 
 impl Application {
-    pub fn new() -> Self {
+    pub fn new(shader: String) -> Self {
         Self {
-            editor: editor::Editor::new(),
-            viewer: viewer::Viewer::new(),
+            editor: editor::Editor::new(&shader),
+            viewer: viewer::Viewer::new(shader),
             layout: layout::Layout::new(),
             file: None,
             is_loading: false,
+            show_menu: false,
         }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Editor(message) => match message {
-                editor::Message::UpdatePipeline(_update) => {
-                    //TODO: Handle the update in the viewer
-                    //Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
-                    Task::none()
+                editor::Message::UpdatePipeline(update) => {
+                    Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
                 }
                 _ => self.editor.update(message).map(Message::Editor),
             },
             Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
             Message::Layout(message) => self.layout.update(message).map(Message::Layout),
+            Message::ShowMenu => {
+                self.show_menu = true;
+                Task::none()
+            }
+            Message::CloseMenu => {
+                self.show_menu = false;
+                Task::none()
+            }
             Message::Menu(message) => match message {
                 menu::Message::OpenProject => Task::done(Message::OpenProject),
                 menu::Message::NewProject => Task::done(Message::NewProject),
@@ -78,7 +90,7 @@ impl Application {
             Message::NewProject => {
                 if !self.is_loading {
                     self.file = None;
-                    self.editor = editor::Editor::new();
+                    self.editor = editor::Editor::new("");
                 }
 
                 self.editor
@@ -134,6 +146,13 @@ impl Application {
 
                 Task::none()
             }
+            Message::Event(event) => match event {
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(key::Named::Escape),
+                    ..
+                }) => Task::done(Message::CloseMenu),
+                _ => Task::none(),
+            },
         }
     }
 
@@ -156,11 +175,17 @@ impl Application {
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
 
-        column!(
-            menu::view().map(Message::Menu),
+        let content = column!(
+            menu_icon(),
             container(panes).width(Length::Fill).height(Length::Fill),
         )
-        .into()
+        .into();
+
+        if self.show_menu {
+            modal(content, menu::view().map(Message::Menu), Message::CloseMenu)
+        } else {
+            content
+        }
     }
 
     pub fn theme(&self) -> Theme {
@@ -174,6 +199,40 @@ impl Application {
 
 impl Default for Application {
     fn default() -> Self {
-        Self::new()
+        Self::new(include_str!("viewer/canvasscene/shaders/empty_frag.wgsl").to_string())
     }
+}
+
+fn menu_icon<'a>() -> Element<'a, Message> {
+    const MENU_FONT: Font = Font::with_name("menu");
+
+    button(text('\u{0e9bd}').font(MENU_FONT))
+        .on_press(Message::ShowMenu)
+        .into()
+}
+
+fn modal<'a>(
+    base: impl Into<Element<'a, Message>>,
+    content: impl Into<Element<'a, Message>>,
+    on_blur: Message,
+) -> Element<'a, Message> {
+    stack![
+        base.into(),
+        opaque(
+            mouse_area(center(opaque(content)).style(|_theme| {
+                container::Style {
+                    background: Some(
+                        Color {
+                            a: 0.8,
+                            ..Color::BLACK
+                        }
+                        .into(),
+                    ),
+                    ..container::Style::default()
+                }
+            }))
+            .on_press(on_blur)
+        )
+    ]
+    .into()
 }

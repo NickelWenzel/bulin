@@ -295,3 +295,9 @@ impl Candidate {
         }
     }
 }
+
+impl Default for Candidate {
+    fn default() -> Self {
+        Self::new()
+    }
+}

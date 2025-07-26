@@ -44,10 +44,10 @@ pub enum Message {
 }
 
 impl TextEditor {
-    pub fn new() -> Self {
+    pub fn new(shader: &str) -> Self {
         Self {
             file: None,
-            content: text_editor::Content::new(),
+            content: text_editor::Content::with_text(shader),
             theme: highlighter::Theme::SolarizedDark,
             word_wrap: true,
             is_loading: false,
@@ -58,13 +58,6 @@ impl TextEditor {
 
     pub fn with_file(self, file: Option<PathBuf>) -> Self {
         Self { file, ..self }
-    }
-
-    pub fn with_content(self, content: &str) -> Self {
-        Self {
-            content: text_editor::Content::with_text(content),
-            ..self
-        }
     }
 
     pub fn with_theme(self, theme: highlighter::Theme) -> Self {
@@ -273,7 +266,7 @@ impl TextEditor {
             }
 
             if self.is_dirty {
-                path = format!("{} •", path);
+                path = format!("{path} •");
             }
 
             Some(path)
@@ -312,7 +305,7 @@ impl TextEditor {
                 text_editor::Edit::Paste(str) => {
                     if !str.is_empty() {
                         ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
-                        str.chars().into_iter().for_each(|_| {
+                        str.chars().for_each(|_| {
                             ret.push(text_editor::Action::Select(text_editor::Motion::Left))
                         });
                     }
@@ -392,6 +385,7 @@ fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
     text(codepoint).font(ICON_FONT).into()
 }
 
+#[derive(Default)]
 struct UndoHandler {
     undo_actions: Vec<text_editor::Action>,
     actions_per_undo: Vec<usize>,
@@ -452,18 +446,7 @@ impl UndoHandler {
         last_n: usize,
     ) -> Vec<text_editor::Action> {
         let actions: Vec<_> = take_from.drain(take_from.len() - last_n..).rev().collect();
-        add_to.extend(actions.iter().map(|a| a.clone()));
+        add_to.extend(actions.iter().cloned());
         actions
-    }
-}
-
-impl Default for UndoHandler {
-    fn default() -> Self {
-        Self {
-            undo_actions: Vec::new(),
-            actions_per_undo: Vec::new(),
-            redo_actions: Vec::new(),
-            actions_per_redo: Vec::new(),
-        }
     }
 }

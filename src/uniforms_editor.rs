@@ -92,7 +92,7 @@ impl UniformsEditor {
                         UniformsUpdate::Remove(name),
                     )))
                 } else {
-                    return Task::none();
+                    Task::none()
                 }
             }
             Message::Uniforms(name, message) => {

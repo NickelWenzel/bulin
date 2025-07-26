@@ -1,24 +1,19 @@
-use iced::Rectangle;
-
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct DefaultUniforms {
-    pub position: [f32; 2],
     pub resolution: [f32; 2],
 }
 impl DefaultUniforms {
-    pub fn new(
-        Rectangle {
-            x,
-            y,
-            width,
-            height,
-        }: Rectangle,
-    ) -> Self {
+    pub fn new(width: f32, height: f32) -> Self {
         Self {
-            position: [x, y],
             resolution: [width, height],
         }
+    }
+}
+
+impl Default for DefaultUniforms {
+    fn default() -> Self {
+        Self::new(1000.0, 1000.0) // Default resolution
     }
 }
 

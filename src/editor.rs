@@ -22,9 +22,9 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new() -> Self {
+    pub fn new(shader: &str) -> Self {
         Self {
-            text_editor: text_editor::TextEditor::new(),
+            text_editor: text_editor::TextEditor::new(shader),
             uniforms_editor: uniforms_editor::UniformsEditor::new(),
         }
     }
