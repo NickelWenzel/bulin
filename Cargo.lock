@@ -508,7 +508,6 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
- "tokio",
  "tracing-subscriber",
  "two-face",
  "wasmtimer",
@@ -1521,12 +1520,13 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "iced"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "iced_core",
  "iced_debug",
  "iced_devtools",
  "iced_futures",
+ "iced_highlighter",
  "iced_renderer",
  "iced_runtime",
  "iced_widget",
@@ -1550,7 +1550,7 @@ dependencies = [
 [[package]]
 name = "iced_beacon"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "bincode",
  "futures",
@@ -1565,7 +1565,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",
@@ -1583,7 +1583,7 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "iced_beacon",
  "iced_core",
@@ -1594,7 +1594,7 @@ dependencies = [
 [[package]]
 name = "iced_devtools"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "iced_debug",
  "iced_program",
@@ -1614,7 +1614,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "futures",
  "iced_core",
@@ -1628,7 +1628,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "bitflags 2.9.1",
  "bytemuck",
@@ -1646,9 +1646,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced_highlighter"
+version = "0.14.0-dev"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
+dependencies = [
+ "iced_core",
+ "syntect",
+]
+
+[[package]]
 name = "iced_program"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "iced_graphics",
  "iced_runtime",
@@ -1657,7 +1666,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -1669,7 +1678,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "bytes",
  "iced_core",
@@ -1682,7 +1691,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -1698,7 +1707,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "bitflags 2.9.1",
  "bytemuck",
@@ -1717,8 +1726,9 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
+ "iced_highlighter",
  "iced_renderer",
  "iced_runtime",
  "log",
@@ -1731,7 +1741,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced?branch=fix_wasm_custom_shaders#c299e579ae03fab231922ad9dccb9ac1b64312c8"
+source = "git+https://github.com/NickelWenzel/iced#a952dd68685dff12d3ec4c894f0cf721ae913da3"
 dependencies = [
  "iced_debug",
  "iced_program",
@@ -2709,6 +2719,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
+name = "onig"
+version = "6.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "336b9c63443aceef14bea841b899035ae3abe89b7c486aaf4c5bd8aafedac3f0"
+dependencies = [
+ "bitflags 2.9.1",
+ "libc",
+ "once_cell",
+ "onig_sys",
+]
+
+[[package]]
+name = "onig_sys"
+version = "69.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7f86c6eef3d6df15f23bcfb6af487cbd2fed4e5581d58d5bf1f5f8b7f6727dc"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
+
+[[package]]
 name = "orbclient"
 version = "0.3.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3680,6 +3712,7 @@ dependencies = [
  "flate2",
  "fnv",
  "once_cell",
+ "onig",
  "plist",
  "regex-syntax",
  "serde",
