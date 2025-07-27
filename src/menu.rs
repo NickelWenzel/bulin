@@ -4,6 +4,7 @@ use crate::text_editor;
 use iced::widget::column;
 use iced::widget::container;
 use iced::widget::rule;
+use iced::widget::text_editor::Action;
 use iced::widget::{button, text, Button};
 use iced::{Element, Length};
 
@@ -44,11 +45,15 @@ pub fn view() -> Element<'static, Message> {
         rule::Rule::horizontal(1),
         menu_item(
             "Undo",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::Undo))
+            Message::Editor(editor::Message::TextEditor(
+                text_editor::Message::ActionPerformed(Action::Undo,)
+            )),
         ),
         menu_item(
             "Redo",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::Redo))
+            Message::Editor(editor::Message::TextEditor(
+                text_editor::Message::ActionPerformed(Action::Redo,)
+            )),
         )
     ])
     .width(180.0)

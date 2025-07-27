@@ -1519,7 +1519,7 @@ checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 [[package]]
 name = "iced"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_core",
  "iced_debug",
@@ -1550,7 +1550,7 @@ dependencies = [
 [[package]]
 name = "iced_beacon"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "bincode",
  "futures",
@@ -1565,7 +1565,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",
@@ -1583,7 +1583,7 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_beacon",
  "iced_core",
@@ -1594,7 +1594,7 @@ dependencies = [
 [[package]]
 name = "iced_devtools"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_debug",
  "iced_program",
@@ -1614,7 +1614,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "futures",
  "iced_core",
@@ -1628,7 +1628,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "bitflags 2.9.1",
  "bytemuck",
@@ -1648,7 +1648,7 @@ dependencies = [
 [[package]]
 name = "iced_highlighter"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_core",
  "syntect",
@@ -1657,7 +1657,7 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_graphics",
  "iced_runtime",
@@ -1666,7 +1666,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -1678,7 +1678,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "bytes",
  "iced_core",
@@ -1691,7 +1691,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "bytemuck",
  "cosmic-text",
@@ -1707,7 +1707,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "bitflags 2.9.1",
  "bytemuck",
@@ -1726,7 +1726,7 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_highlighter",
  "iced_renderer",
@@ -1741,7 +1741,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.14.0-dev"
-source = "git+https://github.com/NickelWenzel/iced#e533382ad372e4e6f27fa8e31a7693ff6c50aaf9"
+source = "git+https://github.com/NickelWenzel/iced#917c641991e614fe80a071cdcdce1102dd8e1920"
 dependencies = [
  "iced_debug",
  "iced_program",
@@ -3260,9 +3260,9 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rustc-demangle"
-version = "0.1.25"
+version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "989e6739f80c4ad5b13e0fd7fe89531180375b18520cc8c82080e4dc4035b84f"
+checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
 
 [[package]]
 name = "rustc-hash"
