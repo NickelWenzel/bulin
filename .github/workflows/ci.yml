@@ -3,10 +3,10 @@ name: Rust CI
 on:
   push:
     branches:
-      - bulin_rust
+      - '*'
   pull_request:
     branches:
-      - bulin_rust
+      - '*'
 
 jobs:
   build-debug:

@@ -1,5 +1,8 @@
-mod highlighter;
-mod visitor;
+mod content;
+use content::Content;
+mod wgsl_highlighter;
+use wgsl_highlighter::WGSLHighlighter;
+
 use crate::shader_update::FragmentShader;
 use crate::util;
 
@@ -8,29 +11,42 @@ use iced::widget::{
     button, column, container, horizontal_space, pick_list, row, text, text_editor, toggler,
     tooltip,
 };
-use iced::{Center, Element, Fill, Font, Task, Theme};
+use iced::{Center, Element, Fill, Font, Task};
 
-use serde::ser::SerializeStruct;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use iced_highlighter::{Settings, Theme};
 
-use std::ffi;
-use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+
+use std::path::PathBuf;
 use std::sync::Arc;
 
+#[derive(Serialize, Deserialize)]
 pub struct TextEditor {
     file: Option<PathBuf>,
-    content: text_editor::Content,
-    theme: highlighter::Theme,
+    content: Content,
+    #[serde(default = "default_theme", skip)]
+    theme: Theme,
     word_wrap: bool,
+    #[serde(default = "default_false", skip)]
     is_loading: bool,
+    #[serde(default = "default_false", skip)]
     is_dirty: bool,
+    #[serde(default = "UndoHandler::new", skip)]
     undo_handler: UndoHandler,
+}
+
+fn default_theme() -> Theme {
+    Theme::SolarizedDark
+}
+
+fn default_false() -> bool {
+    false
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     ActionPerformed(text_editor::Action),
-    ThemeSelected(highlighter::Theme),
+    ThemeSelected(Theme),
     WordWrapToggled(bool),
     NewFile,
     OpenFile,
@@ -47,21 +63,13 @@ impl TextEditor {
     pub fn new(shader: &str) -> Self {
         Self {
             file: None,
-            content: text_editor::Content::with_text(shader),
-            theme: highlighter::Theme::SolarizedDark,
+            content: Content::with_text(shader),
+            theme: default_theme(),
             word_wrap: true,
             is_loading: false,
             is_dirty: false,
             undo_handler: UndoHandler::new(),
         }
-    }
-
-    pub fn with_file(self, file: Option<PathBuf>) -> Self {
-        Self { file, ..self }
-    }
-
-    pub fn with_theme(self, theme: highlighter::Theme) -> Self {
-        Self { theme, ..self }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -94,7 +102,7 @@ impl TextEditor {
             Message::NewFile => {
                 if !self.is_loading {
                     self.file = None;
-                    self.content = text_editor::Content::new();
+                    self.content = Content::new();
                 }
 
                 Task::done(Message::UpdatePipeline(self.content()))
@@ -114,7 +122,7 @@ impl TextEditor {
 
                 if let Ok((path, contents)) = result {
                     self.file = Some(path);
-                    self.content = text_editor::Content::with_text(&contents);
+                    self.content = Content::with_text(&contents);
                 }
 
                 Task::done(Message::UpdatePipeline(self.content()))
@@ -185,13 +193,9 @@ impl TextEditor {
             toggler(self.word_wrap)
                 .label("Word Wrap")
                 .on_toggle(Message::WordWrapToggled),
-            pick_list(
-                highlighter::Theme::ALL,
-                Some(self.theme),
-                Message::ThemeSelected
-            )
-            .text_size(14)
-            .padding([5, 10])
+            pick_list(Theme::ALL, Some(self.theme), Message::ThemeSelected)
+                .text_size(14)
+                .padding([5, 10])
         ]
         .spacing(10)
         .align_y(Center);
@@ -206,16 +210,10 @@ impl TextEditor {
                 } else {
                     text::Wrapping::None
                 })
-                .highlight_with::<highlighter::Highlighter>(
-                    highlighter::Settings {
+                .highlight_with::<WGSLHighlighter>(
+                    Settings {
                         theme: self.theme,
-                        token: self
-                            .file
-                            .as_deref()
-                            .and_then(Path::extension)
-                            .and_then(ffi::OsStr::to_str)
-                            .unwrap_or("wgsl")
-                            .to_owned(),
+                        token: "wgsl".to_string(),
                     },
                     |highlight, _theme| highlight.to_format(),
                 )
@@ -249,11 +247,11 @@ impl TextEditor {
         .into()
     }
 
-    pub fn theme(&self) -> Theme {
+    pub fn theme(&self) -> iced::Theme {
         if self.theme.is_dark() {
-            Theme::Dark
+            iced::Theme::Dark
         } else {
-            Theme::Light
+            iced::Theme::Light
         }
     }
 
@@ -316,34 +314,6 @@ impl TextEditor {
             }
         }
         ret
-    }
-}
-
-impl Serialize for TextEditor {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let content = self.content();
-
-        let mut state = serializer.serialize_struct("Editor", 3)?;
-        state.serialize_field("file", &self.file)?;
-        state.serialize_field("content", &content)?;
-        state.serialize_field("theme", &self.theme)?;
-        state.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for TextEditor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_struct(
-            "Editor",
-            &["file", "content", "theme"],
-            visitor::EditorVisitor,
-        )
     }
 }
 
