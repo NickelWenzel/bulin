@@ -8,7 +8,16 @@ use syntect::highlighting;
 use syntect::parsing;
 
 static WGSL_SYNTAX_SET: Lazy<parsing::SyntaxSet> = Lazy::new(|| {
-    parsing::SyntaxSet::load_from_folder(format!("{}/assets", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    let mut builder = parsing::SyntaxSetBuilder::new();
+    builder.add(
+        parsing::SyntaxDefinition::load_from_str(
+            include_str!("../../assets/WGSL.sublime-syntax"),
+            true,
+            None,
+        )
+        .unwrap(),
+    );
+    builder.build()
 });
 static THEMES: Lazy<highlighting::ThemeSet> = Lazy::new(highlighting::ThemeSet::load_defaults);
 
