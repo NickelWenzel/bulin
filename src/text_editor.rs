@@ -31,8 +31,6 @@ pub struct TextEditor {
     is_loading: bool,
     #[serde(default = "default_false", skip)]
     is_dirty: bool,
-    #[serde(default = "UndoHandler::new", skip)]
-    undo_handler: UndoHandler,
 }
 
 fn default_theme() -> Theme {
@@ -55,8 +53,6 @@ pub enum Message {
     SaveFileAs,
     FileSaved(Result<PathBuf, util::Error>),
     UpdatePipeline(FragmentShader),
-    Undo,
-    Redo,
 }
 
 impl TextEditor {
@@ -68,7 +64,6 @@ impl TextEditor {
             word_wrap: true,
             is_loading: false,
             is_dirty: false,
-            undo_handler: UndoHandler::new(),
         }
     }
 
@@ -76,9 +71,6 @@ impl TextEditor {
         match message {
             Message::ActionPerformed(action) => {
                 let is_edit = action.is_edit();
-
-                let undo_actions = self.create_undo(&action);
-                self.undo_handler.push(undo_actions);
 
                 self.content.perform(action);
 
@@ -158,20 +150,6 @@ impl TextEditor {
 
                 Task::none()
             }
-            Message::Undo => {
-                self.undo_handler.undo().into_iter().for_each(|action| {
-                    self.content.perform(action);
-                });
-
-                Task::done(Message::UpdatePipeline(self.content()))
-            }
-            Message::Redo => {
-                self.undo_handler.redo().into_iter().for_each(|action| {
-                    self.content.perform(action);
-                });
-
-                Task::done(Message::UpdatePipeline(self.content()))
-            }
             Message::UpdatePipeline(_) => Task::none(),
         }
     }
@@ -223,10 +201,14 @@ impl TextEditor {
                             Some(text_editor::Binding::Custom(Message::SaveFile))
                         }
                         keyboard::Key::Character("z") if key_press.modifiers.command() => {
-                            Some(text_editor::Binding::Custom(Message::Undo))
+                            Some(text_editor::Binding::Custom(Message::ActionPerformed(
+                                text_editor::Action::Undo,
+                            )))
                         }
                         keyboard::Key::Character("y") if key_press.modifiers.command() => {
-                            Some(text_editor::Binding::Custom(Message::Redo))
+                            Some(text_editor::Binding::Custom(Message::ActionPerformed(
+                                text_editor::Action::Redo,
+                            )))
                         }
                         keyboard::Key::Named(keyboard::key::Named::Delete) => {
                             Some(text_editor::Binding::Delete)
@@ -276,45 +258,6 @@ impl TextEditor {
     pub fn content(&self) -> String {
         self.content.text()
     }
-
-    fn create_undo(&mut self, action: &text_editor::Action) -> Vec<text_editor::Action> {
-        let mut ret = Vec::new();
-        if let text_editor::Action::Edit(edit) = action {
-            let selection = self.content.selection().unwrap_or_default();
-            let has_selection = !selection.is_empty();
-            ret.push(text_editor::Action::Edit(text_editor::Edit::Paste(
-                Arc::new(selection),
-            )));
-
-            let mut insert_add_offset_from_cursor = |offset: isize| {
-                let (line, column) = self.content.cursor_position();
-                if let Some(line) = self.content.line(line) {
-                    if let Some(char) = line.text.chars().nth((column as isize + offset) as usize) {
-                        ret.push(text_editor::Action::Edit(text_editor::Edit::Insert(char)));
-                    }
-                }
-            };
-
-            match edit {
-                text_editor::Edit::Enter | text_editor::Edit::Insert(_) => {
-                    ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
-                    ret.push(text_editor::Action::Select(text_editor::Motion::Left));
-                }
-                text_editor::Edit::Paste(str) => {
-                    if !str.is_empty() {
-                        ret.push(text_editor::Action::Edit(text_editor::Edit::Delete));
-                        str.chars().for_each(|_| {
-                            ret.push(text_editor::Action::Select(text_editor::Motion::Left))
-                        });
-                    }
-                }
-                text_editor::Edit::Backspace if !has_selection => insert_add_offset_from_cursor(-1),
-                text_editor::Edit::Delete if !has_selection => insert_add_offset_from_cursor(0),
-                _ => (),
-            }
-        }
-        ret
-    }
 }
 
 fn action<'a, Message: Clone + 'a>(
@@ -353,70 +296,4 @@ fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
     const ICON_FONT: Font = Font::with_name("editor-icons");
 
     text(codepoint).font(ICON_FONT).into()
-}
-
-#[derive(Default)]
-struct UndoHandler {
-    undo_actions: Vec<text_editor::Action>,
-    actions_per_undo: Vec<usize>,
-    redo_actions: Vec<text_editor::Action>,
-    actions_per_redo: Vec<usize>,
-}
-
-impl UndoHandler {
-    fn new() -> Self {
-        Self {
-            undo_actions: Vec::new(),
-            actions_per_undo: Vec::new(),
-            redo_actions: Vec::new(),
-            actions_per_redo: Vec::new(),
-        }
-    }
-
-    fn push(&mut self, actions: Vec<text_editor::Action>) {
-        self.actions_per_undo.push(actions.len());
-        self.undo_actions.extend(actions);
-        self.redo_actions.clear();
-        self.actions_per_redo.clear();
-    }
-
-    fn undo(&mut self) -> Vec<text_editor::Action> {
-        match self
-            .actions_per_undo
-            .pop()
-            .inspect(|n| self.actions_per_redo.push(*n))
-        {
-            None => Vec::new(),
-            Some(action_count) => Self::transfer_and_return_tail(
-                &mut self.undo_actions,
-                &mut self.redo_actions,
-                action_count,
-            ),
-        }
-    }
-
-    fn redo(&mut self) -> Vec<text_editor::Action> {
-        match self
-            .actions_per_redo
-            .pop()
-            .inspect(|n| self.actions_per_undo.push(*n))
-        {
-            None => Vec::new(),
-            Some(action_count) => Self::transfer_and_return_tail(
-                &mut self.redo_actions,
-                &mut self.undo_actions,
-                action_count,
-            ),
-        }
-    }
-
-    fn transfer_and_return_tail(
-        take_from: &mut Vec<text_editor::Action>,
-        add_to: &mut Vec<text_editor::Action>,
-        last_n: usize,
-    ) -> Vec<text_editor::Action> {
-        let actions: Vec<_> = take_from.drain(take_from.len() - last_n..).rev().collect();
-        add_to.extend(actions.iter().cloned());
-        actions
-    }
 }
