@@ -12,6 +12,8 @@ use iced::mouse;
 use iced::widget::shader::{self, Viewport};
 use iced::Rectangle;
 
+use tracing::debug;
+
 use crate::shader_update::ShaderUpdate;
 use crate::viewer::canvasscene::uniforms::DefaultUniforms;
 
@@ -39,7 +41,7 @@ impl CanvasScene {
                 // TODO: Handle uniforms update if necessary
                 // This could involve updating the pipeline or uniforms state
                 // For now, we just log the update
-                println!("Uniforms update received: {uniforms_update:?}");
+                debug!("Uniforms update received: {uniforms_update:?}");
             }
         }
     }

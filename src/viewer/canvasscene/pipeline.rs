@@ -1,5 +1,6 @@
 use iced::Rectangle;
 use iced_wgpu::wgpu;
+use tracing::debug;
 
 use crate::viewer::canvasscene::uniforms::DefaultUniforms;
 
@@ -19,7 +20,7 @@ impl Pipeline {
         shader: &str,
         default_uniforms: &DefaultUniforms,
     ) -> Self {
-        device.on_uncaptured_error(Box::new(|e| eprintln!("WGPU error: {e:#}")));
+        device.on_uncaptured_error(Box::new(|e| debug!("WGPU error: {e:#}")));
 
         let texture = create_texture(device, format, default_uniforms);
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());

@@ -1,5 +1,4 @@
 # Project
-- ❌ Adjust CI-pipeline to rust native and wasm builds
 - ❌ Add Readme 
 - ❌ VSCode debug configs for wasm
 

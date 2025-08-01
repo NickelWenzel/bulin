@@ -229,7 +229,7 @@ impl shader::Primitive for Primitive {
             .get_mut::<Pipeline>()
             .ok_or(String::new())
             .and_then(|pipeline| pipeline.update(device, format, &self.shader, &self.uniforms))
-            .inspect_err(|e| println!("Failed to create pipeline:\n{}", e))
+            .inspect_err(|e| error!("Failed to create pipeline:\n{}", e))
         {
             pipeline
                 .update_default_buffer(queue, &uniforms::DefaultUniforms::new(bounds.clone()))
