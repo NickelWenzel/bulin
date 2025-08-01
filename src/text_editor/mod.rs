@@ -4,7 +4,7 @@ mod wgsl_highlighter;
 use wgsl_highlighter::WGSLHighlighter;
 
 use crate::shader_update::FragmentShader;
-use crate::util;
+use crate::util::{self, FileName};
 
 use iced::keyboard;
 use iced::widget::{
@@ -17,12 +17,11 @@ use iced_highlighter::{Settings, Theme};
 
 use serde::{Deserialize, Serialize};
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize)]
 pub struct TextEditor {
-    file: Option<PathBuf>,
+    file: Option<FileName>,
     content: Content,
     #[serde(default = "default_theme", skip)]
     theme: Theme,
@@ -48,10 +47,10 @@ pub enum Message {
     WordWrapToggled(bool),
     NewFile,
     OpenFile,
-    FileOpened(Result<(PathBuf, Arc<String>), util::Error>),
+    FileOpened(Result<(FileName, Arc<String>), util::Error>),
     SaveFile,
     SaveFileAs,
-    FileSaved(Result<PathBuf, util::Error>),
+    FileSaved(Result<FileName, util::Error>),
     UpdatePipeline(FragmentShader),
 }
 
@@ -238,21 +237,15 @@ impl TextEditor {
     }
 
     pub fn filename_display_text(&self) -> Option<String> {
-        if let Some(path) = &self.file {
-            let mut path = path.display().to_string();
+        let mut path = String::from(self.file.as_ref()?.as_str()?);
 
-            if path.len() > 60 {
-                path = format!("...{}", &path[path.len() - 40..]);
-            }
-
-            if self.is_dirty {
-                path = format!("{path} •");
-            }
-
-            Some(path)
-        } else {
-            None
+        if path.len() > 60 {
+            path = format!("...{}", &path[path.len() - 40..])
         }
+        if self.is_dirty {
+            path = format!("{path} •")
+        }
+        Some(path)
     }
 
     pub fn content(&self) -> String {
