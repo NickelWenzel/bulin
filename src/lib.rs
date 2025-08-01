@@ -12,14 +12,15 @@ use iced::widget::{button, center, column, container, mouse_area, opaque, stack,
 use iced::{keyboard, Color, Element, Event, Font, Length, Subscription, Task, Theme};
 use util::Error;
 
-use std::path::PathBuf;
 use std::sync::Arc;
+
+use crate::util::FileName;
 
 pub struct Application {
     editor: editor::Editor,
     viewer: viewer::Viewer,
     layout: layout::Layout,
-    file: Option<PathBuf>,
+    file: Option<FileName>,
     is_loading: bool,
     show_menu: bool,
 }
@@ -34,10 +35,10 @@ pub enum Message {
     Menu(menu::Message),
     OpenProject,
     NewProject,
-    ProjectOpened(Result<(PathBuf, Arc<String>), Error>),
+    ProjectOpened(Result<(FileName, Arc<String>), Error>),
     SaveProject,
     SaveProjectAs,
-    ProjectSaved(Result<PathBuf, Error>),
+    ProjectSaved(Result<FileName, Error>),
     Event(Event),
 }
 

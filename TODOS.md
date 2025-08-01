@@ -20,7 +20,7 @@
 - ❌ Add additional shader text editor tabs
 - ❌ List additonal tabs
 - ❌ Reference and include tabs in main shader
-- ❌ Load shader code frokm web via some API
+- ❌ Load shader code from web via some API
 - ❌ Add preview for defined function interfaces via some preview window
 
 # Scene builder
@@ -31,5 +31,6 @@
 - ❌ Add preview for blocks
 
 # Application
+- ❌ Re-enable uniforms
 - ❌ Export to shadertoy etc.
 - ❌ Text window for shader error, possibly with correct line number
