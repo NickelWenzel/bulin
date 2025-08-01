@@ -6,42 +6,42 @@ on:
       - master
 
 jobs:
-  build-debug:
+  build-and-test:
     runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        target: [native, wasm32-unknown-unknown]
+        mode: [debug, release]
+        include:
+          - target: native
+            target_flag: ""
+          - target: wasm32-unknown-unknown
+            target_flag: "--target wasm32-unknown-unknown"
+          - mode: debug
+            mode_flag: ""
+            test_flag: ""
+          - mode: release
+            mode_flag: "--release"
+            test_flag: "--release"
 
     steps:
-      - uses: dtolnay/rust-toolchain@master
+      - uses: hecrj/setup-rust-action@v2
         with:
-          toolchain: 1.88
+          rust-version: stable
+          targets: wasm32-unknown-unknown
 
       - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
-
-      - name: Build in debug mode
-        run: cargo build
-
-      - name: Run tests in debug mode
-        run: cargo test --all
-
-  build-release:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.88
-          
-      - name: Checkout code
-        uses: actions/checkout@v3
+          key: ${{ matrix.target }}-${{ matrix.mode }}
 
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Build ${{ matrix.mode }} for ${{ matrix.target }}
+        run: cargo build ${{ matrix.mode_flag }} ${{ matrix.target_flag }}
 
-      - name: Build in release mode
-        run: cargo build --release
-
-      - name: Run tests in release mode
-        run: cargo test --all --release
+      - name: Run tests ${{ matrix.mode }} for ${{ matrix.target }}
+        if: matrix.target == 'native'
+        run: cargo test --all ${{ matrix.test_flag }}
