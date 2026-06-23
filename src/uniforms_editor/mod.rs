@@ -5,7 +5,7 @@ use crate::shader_update::*;
 use uniform::*;
 
 use iced::{
-    widget::{button, horizontal_space, row},
+    widget::{button, row, space},
     Element, Subscription, Task,
 };
 use serde::{Deserialize, Serialize};
@@ -114,7 +114,7 @@ impl UniformsEditor {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&'_ self) -> Element<'_, Message> {
         let time = if let Some(time) = &self.time {
             row![
                 time.view().map(Message::Time),
@@ -122,7 +122,7 @@ impl UniformsEditor {
             ]
         } else {
             row![
-                horizontal_space(),
+                space::horizontal(),
                 button("Add time").on_press(Message::AddTime)
             ]
         };

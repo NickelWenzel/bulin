@@ -206,7 +206,7 @@ struct Customs {{
 
 @group(1) @binding(0) var<uniform> customs: Customs;"#,
         data.iter()
-            .map(|u| u.to_shader_line())
+            .map(Uniform::to_shader_line)
             .collect::<Vec<_>>()
             .join(",\n")
     )
@@ -221,11 +221,11 @@ impl shader::Primitive for Primitive {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bounds: &Rectangle,
-        viewport: &Viewport,
+        _viewport: &Viewport,
     ) {
-        pipeline
-            .update(device, &self.shader, &self.uniforms)
-            .inspect_err(|e| error!("Failed to update pipeline:\n{}", e));
+        if let Err(e) = pipeline.update(device, &self.shader, &self.uniforms) {
+            error!("Failed to update pipeline:\n{}", e);
+        };
         pipeline
             .update_default_buffer(
                 queue,

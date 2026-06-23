@@ -190,7 +190,7 @@ impl Application {
     }
 
     pub fn theme(&self) -> Theme {
-        self.editor.text().theme()
+        self.editor.text().theme().clone()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

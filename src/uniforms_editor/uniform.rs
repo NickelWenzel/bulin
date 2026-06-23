@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use iced::{
-    widget::{column, combo_box, horizontal_space, row, text, text_input},
+    widget::{column, combo_box, row, space, text, text_input},
     Element, Length, Task,
 };
 use iced_aw::number_input;
@@ -95,7 +95,7 @@ impl Uniform {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&'_ self) -> Element<'_, Message> {
         let name = text(&self.name);
         let value_view = match &self.value {
             Type::Int(value) => {
@@ -133,7 +133,7 @@ impl Uniform {
                 Message::ChangeValue(Type::VecInt4(v))
             }),
         };
-        row![name, horizontal_space(), value_view].into()
+        row![name, space::horizontal(), value_view].into()
     }
 
     pub fn to_shader_line(&self) -> String {
@@ -141,12 +141,12 @@ impl Uniform {
     }
 }
 
-fn number_input2<T, F>(
-    (v0, v1): &(T, T),
+fn number_input2<'a, T, F>(
+    (v0, v1): &'a (T, T),
     bounds: impl RangeBounds<T> + Clone,
     step: T,
     on_change: F,
-) -> Element<Message>
+) -> Element<'a, Message>
 where
     F: 'static + Fn((T, T)) -> Message + Copy,
     T: 'static
@@ -167,12 +167,12 @@ where
     .into()
 }
 
-fn number_input3<T, F>(
-    (v0, v1, v2): &(T, T, T),
+fn number_input3<'a, T, F>(
+    (v0, v1, v2): &'a (T, T, T),
     bounds: impl RangeBounds<T> + Clone,
     step: T,
     on_change: F,
-) -> Element<Message>
+) -> Element<'a, Message>
 where
     F: 'static + Fn((T, T, T)) -> Message + Copy,
     T: 'static
@@ -193,12 +193,12 @@ where
     .into()
 }
 
-fn number_input4<T, F>(
-    (v0, v1, v2, v3): &(T, T, T, T),
+fn number_input4<'a, T, F>(
+    (v0, v1, v2, v3): &'a (T, T, T, T),
     bounds: impl RangeBounds<T> + Clone,
     step: T,
     on_change: F,
-) -> Element<Message>
+) -> Element<'a, Message>
 where
     F: 'static + Fn((T, T, T, T)) -> Message + Copy,
     T: 'static
@@ -266,7 +266,7 @@ impl Candidate {
         }
     }
 
-    pub fn view(&self) -> Element<CandidateMessage> {
+    pub fn view<'a>(&'a self) -> Element<'a, CandidateMessage> {
         let upper_left = row![
             text_input("Name...", &self.name).on_input(CandidateMessage::NameChanged),
             combo_box(
