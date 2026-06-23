@@ -115,7 +115,6 @@ impl Pipeline {
         if !(custom_uniforms_need_update || shader_needs_update) {
             return Ok(self);
         }
-        std::thread::sleep(std::time::Duration::from_secs(30));
 
         if custom_uniforms_need_update {
             match Pipeline::create_custom_uniforms(device, &versioned_custom_uniforms.data) {

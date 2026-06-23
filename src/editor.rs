@@ -56,7 +56,7 @@ impl Editor {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&'_ self) -> Element<'_, Message> {
         container(iced::widget::column![
             self.uniforms_editor.view().map(Message::UniformsEditor),
             self.text_editor.view().map(Message::TextEditor),

@@ -63,7 +63,7 @@ impl Time {
         }
     }
 
-    pub fn view(&self) -> Element<Message> {
+    pub fn view(&'_ self) -> Element<'_, Message> {
         row![
             text("uTime").width(Length::Fill),
             text(format!("{:.2} s", self.duration())),

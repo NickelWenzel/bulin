@@ -4,7 +4,6 @@ use crate::text_editor;
 use iced::widget::column;
 use iced::widget::container;
 use iced::widget::rule;
-use iced::widget::text_editor::Action;
 use iced::widget::{button, text, Button};
 use iced::{Element, Length};
 
@@ -37,22 +36,22 @@ pub fn view() -> Element<'static, Message> {
                 text_editor::Message::SaveFileAs
             ))
         ),
-        rule::Rule::horizontal(1),
+        rule::horizontal(1),
         menu_item("Open Project", Message::OpenProject),
         menu_item("New Project", Message::NewProject),
         menu_item("Save Project", Message::SaveProject),
         menu_item("Save Project as", Message::SaveProjectAs),
-        rule::Rule::horizontal(1),
+        rule::horizontal(1),
         menu_item(
             "Undo",
             Message::Editor(editor::Message::TextEditor(
-                text_editor::Message::ActionPerformed(Action::Undo,)
+                text_editor::Message::EditorMessage(iced_code_editor::Message::Undo)
             )),
         ),
         menu_item(
             "Redo",
             Message::Editor(editor::Message::TextEditor(
-                text_editor::Message::ActionPerformed(Action::Redo,)
+                text_editor::Message::EditorMessage(iced_code_editor::Message::Redo)
             )),
         )
     ])
