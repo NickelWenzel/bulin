@@ -14,7 +14,7 @@ pub enum Message {
     ChangeName(String),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Type {
     Int(i32),
     Float(f32),

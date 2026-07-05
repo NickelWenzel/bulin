@@ -1,43 +1,31 @@
-mod pipeline;
+// mod pipeline;
+mod pipeline2;
 mod uniforms;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::shader_update::{ShaderUpdate, UniformsUpdate};
 use crate::uniforms_editor::uniform::{Type, Uniform};
 
-use pipeline::Pipeline;
-
 use iced_wgpu::wgpu;
 
+use iced::Rectangle;
 use iced::mouse;
 use iced::widget::shader::{self, Viewport};
-use iced::Rectangle;
-use tracing::error;
 
-#[derive(Clone)]
+const EMPTY_FRAG_WGSL: &str = include_str!("shaders/empty_frag.wgsl");
+const VERTEX_SHADER: &str = include_str!("shaders/vertex_shader.wgsl");
+
 pub struct CanvasScene {
-    shader: VersionedShader,
+    primitive_data: Arc<PrimitiveData>,
     uniforms: Vec<Uniform>,
-    uniforms_render_data: VersionedUniformRenderData,
 }
 
 impl CanvasScene {
     pub fn new(shader: String) -> Self {
         Self {
-            shader: VersionedShader {
-                data: Arc::new(shader),
-                version: 0,
-            },
+            primitive_data: Arc::new(PrimitiveData::new(shader, UniformRenderData::empty())),
             uniforms: Vec::new(),
-            uniforms_render_data: VersionedUniformRenderData {
-                data: UniformRenderData {
-                    uniforms_str: Arc::new(String::new()),
-                    uniforms_bytes: Arc::new(RwLock::new(Vec::new())),
-                    uniforms_size: 0,
-                },
-                version: 0,
-            },
         }
     }
 
@@ -49,52 +37,52 @@ impl CanvasScene {
     }
 
     fn update_shader(&mut self, shader: String) {
-        self.shader.data = Arc::new(shader);
-        self.shader.version += 1;
+        self.primitive_data = Arc::new(PrimitiveData::new(
+            shader,
+            self.primitive_data.uniforms.clone(),
+        ));
     }
 
     fn update_uniforms(&mut self, uniforms: UniformsUpdate) {
         match uniforms {
             UniformsUpdate::Add(uniform) => {
                 self.uniforms.push(uniform);
-                let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
-                self.update_uniforms_impl(uniforms.as_slice());
+                self.primitive_data = Arc::new(PrimitiveData::new(
+                    self.primitive_data.shader.clone(),
+                    UniformRenderData::from_uniforms(&self.uniforms),
+                ));
             }
             UniformsUpdate::Update(name, uniform) => {
-                if let (Some(item), Ok(mut uniform_bytes)) = (
-                    self.uniforms.iter_mut().find(|e| e.name == name),
-                    self.uniforms_render_data.data.uniforms_bytes.try_write(),
-                ) {
+                if let Some(item) = self.uniforms.iter_mut().find(|e| e.name == name) {
                     *item = uniform;
-                    *uniform_bytes = to_uniforms_bytes(&self.uniforms);
+                    self.primitive_data = Arc::new(PrimitiveData::new(
+                        self.primitive_data.shader.clone(),
+                        UniformRenderData::from_uniforms(&self.uniforms),
+                    ));
                 }
             }
             UniformsUpdate::Remove(name) => {
                 if let Some(idx) = self.uniforms.iter().position(|e| e.name == name) {
                     self.uniforms.remove(idx);
-                    let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
-                    self.update_uniforms_impl(uniforms.as_slice());
+                    self.primitive_data = Arc::new(PrimitiveData::new(
+                        self.primitive_data.shader.clone(),
+                        UniformRenderData::from_uniforms(&self.uniforms),
+                    ));
                 }
             }
             UniformsUpdate::Clear => {
                 self.uniforms.clear();
-                let uniforms = self.uniforms.drain(..).collect::<Vec<Uniform>>();
-                self.update_uniforms_impl(uniforms.as_slice());
+                self.primitive_data = Arc::new(PrimitiveData::new(
+                    self.primitive_data.shader.clone(),
+                    UniformRenderData::empty(),
+                ));
             }
             UniformsUpdate::Reset(uniforms) => {
-                self.update_uniforms_impl(uniforms.as_slice());
+                self.primitive_data = Arc::new(PrimitiveData::new(
+                    self.primitive_data.shader.clone(),
+                    UniformRenderData::from_uniforms(&uniforms),
+                ));
             }
-        }
-    }
-
-    fn update_uniforms_impl(&mut self, uniforms: &[Uniform]) {
-        if let Ok(mut uniform_bytes) = self.uniforms_render_data.data.uniforms_bytes.try_write() {
-            self.uniforms = uniforms.to_vec();
-            self.uniforms_render_data.data.uniforms_str =
-                Arc::new(to_uniforms_string(&self.uniforms));
-            *uniform_bytes = to_uniforms_bytes(uniforms);
-            self.uniforms_render_data.data.uniforms_size = self.uniforms.len();
-            self.uniforms_render_data.version += 1;
         }
     }
 }
@@ -109,41 +97,76 @@ impl<Message> shader::Program<Message> for CanvasScene {
         _cursor: mouse::Cursor,
         _bounds: Rectangle,
     ) -> Self::Primitive {
-        Primitive::new(self.shader.clone(), self.uniforms_render_data.clone())
+        Primitive {
+            data: self.primitive_data.clone(),
+        }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct VersionedData<T> {
-    pub data: T,
-    pub version: usize,
-}
-
-type VersionedShader = VersionedData<Arc<String>>;
-
 #[derive(Debug)]
 pub struct Primitive {
-    shader: VersionedShader,
-    uniforms: VersionedUniformRenderData,
+    data: Arc<PrimitiveData>,
 }
 
-impl Primitive {
-    pub fn new(shader: VersionedShader, uniforms: VersionedUniformRenderData) -> Self {
+#[derive(Debug)]
+struct PrimitiveData {
+    shader: String,
+    uniforms: UniformRenderData,
+}
+
+impl PrimitiveData {
+    fn new(shader: String, uniforms: UniformRenderData) -> Self {
         Self { shader, uniforms }
+    }
+
+    fn empty() -> Self {
+        Self {
+            shader: String::from(EMPTY_FRAG_WGSL),
+            uniforms: UniformRenderData::empty(),
+        }
+    }
+
+    fn uniforms_size(&self) -> u64 {
+        self.uniforms.size()
+    }
+
+    fn whole_shader(&self) -> String {
+        format!(
+            "{}\n{}\n{}",
+            VERTEX_SHADER, self.uniforms.uniforms_str, self.shader
+        )
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct UniformRenderData {
-    uniforms_str: Arc<String>,
-    uniforms_bytes: Arc<RwLock<Vec<u8>>>,
-    uniforms_size: usize,
+    uniforms_str: String,
+    uniforms_bytes: Vec<u8>,
 }
 
-type VersionedUniformRenderData = VersionedData<UniformRenderData>;
+impl UniformRenderData {
+    pub fn empty() -> Self {
+        Self {
+            uniforms_str: String::new(),
+            uniforms_bytes: Vec::new(),
+        }
+    }
+
+    pub fn from_uniforms(data: &[Uniform]) -> Self {
+        Self {
+            uniforms_str: to_uniforms_string(data),
+            uniforms_bytes: to_uniforms_bytes(data),
+        }
+    }
+
+    pub fn size(&self) -> u64 {
+        self.uniforms_bytes.len() as u64
+    }
+}
 
 fn to_uniforms_bytes(data: &[Uniform]) -> Vec<u8> {
     let mut bytes = Vec::new();
+    // Pre-allocate memory
     bytes.reserve(data.iter().fold(0, |acc, e| {
         acc + match e.value {
             Type::Int(_) | Type::Float(_) => 4,
@@ -153,6 +176,7 @@ fn to_uniforms_bytes(data: &[Uniform]) -> Vec<u8> {
         }
     }));
 
+    // Push bytes
     for uniform in data {
         match uniform.value {
             Type::Int(value) => bytes.extend_from_slice(&value.to_ne_bytes()),
@@ -213,7 +237,7 @@ struct Customs {{
 }
 
 impl shader::Primitive for Primitive {
-    type Pipeline = Pipeline;
+    type Pipeline = pipeline2::Pipeline;
 
     fn prepare(
         &self,
@@ -221,21 +245,12 @@ impl shader::Primitive for Primitive {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bounds: &Rectangle,
-        _viewport: &Viewport,
+        viewport: &Viewport,
     ) {
-        if let Err(e) = pipeline.update(device, &self.shader, &self.uniforms) {
-            error!("Failed to update pipeline:\n{}", e);
-        };
-        pipeline
-            .update_default_buffer(
-                queue,
-                &uniforms::DefaultUniforms::new(bounds.width, bounds.height),
-            )
-            .update_custom_buffer(queue, &self.uniforms.data.uniforms_bytes.read().unwrap());
+        pipeline.prepare(device, queue, bounds, viewport, self.data.clone())
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
-        pipeline.draw(render_pass);
-        true
+        pipeline.draw(render_pass)
     }
 }
