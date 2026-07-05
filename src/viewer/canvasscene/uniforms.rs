@@ -16,5 +16,3 @@ impl Default for DefaultUniforms {
         Self::new(1000.0, 1000.0) // Default resolution
     }
 }
-
-pub type CustomUniforms = [u8];

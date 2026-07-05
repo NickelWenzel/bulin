@@ -1,14 +1,14 @@
 use iced::Length;
 // mod wgsl_highlighter;
-use iced_code_editor::{theme, CodeEditor};
+use iced_code_editor::{CodeEditor, theme};
 // use wgsl_highlighter::WGSLHighlighter;
 
 use crate::shader_update::FragmentShader;
 use crate::util::{self, FileName};
 
 use iced::{
-    widget::{button, column, container, pick_list, row, space, text, toggler, tooltip},
     Center, Element, Font, Task, Theme,
+    widget::{button, column, container, pick_list, row, space, text, toggler, tooltip},
 };
 
 use serde::{Deserialize, Serialize};
@@ -42,7 +42,7 @@ fn default_editor() -> CodeEditor {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    EditorMessage(iced_code_editor::Message),
+    Editor(iced_code_editor::Message),
     ThemeSelected(Theme),
     WordWrapToggled(bool),
     NewFile,
@@ -67,10 +67,10 @@ impl TextEditor {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::EditorMessage(msg) => {
-                let task = self.editor.update(&msg).map(Message::EditorMessage);
+            Message::Editor(msg) => {
+                let task = self.editor.update(&msg).map(Message::Editor);
 
-                if self.editor.is_modified() {
+                if matches!(msg, iced_code_editor::Message::CharacterInput(_)) {
                     self.is_dirty = true;
                     Task::batch([task, Task::done(Message::UpdatePipeline(self.content()))])
                 } else {
@@ -178,7 +178,7 @@ impl TextEditor {
 
         column![
             controls,
-            row![self.editor.view().map(Message::EditorMessage)].height(Length::Fill),
+            row![self.editor.view().map(Message::Editor)].height(Length::Fill),
             //.height(Fill),
             // highlight_with::<WGSLHighlighter>(
             //     Settings {
