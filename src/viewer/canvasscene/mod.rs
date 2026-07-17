@@ -228,7 +228,7 @@ struct Customs {{
     {},
 }}
 
-@group(1) @binding(0) var<uniform> customs: Customs;"#,
+@group(0) @binding(0) var<uniform> customs: Customs;"#,
         data.iter()
             .map(Uniform::to_shader_line)
             .collect::<Vec<_>>()
