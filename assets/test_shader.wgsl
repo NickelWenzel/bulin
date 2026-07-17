@@ -1,6 +1,6 @@
 @fragment
 fn fs_main(@builtin(position) clip_pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let time = 0.1;
+    let time = 21.; //custom.time;
     let radius = 0.3;
     let leaves = 7.0;
     let speed = 0.5;
