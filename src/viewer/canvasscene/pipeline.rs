@@ -8,16 +8,17 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use iced::Rectangle;
 use iced::futures::executor::block_on;
 use iced::wgpu;
-use iced::widget::shader::{self, Viewport};
+use iced::widget::shader::{self};
 use tracing::{debug, warn};
 
 use super::PrimitiveData;
 
 const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const BLIT_WGSL: &str = include_str!("shaders/blit.wgsl");
+const DEFAULT_WIDTH: u32 = 1000;
+const DEFAULT_HEIGHT: u32 = 1000;
 
 struct Target {
     _texture: wgpu::Texture,
@@ -35,13 +36,10 @@ pub struct Pipeline {
     // GPU objects
     offscreen: wgpu::RenderPipeline,
     blit: wgpu::RenderPipeline,
-    blit_layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
     uniforms: Option<UniformsBuffer>,
 
     // Double buffer
-    targets: Option<[Target; 2]>,
-    size: (u32, u32),
+    targets: [Target; 2],
     front: usize,
 
     // Completion tracking
@@ -141,14 +139,55 @@ impl shader::Pipeline for Pipeline {
             cache: None,
         });
 
+        // --- Targets -------------------------------------------------
+        let make_target = || {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("bulin.offscreen.texture"),
+                size: wgpu::Extent3d {
+                    width: DEFAULT_WIDTH,
+                    height: DEFAULT_HEIGHT,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: OFFSCREEN_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+
+            let view = texture.create_view(&Default::default());
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bulin.blit.bind_group"),
+                layout: &blit_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+
+            Target {
+                _texture: texture,
+                view,
+                bind_group,
+            }
+        };
+
+        let targets = [make_target(), make_target()];
+
         Self {
             offscreen,
             blit,
-            blit_layout,
-            sampler,
             uniforms,
-            targets: None,
-            size: (0, 0),
+            targets,
             front: 0,
             generation: 0,
             in_flight: None,
@@ -163,19 +202,8 @@ impl Pipeline {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bounds: &Rectangle,
-        viewport: &Viewport,
         primitive_data: Arc<PrimitiveData>,
     ) {
-        let scale = viewport.scale_factor();
-        let width = ((bounds.width * scale) as u32).max(1);
-        let height = ((bounds.height * scale) as u32).max(1);
-
-        let size_before = self.size;
-        let had_targets = self.targets.is_some();
-        self.resize(device, width, height);
-        let resized = !had_targets || self.size != size_before;
-
         // 1. If the offscreen render we kicked off earlier has completed,
         //    swap front and back. From now on `draw()` samples the new frame.
         if let Some(generation) = self.in_flight
@@ -188,7 +216,7 @@ impl Pipeline {
         // 2. Only start a new offscreen render if the previous one finished.
         //    While one is in flight, the front texture keeps being displayed.
         if self.in_flight.is_none() {
-            let mut needs_draw = resized;
+            let mut needs_draw = false;
 
             //The order of the operations matters here
             // 1. Check if buffer needs to be re-allocated
@@ -236,8 +264,7 @@ impl Pipeline {
             self.primitive_data = primitive_data;
 
             if needs_draw {
-                let targets = self.targets.as_ref().expect("targets allocated");
-                let back = &targets[self.front ^ 1];
+                let back = &self.targets[self.front ^ 1];
 
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("bulin.offscreen.encoder"),
@@ -285,71 +312,11 @@ impl Pipeline {
     pub fn draw(&self, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         // iced has already set viewport + scissor to the widget bounds.
         // Just blit the front texture.
-        let Some(targets) = self.targets.as_ref() else {
-            return false;
-        };
-
         render_pass.set_pipeline(&self.blit);
-        render_pass.set_bind_group(0, &targets[self.front].bind_group, &[]);
+        render_pass.set_bind_group(0, &self.targets[self.front].bind_group, &[]);
         render_pass.draw(0..3, 0..1);
 
         true // handled here; no need for the fallback `render()` path
-    }
-
-    /// (Re)creates the two offscreen textures when the widget size changes.
-    fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        if self.size == (width, height) && self.targets.is_some() {
-            return;
-        }
-
-        let make_target = || {
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("bulin.offscreen.texture"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: OFFSCREEN_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
-
-            let view = texture.create_view(&Default::default());
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bulin.blit.bind_group"),
-                layout: &self.blit_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
-
-            Target {
-                _texture: texture,
-                view,
-                bind_group,
-            }
-        };
-
-        self.targets = Some([make_target(), make_target()]);
-        self.size = (width, height);
-        self.front = 0;
-        // Any render still in flight targets the old (dropped) textures;
-        // forget about it. Its stale completion callback is harmless because
-        // generations only ever increase.
-        self.in_flight = None;
     }
 }
 
