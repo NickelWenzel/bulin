@@ -244,10 +244,10 @@ impl shader::Primitive for Primitive {
         pipeline: &mut Self::Pipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bounds: &Rectangle,
-        viewport: &Viewport,
+        _bounds: &Rectangle,
+        _viewport: &Viewport,
     ) {
-        pipeline.prepare(device, queue, bounds, viewport, self.data.clone())
+        pipeline.prepare(device, queue, self.data.clone())
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
