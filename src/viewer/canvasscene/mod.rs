@@ -1,5 +1,5 @@
 // mod pipeline;
-mod pipeline2;
+mod pipeline;
 mod uniforms;
 
 use std::sync::Arc;
@@ -237,7 +237,7 @@ struct Customs {{
 }
 
 impl shader::Primitive for Primitive {
-    type Pipeline = pipeline2::Pipeline;
+    type Pipeline = pipeline::Pipeline;
 
     fn prepare(
         &self,
