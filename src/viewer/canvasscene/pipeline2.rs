@@ -198,7 +198,6 @@ impl Pipeline {
             }
 
             // 2. Check if buffer content changed
-            let mut needs_offscreen_pipeline = false;
             if let Some(uniforms) = &self.uniforms
                 && self.primitive_data.uniforms.uniforms_bytes
                     != primitive_data.uniforms.uniforms_bytes
@@ -209,11 +208,13 @@ impl Pipeline {
                     &primitive_data.uniforms.uniforms_bytes,
                 );
                 needs_draw = true;
-                needs_offscreen_pipeline = true;
             }
 
             // 3. Check if shader changed
-            if needs_offscreen_pipeline || (self.primitive_data.shader != primitive_data.shader) {
+            if (self.primitive_data.shader != primitive_data.shader)
+                || (self.primitive_data.uniforms.uniforms_str
+                    != primitive_data.uniforms.uniforms_str)
+            {
                 let offscreen = create_offscreen_pipeline(
                     device,
                     self.uniforms.as_ref().map(|u| &u.uniforms_layout),
