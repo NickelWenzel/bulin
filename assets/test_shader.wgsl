@@ -1,13 +1,13 @@
 @fragment
-fn fs_main(@builtin(position) clip_pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let time = 21.; //custom.time;
+fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    let time = customs.time;
     let radius = 0.3;
     let leaves = 7.0;
-    let speed = 0.5;
+    let speed = 10.0;
     let flower_color = vec3<f32>(0.9, 0.1, 0.2);
     let test = vec3<f32>(0.1, 0.2, 0.1);
 
-    let st = clip_pos.xy / vec2<f32>(1000.);//uniforms.resolution;
+    let st = uv;
 
     let d = 0.25 + 0.5 * (0.5 + 0.5 * sin(2.0 * time));
     let pos = vec2<f32>(d) - st;
