@@ -357,16 +357,16 @@ fn create_offscreen_pipeline(
     uniforms_layout: Option<&wgpu::BindGroupLayout>,
     shader: &str,
 ) -> Option<wgpu::RenderPipeline> {
+    // Guard shader compilation *and* pipeline creation: a shader that
+    // references a bind group the layout doesn't provide only errors at
+    // pipeline creation, so popping the scope earlier would let a broken
+    // pipeline through.
     device.push_error_scope(wgpu::ErrorFilter::Validation);
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("bulin.shader"),
         source: wgpu::ShaderSource::Wgsl(shader.into()),
     });
-    if let Some(error) = block_on(device.pop_error_scope()) {
-        warn!("Error creating shader module:\n{error}");
-        return None;
-    }
 
     let offscreen_layout = uniforms_layout.map(|uniforms_layout| {
         device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -397,6 +397,11 @@ fn create_offscreen_pipeline(
         multiview: None,
         cache: None,
     });
+
+    if let Some(error) = block_on(device.pop_error_scope()) {
+        warn!("Error creating offscreen pipeline:\n{error}");
+        return None;
+    }
 
     Some(offscreen)
 }
