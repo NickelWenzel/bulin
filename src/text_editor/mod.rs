@@ -1,13 +1,11 @@
-use iced::Length;
-// mod wgsl_highlighter;
-use iced_code_editor::{CodeEditor, theme};
-// use wgsl_highlighter::WGSLHighlighter;
+use iced::widget::text_editor;
+use iced::{Length, Theme, highlighter, keyboard};
 
 use crate::shader_update::FragmentShader;
 use crate::util::{self, FileName};
 
 use iced::{
-    Center, Element, Font, Task, Theme,
+    Center, Element, Font, Task,
     widget::{button, column, container, pick_list, row, space, text, toggler, tooltip},
 };
 
@@ -15,35 +13,36 @@ use serde::{Deserialize, Serialize};
 
 use std::sync::Arc;
 
+// custom string serialization for content
+#[expect(dead_code, reason = "used in custom serde")]
+const CONTENT_SERDE: &str = include_str!("content_serde.rs");
+
+// stable id
+const EDITOR: &str = "editor";
+
 #[derive(Serialize, Deserialize)]
 pub struct TextEditor {
     file: Option<FileName>,
-    #[serde(default = "default_editor", skip)]
-    editor: CodeEditor,
+    #[serde(with = "CONTENT_SERDE", skip)]
+    content: text_editor::Content,
     #[serde(default = "default_theme", skip)]
-    theme: Theme,
-    #[serde(default = "default_false", skip)]
+    theme: highlighter::Theme,
+    #[serde(default = "bool::default", skip)]
+    word_wrap: bool,
+    #[serde(default = "bool::default", skip)]
     is_loading: bool,
-    #[serde(default = "default_false", skip)]
+    #[serde(default = "bool::default", skip)]
     is_dirty: bool,
 }
 
-fn default_theme() -> Theme {
-    Theme::SolarizedDark
-}
-
-fn default_false() -> bool {
-    false
-}
-
-fn default_editor() -> CodeEditor {
-    CodeEditor::new("", "wgsl")
+fn default_theme() -> highlighter::Theme {
+    highlighter::Theme::SolarizedDark
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Editor(iced_code_editor::Message),
-    ThemeSelected(Theme),
+    ActionPerformed(text_editor::Action),
+    ThemeSelected(highlighter::Theme),
     WordWrapToggled(bool),
     NewFile,
     OpenFile,
@@ -58,40 +57,41 @@ impl TextEditor {
     pub fn new(shader: &str) -> Self {
         Self {
             file: None,
-            editor: CodeEditor::new(shader, "wgsl"),
+            content: text_editor::Content::with_text(shader),
             theme: default_theme(),
             is_loading: false,
             is_dirty: false,
+            word_wrap: false,
         }
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Editor(msg) => {
-                let task = self.editor.update(&msg).map(Message::Editor);
+            Message::ActionPerformed(action) => {
+                let is_dirty = action.is_edit();
+                self.content.perform(action);
 
-                if matches!(msg, iced_code_editor::Message::CharacterInput(_)) {
+                if is_dirty {
                     self.is_dirty = true;
-                    Task::batch([task, Task::done(Message::UpdatePipeline(self.content()))])
+                    Task::done(Message::UpdatePipeline(self.content()))
                 } else {
-                    task
+                    Task::none()
                 }
             }
             Message::ThemeSelected(theme) => {
-                self.editor.set_theme(theme::from_iced_theme(&theme));
                 self.theme = theme;
 
                 Task::none()
             }
             Message::WordWrapToggled(word_wrap) => {
-                self.editor.set_wrap_enabled(word_wrap);
+                self.word_wrap = word_wrap;
 
                 Task::none()
             }
             Message::NewFile => {
                 if !self.is_loading {
                     self.file = None;
-                    self.editor = CodeEditor::new("", "wgsl");
+                    self.content = text_editor::Content::new();
                 }
 
                 Task::done(Message::UpdatePipeline(self.content()))
@@ -111,7 +111,7 @@ impl TextEditor {
 
                 if let Ok((path, contents)) = result {
                     self.file = Some(path);
-                    self.editor = CodeEditor::new(&contents, "wgsl");
+                    self.content = text_editor::Content::with_text(&contents);
                 }
 
                 Task::done(Message::UpdatePipeline(self.content()))
@@ -143,7 +143,6 @@ impl TextEditor {
                 if let Ok(path) = result {
                     self.file = Some(path);
                     self.is_dirty = false;
-                    self.editor.mark_saved();
                 }
 
                 Task::none()
@@ -166,63 +165,59 @@ impl TextEditor {
                 self.is_dirty.then_some(Message::SaveFile)
             ),
             space::horizontal(),
-            toggler(self.editor.wrap_enabled())
+            toggler(self.word_wrap)
                 .label("Word Wrap")
                 .on_toggle(Message::WordWrapToggled),
-            pick_list(Theme::ALL, Some(&self.theme), Message::ThemeSelected)
-                .text_size(14)
-                .padding([5, 10])
+            pick_list(
+                Some(&self.theme),
+                highlighter::Theme::ALL,
+                highlighter::Theme::to_string
+            )
+            .on_select(Message::ThemeSelected)
+            .text_size(14)
+            .padding([5, 10])
         ]
         .spacing(10)
         .align_y(Center);
 
         column![
             controls,
-            row![self.editor.view().map(Message::Editor)].height(Length::Fill),
-            //.height(Fill),
-            // highlight_with::<WGSLHighlighter>(
-            //     Settings {
-            //         theme: self.theme,
-            //         token: "wgsl".to_string(),
-            //     },
-            //     |highlight, _theme| highlight.to_format(),
-            // )
-            // .key_binding(|key_press| {
-            //     match key_press.key.as_ref() {
-            //         keyboard::Key::Character("s") if key_press.modifiers.command() => {
-            //             Some(text_editor::Binding::Custom(Message::SaveFile))
-            //         }
-            //         keyboard::Key::Character("z") if key_press.modifiers.command() => {
-            //             Some(text_editor::Binding::Custom(Message::EditorMessage(
-            //                 text_editor::Action::Undo,
-            //             )))
-            //         }
-            //         keyboard::Key::Character("y") if key_press.modifiers.command() => {
-            //             Some(text_editor::Binding::Custom(Message::EditorMessage(
-            //                 text_editor::Action::Redo,
-            //             )))
-            //         }
-            //         keyboard::Key::Named(keyboard::key::Named::Delete) => {
-            //             Some(text_editor::Binding::Delete)
-            //         }
-            //         keyboard::Key::Named(keyboard::key::Named::Tab) => {
-            //             Some(text_editor::Binding::Custom(Message::EditorMessage(
-            //                 text_editor::Action::Edit(text_editor::Edit::Paste(Arc::new(
-            //                     String::from("  "),
-            //                 ))),
-            //             )))
-            //         }
-            //         _ => text_editor::Binding::from_key_press(key_press),
-            //     }
-            // }),
+            text_editor(&self.content)
+                .id(EDITOR)
+                .height(Length::Fill)
+                .on_action(Message::ActionPerformed)
+                .wrapping(if self.word_wrap {
+                    text::Wrapping::Word
+                } else {
+                    text::Wrapping::None
+                })
+                .highlight("wgsl", self.theme)
+                .key_binding(|key_press| {
+                    match key_press.key.as_ref() {
+                        keyboard::Key::Character("s") if key_press.modifiers.command() => {
+                            Some(text_editor::Binding::Custom(Message::SaveFile))
+                        }
+                        _ => text_editor::Binding::from_key_press(key_press),
+                    }
+                }),
         ]
         .spacing(10)
         .padding(10)
         .into()
     }
 
-    pub fn theme(&self) -> &iced::Theme {
-        &self.theme
+    pub fn theme(&self) -> Theme {
+        match self.theme {
+            highlighter::Theme::SolarizedDark => Theme::SolarizedDark,
+            highlighter::Theme::Base16Mocha => Theme::CatppuccinMocha,
+            theme => {
+                if theme.is_dark() {
+                    Theme::Dark
+                } else {
+                    Theme::Light
+                }
+            }
+        }
     }
 
     pub fn filename_display_text(&self) -> Option<String> {
@@ -238,7 +233,7 @@ impl TextEditor {
     }
 
     pub fn content(&self) -> String {
-        self.editor.content()
+        self.content.text()
     }
 }
 
@@ -275,7 +270,10 @@ fn open_icon<'a, Message>() -> Element<'a, Message> {
 }
 
 fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
-    const ICON_FONT: Font = Font::with_name("editor-icons");
+    const ICON_FONT: Font = Font::new("editor-icons");
 
-    text(codepoint).font(ICON_FONT).into()
+    text(codepoint)
+        .font(ICON_FONT)
+        .shaping(text::Shaping::Basic)
+        .into()
 }

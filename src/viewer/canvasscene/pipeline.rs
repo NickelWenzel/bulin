@@ -109,8 +109,8 @@ impl shader::Pipeline for Pipeline {
 
         let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("bulin.blit.pipeline_layout"),
-            bind_group_layouts: &[&blit_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&blit_layout)],
+            immediate_size: 0,
         });
 
         let blit = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -135,8 +135,8 @@ impl shader::Pipeline for Pipeline {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // --- Targets -------------------------------------------------
@@ -285,6 +285,7 @@ impl Pipeline {
                         depth_stencil_attachment: None,
                         timestamp_writes: None,
                         occlusion_query_set: None,
+                        multiview_mask: None,
                     });
 
                     pass.set_pipeline(&self.offscreen);
@@ -329,7 +330,7 @@ fn create_offscreen_pipeline(
     // references a bind group the layout doesn't provide only errors at
     // pipeline creation, so popping the scope earlier would let a broken
     // pipeline through.
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("bulin.shader"),
@@ -339,8 +340,8 @@ fn create_offscreen_pipeline(
     let offscreen_layout = uniforms_layout.map(|uniforms_layout| {
         device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("bulin.offscreen.layout"),
-            bind_group_layouts: &[uniforms_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(uniforms_layout)],
+            immediate_size: 0,
         })
     });
 
@@ -362,11 +363,11 @@ fn create_offscreen_pipeline(
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
         cache: None,
+        multiview_mask: None,
     });
 
-    if let Some(error) = block_on(device.pop_error_scope()) {
+    if let Some(error) = block_on(error_scope.pop()) {
         warn!("Error creating offscreen pipeline:\n{error}");
         return None;
     }

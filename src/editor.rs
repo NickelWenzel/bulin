@@ -2,8 +2,8 @@ use crate::shader_update::ShaderUpdate;
 use crate::text_editor;
 use crate::uniforms_editor;
 
-use iced::widget::container;
 use iced::Subscription;
+use iced::widget::container;
 use iced::{Element, Task};
 use serde::{Deserialize, Serialize};
 

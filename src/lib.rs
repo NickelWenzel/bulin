@@ -9,7 +9,7 @@ mod viewer;
 
 use iced::keyboard::key;
 use iced::widget::{button, center, column, container, mouse_area, opaque, stack, text};
-use iced::{keyboard, Color, Element, Event, Font, Length, Subscription, Task, Theme};
+use iced::{Color, Element, Event, Font, Length, Subscription, Task, Theme, keyboard};
 use util::Error;
 
 use std::sync::Arc;
@@ -190,7 +190,7 @@ impl Application {
     }
 
     pub fn theme(&self) -> Theme {
-        self.editor.text().theme().clone()
+        self.editor.text().theme()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -205,7 +205,7 @@ impl Default for Application {
 }
 
 fn menu_icon<'a>() -> Element<'a, Message> {
-    const MENU_FONT: Font = Font::with_name("menu");
+    const MENU_FONT: Font = Font::new("menu");
 
     button(text('\u{0e9bd}').font(MENU_FONT))
         .on_press(Message::ShowMenu)

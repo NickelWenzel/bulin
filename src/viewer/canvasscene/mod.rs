@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::shader_update::{ShaderUpdate, UniformsUpdate};
 use crate::uniforms_editor::uniform::{Type, Uniform};
 
-use iced_wgpu::wgpu;
+use iced::wgpu;
 
 use iced::Rectangle;
 use iced::mouse;

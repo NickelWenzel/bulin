@@ -1,11 +1,11 @@
-use std::ops::RangeBounds;
+use std::convert::identity;
 
 use iced::{
-    widget::{column, combo_box, row, space, text, text_input},
     Element, Length, Task,
+    widget::{column, combo_box, row, space, text, text_input},
 };
-use iced_aw::number_input;
-use num_traits::bounds::Bounded;
+
+use iced_palace::widget::labeled_slider;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -14,7 +14,7 @@ pub enum Message {
     ChangeName(String),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum Type {
     Int(i32),
     Float(f32),
@@ -96,43 +96,27 @@ impl Uniform {
     }
 
     pub fn view(&'_ self) -> Element<'_, Message> {
+        let fr = -100.0..=100.0;
+        let fs = 0.1;
+
+        let ir = -100..=100;
+        let is = 1;
+
         let name = text(&self.name);
-        let value_view = match &self.value {
-            Type::Int(value) => {
-                number_input(value, -100..100, |v| Message::ChangeValue(Type::Int(v)))
-                    .step(1)
-                    .into()
-            }
-            Type::Float(value) => number_input(value, -100.0..100.0, |v| {
-                Message::ChangeValue(Type::Float(v))
-            })
-            .step(1.0)
-            .into(),
-            Type::VecFloat2(value) => number_input2(value, -100.0..100.0, 1.0, |v| {
-                Message::ChangeValue(Type::VecFloat2(v))
-            }),
-            Type::VecFloat3(value) => number_input3(value, -100.0..100.0, 1.0, |v| {
-                Message::ChangeValue(Type::VecFloat3(v))
-            }),
-            Type::Col3(value) => number_input3(value, 0.0..1.0, 0.05, |v| {
-                Message::ChangeValue(Type::Col3(v))
-            }),
-            Type::VecFloat4(value) => number_input4(value, -100.0..100.0, 1.0, |v| {
-                Message::ChangeValue(Type::VecFloat4(v))
-            }),
-            Type::Col4(value) => number_input4(value, 0.0..1.0, 0.05, |v| {
-                Message::ChangeValue(Type::Col4(v))
-            }),
-            Type::VecInt2(value) => number_input2(value, -100..100, 1, |v| {
-                Message::ChangeValue(Type::VecInt2(v))
-            }),
-            Type::VecInt3(value) => number_input3(value, -100..100, 1, |v| {
-                Message::ChangeValue(Type::VecInt3(v))
-            }),
-            Type::VecInt4(value) => number_input4(value, -100..100, 1, |v| {
-                Message::ChangeValue(Type::VecInt4(v))
-            }),
-        };
+        let value_view = match self.value {
+            Type::Int(value) => input_slider(value, ir, is).map(Type::Int),
+            Type::Float(value) => input_slider(value, fr, fs).map(Type::Float),
+            Type::VecFloat2(value) => input_slider2(value, fr, fs).map(Type::VecFloat2),
+            Type::VecFloat3(value) => input_slider3(value, fr, fs).map(Type::VecFloat3),
+            Type::Col3(value) => input_slider3(value, 0.0..=1.0, 0.05).map(Type::Col3),
+            Type::VecFloat4(value) => input_slider4(value, fr, fs).map(Type::VecFloat4),
+            Type::Col4(value) => input_slider4(value, 0.0..=1.0, 0.05).map(Type::Col4),
+            Type::VecInt2(value) => input_slider2(value, ir, is).map(Type::VecInt2),
+            Type::VecInt3(value) => input_slider3(value, ir, is).map(Type::VecInt3),
+            Type::VecInt4(value) => input_slider4(value, ir, is).map(Type::VecInt4),
+        }
+        .map(Message::ChangeValue);
+
         row![name, space::horizontal(), value_view].into()
     }
 
@@ -141,90 +125,104 @@ impl Uniform {
     }
 }
 
-fn number_input2<'a, T, F>(
-    (v0, v1): &'a (T, T),
-    bounds: impl RangeBounds<T> + Clone,
-    step: T,
-    on_change: F,
-) -> Element<'a, Message>
-where
-    F: 'static + Fn((T, T)) -> Message + Copy,
-    T: 'static
-        + num_traits::Num
-        + num_traits::NumAssignOps
-        + PartialOrd
-        + std::fmt::Display
-        + std::str::FromStr
-        + Copy
-        + Bounded,
+trait Input:
+    Copy
+    + PartialOrd
+    + From<u8>
+    + num_traits::FromPrimitive
+    + num_traits::AsPrimitive<f64>
+    + std::fmt::Display
+    + 'static
 {
-    let (v0_c, v1_c) = (*v0, *v1);
+}
+
+impl<T> Input for T where
+    T: Copy
+        + PartialOrd
+        + From<u8>
+        + num_traits::FromPrimitive
+        + num_traits::AsPrimitive<f64>
+        + std::fmt::Display
+        + 'static
+{
+}
+
+fn input_slider<'a, T: Input>(
+    value: T,
+    range: std::ops::RangeInclusive<T>,
+    step: T,
+) -> Element<'a, T> {
+    labeled_slider("", (range, step), value, identity, |value| {
+        format!("{value:.2}")
+    })
+    .into()
+}
+
+fn input_slider2<'a, T: Input>(
+    v: (T, T),
+    range: std::ops::RangeInclusive<T>,
+    step: T,
+) -> Element<'a, (T, T)> {
+    let input_slider = |value: T, set: fn((T, T), T) -> (T, T)| {
+        labeled_slider(
+            "",
+            (range.clone(), step),
+            value,
+            move |value| set(v, value),
+            |value| format!("{value:.2}",),
+        )
+    };
 
     row![
-        number_input(v0, bounds.clone(), move |v| on_change((v, v1_c))).step(step),
-        number_input(v1, bounds, move |v| on_change((v0_c, v))).step(step),
+        input_slider(v.0, |(_, v1), v0| (v0, v1)),
+        input_slider(v.1, |(v0, _), v1| (v0, v1)),
     ]
     .into()
 }
 
-fn number_input3<'a, T, F>(
-    (v0, v1, v2): &'a (T, T, T),
-    bounds: impl RangeBounds<T> + Clone,
+fn input_slider3<'a, T: Input>(
+    v: (T, T, T),
+    range: std::ops::RangeInclusive<T>,
     step: T,
-    on_change: F,
-) -> Element<'a, Message>
-where
-    F: 'static + Fn((T, T, T)) -> Message + Copy,
-    T: 'static
-        + num_traits::Num
-        + num_traits::NumAssignOps
-        + PartialOrd
-        + std::fmt::Display
-        + std::str::FromStr
-        + Copy
-        + Bounded,
-{
-    let (v0_c, v1_c, v2_c) = (*v0, *v1, *v2);
+) -> Element<'a, (T, T, T)> {
+    let input_slider = |value: T, set: fn((T, T, T), T) -> (T, T, T)| {
+        labeled_slider(
+            "",
+            (range.clone(), step),
+            value,
+            move |value| set(v, value),
+            |value| format!("{value:.2}",),
+        )
+    };
+
     row![
-        number_input(v0, bounds.clone(), move |v| on_change((v, v1_c, v2_c))).step(step),
-        number_input(v1, bounds.clone(), move |v| on_change((v0_c, v, v2_c))).step(step),
-        number_input(v2, bounds, move |v| on_change((v0_c, v1_c, v))).step(step),
+        input_slider(v.0, |(_, v1, v2), v0| (v0, v1, v2)),
+        input_slider(v.1, |(v0, _, v2), v1| (v0, v1, v2)),
+        input_slider(v.2, |(v0, v1, _), v2| (v0, v1, v2)),
     ]
     .into()
 }
 
-fn number_input4<'a, T, F>(
-    (v0, v1, v2, v3): &'a (T, T, T, T),
-    bounds: impl RangeBounds<T> + Clone,
+fn input_slider4<'a, T: Input>(
+    v: (T, T, T, T),
+    range: std::ops::RangeInclusive<T>,
     step: T,
-    on_change: F,
-) -> Element<'a, Message>
-where
-    F: 'static + Fn((T, T, T, T)) -> Message + Copy,
-    T: 'static
-        + num_traits::Num
-        + num_traits::NumAssignOps
-        + PartialOrd
-        + std::fmt::Display
-        + std::str::FromStr
-        + Copy
-        + Bounded,
-{
-    let (v0_c, v1_c, v2_c, v3_c) = (*v0, *v1, *v2, *v3);
+) -> Element<'a, (T, T, T, T)> {
+    let input_slider = |value: T, set: fn((T, T, T, T), T) -> (T, T, T, T)| {
+        labeled_slider(
+            "",
+            (range.clone(), step),
+            value,
+            move |value| set(v, value),
+            |value| format!("{value:.2}",),
+        )
+    };
+
     row![
-        number_input(v0, bounds.clone(), move |v| on_change((
-            v, v1_c, v2_c, v3_c
-        )))
-        .step(step),
-        number_input(v1, bounds.clone(), move |v| on_change((
-            v0_c, v, v2_c, v3_c
-        )))
-        .step(step),
-        number_input(v1, bounds.clone(), move |v| on_change((
-            v0_c, v1_c, v, v3_c
-        )))
-        .step(step),
-        number_input(v2, bounds, move |v| on_change((v0_c, v1_c, v2_c, v))).step(step),
+        input_slider(v.0, |(_, v1, v2, v3), v0| (v0, v1, v2, v3)),
+        input_slider(v.1, |(v0, _, v2, v3), v1| (v0, v1, v2, v3)),
+        input_slider(v.2, |(v0, v1, _, v3), v2| (v0, v1, v2, v3)),
+        input_slider(v.3, |(v0, v1, v2, _), v3| (v0, v1, v2, v3)),
     ]
     .into()
 }
