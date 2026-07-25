@@ -5,7 +5,7 @@ mod uniforms;
 use std::sync::Arc;
 
 use crate::shader_update::{ShaderUpdate, UniformsUpdate};
-use crate::uniforms_editor::uniform::{Type, Uniform};
+use crate::uniforms_editor::uniform::Uniform;
 
 use iced::wgpu;
 
@@ -165,56 +165,32 @@ impl UniformRenderData {
 }
 
 fn to_uniforms_bytes(data: &[Uniform]) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    // Pre-allocate memory
-    bytes.reserve(data.iter().fold(0, |acc, e| {
-        acc + match e.value {
-            Type::Int(_) | Type::Float(_) => 4,
-            Type::VecFloat2(_) | Type::VecInt2(_) => 8,
-            Type::VecFloat3(_) | Type::Col3(_) | Type::VecInt3(_) => 12,
-            Type::VecFloat4(_) | Type::Col4(_) | Type::VecInt4(_) => 16,
-        }
-    }));
-
-    // Push bytes
-    for uniform in data {
-        match uniform.value {
-            Type::Int(value) => bytes.extend_from_slice(&value.to_ne_bytes()),
-            Type::Float(value) => bytes.extend_from_slice(&value.to_ne_bytes()),
-            Type::VecFloat2(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-            }
-            Type::VecFloat3(value) | Type::Col3(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-                bytes.extend_from_slice(&value.2.to_ne_bytes());
-            }
-            Type::VecFloat4(value) | Type::Col4(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-                bytes.extend_from_slice(&value.2.to_ne_bytes());
-                bytes.extend_from_slice(&value.3.to_ne_bytes());
-            }
-            Type::VecInt2(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-            }
-            Type::VecInt3(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-                bytes.extend_from_slice(&value.2.to_ne_bytes());
-            }
-            Type::VecInt4(value) => {
-                bytes.extend_from_slice(&value.0.to_ne_bytes());
-                bytes.extend_from_slice(&value.1.to_ne_bytes());
-                bytes.extend_from_slice(&value.2.to_ne_bytes());
-                bytes.extend_from_slice(&value.3.to_ne_bytes());
-            }
-        }
+    if data.is_empty() {
+        return Vec::new();
     }
 
+    let mut bytes = Vec::new();
+    let mut struct_alignment = 1;
+
+    for uniform in data {
+        let value = uniform.value;
+        let alignment = value.wgsl_alignment();
+        struct_alignment = struct_alignment.max(alignment);
+
+        bytes.resize(align_up(bytes.len(), alignment), 0);
+        let payload_offset = bytes.len();
+        value.write_payload(&mut bytes);
+
+        debug_assert_eq!(bytes.len() - payload_offset, value.wgsl_size());
+    }
+
+    bytes.resize(align_up(bytes.len(), struct_alignment), 0);
     bytes
+}
+
+fn align_up(offset: usize, alignment: usize) -> usize {
+    debug_assert!(alignment.is_power_of_two());
+    (offset + alignment - 1) & !(alignment - 1)
 }
 
 fn to_uniforms_string(data: &[Uniform]) -> String {
@@ -252,5 +228,115 @@ impl shader::Primitive for Primitive {
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         pipeline.draw(render_pass)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::uniforms_editor::uniform::Type;
+
+    fn uniform(value: Type) -> Uniform {
+        Uniform {
+            value,
+            name: String::new(),
+        }
+    }
+
+    fn read_f32(bytes: &[u8], offset: usize) -> f32 {
+        f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn empty_uniforms_have_no_bytes() {
+        assert!(to_uniforms_bytes(&[]).is_empty());
+    }
+
+    #[test]
+    fn col3_has_trailing_struct_padding() {
+        let bytes = to_uniforms_bytes(&[uniform(Type::Col3((1.0, 2.0, 3.0)))]);
+
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(read_f32(&bytes, 0), 1.0);
+        assert_eq!(read_f32(&bytes, 4), 2.0);
+        assert_eq!(read_f32(&bytes, 8), 3.0);
+        assert_eq!(&bytes[12..16], &[0; 4]);
+    }
+
+    #[test]
+    fn col4_occupies_exactly_sixteen_bytes() {
+        let bytes = to_uniforms_bytes(&[uniform(Type::Col4((1.0, 2.0, 3.0, 4.0)))]);
+
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(read_f32(&bytes, 12), 4.0);
+    }
+
+    #[test]
+    fn col4_is_aligned_after_a_scalar() {
+        let bytes = to_uniforms_bytes(&[
+            uniform(Type::Float(5.0)),
+            uniform(Type::Col4((1.0, 2.0, 3.0, 4.0))),
+        ]);
+
+        assert_eq!(bytes.len(), 32);
+        assert_eq!(read_f32(&bytes, 0), 5.0);
+        assert_eq!(&bytes[4..16], &[0; 12]);
+        assert_eq!(read_f32(&bytes, 16), 1.0);
+        assert_eq!(read_f32(&bytes, 28), 4.0);
+    }
+
+    #[test]
+    fn scalar_uses_the_remaining_space_after_col3() {
+        let bytes = to_uniforms_bytes(&[
+            uniform(Type::Col3((1.0, 2.0, 3.0))),
+            uniform(Type::Float(4.0)),
+        ]);
+
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(read_f32(&bytes, 8), 3.0);
+        assert_eq!(read_f32(&bytes, 12), 4.0);
+    }
+
+    #[test]
+    fn mixed_values_use_member_and_struct_alignment() {
+        let bytes = to_uniforms_bytes(&[
+            uniform(Type::VecFloat2((1.0, 2.0))),
+            uniform(Type::Float(3.0)),
+            uniform(Type::VecFloat3((4.0, 5.0, 6.0))),
+        ]);
+
+        assert_eq!(bytes.len(), 32);
+        assert_eq!(read_f32(&bytes, 0), 1.0);
+        assert_eq!(read_f32(&bytes, 4), 2.0);
+        assert_eq!(read_f32(&bytes, 8), 3.0);
+        assert_eq!(&bytes[12..16], &[0; 4]);
+        assert_eq!(read_f32(&bytes, 16), 4.0);
+        assert_eq!(read_f32(&bytes, 24), 6.0);
+        assert_eq!(&bytes[28..32], &[0; 4]);
+    }
+
+    #[test]
+    fn every_type_reports_and_writes_its_expected_layout() {
+        let cases = [
+            (Type::Int(1), 4, 4),
+            (Type::Float(1.0), 4, 4),
+            (Type::VecFloat2((1.0, 2.0)), 8, 8),
+            (Type::VecFloat3((1.0, 2.0, 3.0)), 12, 16),
+            (Type::Col3((1.0, 2.0, 3.0)), 12, 16),
+            (Type::VecFloat4((1.0, 2.0, 3.0, 4.0)), 16, 16),
+            (Type::Col4((1.0, 2.0, 3.0, 4.0)), 16, 16),
+            (Type::VecInt2((1, 2)), 8, 8),
+            (Type::VecInt3((1, 2, 3)), 12, 16),
+            (Type::VecInt4((1, 2, 3, 4)), 16, 16),
+        ];
+
+        for (value, expected_size, expected_alignment) in cases {
+            let mut payload = Vec::new();
+            value.write_payload(&mut payload);
+
+            assert_eq!(value.wgsl_size(), expected_size);
+            assert_eq!(value.wgsl_alignment(), expected_alignment);
+            assert_eq!(payload.len(), expected_size);
+        }
     }
 }
