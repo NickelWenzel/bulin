@@ -132,8 +132,8 @@ impl PrimitiveData {
 
     fn whole_shader(&self) -> String {
         format!(
-            "{}\n{}\n{}",
-            VERTEX_SHADER, self.uniforms.uniforms_str, self.shader
+            "{VERTEX_SHADER}\n\n{}\n\n{}",
+            self.uniforms.uniforms_str, self.shader
         )
     }
 }
