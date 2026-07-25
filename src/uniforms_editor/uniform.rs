@@ -1,3 +1,28 @@
+//! Runtime-defined shader uniform types and editor controls.
+//!
+//! Each [`Type`] has two representations: its WGSL member declaration and the
+//! numeric payload written to the GPU uniform buffer. Those representations must
+//! agree on both size and alignment. Payloads cannot simply be concatenated.
+//!
+//! For example, a `Float` followed by a `Col4` is laid out as follows because a
+//! WGSL `vec4<f32>` must begin at a 16-byte-aligned offset:
+//!
+//! ```text
+//! byte       0       4       8      12      16      20      24      28      32
+//!            +-------+-------+-------+-------+-------+-------+-------+-------+
+//! contents   | float |  pad  |  pad  |  pad  |   R   |   G   |   B   |   A   |
+//!            +-------+-------+-------+-------+-------+-------+-------+-------+
+//! ```
+//!
+//! A three-component vector has size 12 but alignment 16. It is therefore not
+//! unconditionally padded to 16 bytes: a following scalar can occupy byte offset
+//! 12. Padding is determined by the complete member sequence in
+//! `viewer::canvasscene::to_uniforms_bytes`, while this module supplies each
+//! member's layout metadata and payload bytes.
+//!
+//! See `docs/architecture/uniform-buffer-layout.md` for the full data flow,
+//! before-and-after diagrams, and extension invariants.
+
 use std::convert::identity;
 
 use iced::{
@@ -53,6 +78,72 @@ impl Type {
             Self::VecInt2(_) => String::from("vec2<i32>"),
             Self::VecInt3(_) => String::from("vec3<i32>"),
             Self::VecInt4(_) => String::from("vec4<i32>"),
+        }
+    }
+
+    /// Returns the WGSL payload size, excluding contextual structure padding.
+    pub(crate) fn wgsl_size(self) -> usize {
+        match self {
+            Self::Int(_) | Self::Float(_) => 4,
+            Self::VecFloat2(_) | Self::VecInt2(_) => 8,
+            Self::VecFloat3(_) | Self::Col3(_) | Self::VecInt3(_) => 12,
+            Self::VecFloat4(_) | Self::Col4(_) | Self::VecInt4(_) => 16,
+        }
+    }
+
+    /// Returns the alignment required for this member's offset in a WGSL struct.
+    pub(crate) fn wgsl_alignment(self) -> usize {
+        match self {
+            Self::Int(_) | Self::Float(_) => 4,
+            Self::VecFloat2(_) | Self::VecInt2(_) => 8,
+            Self::VecFloat3(_)
+            | Self::Col3(_)
+            | Self::VecInt3(_)
+            | Self::VecFloat4(_)
+            | Self::Col4(_)
+            | Self::VecInt4(_) => 16,
+        }
+    }
+
+    /// Appends only the variant payload in WGSL's little-endian representation.
+    ///
+    /// The caller is responsible for inserting member and trailing structure
+    /// padding based on [`Self::wgsl_alignment`]. The enum discriminant is never
+    /// written.
+    pub(crate) fn write_payload(self, bytes: &mut Vec<u8>) {
+        match self {
+            Self::Int(value) => bytes.extend_from_slice(&value.to_le_bytes()),
+            Self::Float(value) => bytes.extend_from_slice(&value.to_le_bytes()),
+            Self::VecFloat2(value) => {
+                bytes.extend_from_slice(&value.0.to_le_bytes());
+                bytes.extend_from_slice(&value.1.to_le_bytes());
+            }
+            Self::VecFloat3(value) | Self::Col3(value) => {
+                bytes.extend_from_slice(&value.0.to_le_bytes());
+                bytes.extend_from_slice(&value.1.to_le_bytes());
+                bytes.extend_from_slice(&value.2.to_le_bytes());
+            }
+            Self::VecFloat4(value) | Self::Col4(value) => {
+                bytes.extend_from_slice(&value.0.to_le_bytes());
+                bytes.extend_from_slice(&value.1.to_le_bytes());
+                bytes.extend_from_slice(&value.2.to_le_bytes());
+                bytes.extend_from_slice(&value.3.to_le_bytes());
+            }
+            Self::VecInt2(value) => {
+                bytes.extend_from_slice(&value.0.to_le_bytes());
+                bytes.extend_from_slice(&value.1.to_le_bytes());
+            }
+            Self::VecInt3(value) => {
+                bytes.extend_from_slice(&value.0.to_le_bytes());
+                bytes.extend_from_slice(&value.1.to_le_bytes());
+                bytes.extend_from_slice(&value.2.to_le_bytes());
+            }
+            Self::VecInt4(value) => {
+                bytes.extend_from_slice(&value.0.to_le_bytes());
+                bytes.extend_from_slice(&value.1.to_le_bytes());
+                bytes.extend_from_slice(&value.2.to_le_bytes());
+                bytes.extend_from_slice(&value.3.to_le_bytes());
+            }
         }
     }
 }
