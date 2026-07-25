@@ -51,8 +51,6 @@ pub struct Pipeline {
     primitive_data: Arc<PrimitiveData>,
 }
 
-impl Pipeline {}
-
 impl shader::Pipeline for Pipeline {
     fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         device.on_uncaptured_error(Arc::new(|e| debug!("WGPU error: {e:#}")));
