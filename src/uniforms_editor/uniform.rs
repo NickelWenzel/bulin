@@ -1,11 +1,10 @@
 use std::convert::identity;
 
 use iced::{
-    Element, Length, Task,
-    widget::{column, combo_box, row, space, text, text_input},
+    Alignment, Color, Element, Length, Task, Theme, border,
+    widget::{column, combo_box, container, row, slider, space, stack, text, text_input},
 };
 
-use iced_palace::widget::labeled_slider;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
@@ -42,7 +41,7 @@ impl Type {
         Type::VecInt4((0, 0, 0, 0)),
     ];
 
-    pub fn to_shader_line(&self) -> String {
+    pub fn to_shader_line(self) -> String {
         match self {
             Self::Int(_) => String::from("i32"),
             Self::Float(_) => String::from("f32"),
@@ -104,16 +103,16 @@ impl Uniform {
 
         let name = text(&self.name);
         let value_view = match self.value {
-            Type::Int(value) => input_slider(value, ir, is).map(Type::Int),
-            Type::Float(value) => input_slider(value, fr, fs).map(Type::Float),
-            Type::VecFloat2(value) => input_slider2(value, fr, fs).map(Type::VecFloat2),
-            Type::VecFloat3(value) => input_slider3(value, fr, fs).map(Type::VecFloat3),
-            Type::Col3(value) => input_slider3(value, 0.0..=1.0, 0.05).map(Type::Col3),
-            Type::VecFloat4(value) => input_slider4(value, fr, fs).map(Type::VecFloat4),
-            Type::Col4(value) => input_slider4(value, 0.0..=1.0, 0.05).map(Type::Col4),
-            Type::VecInt2(value) => input_slider2(value, ir, is).map(Type::VecInt2),
-            Type::VecInt3(value) => input_slider3(value, ir, is).map(Type::VecInt3),
-            Type::VecInt4(value) => input_slider4(value, ir, is).map(Type::VecInt4),
+            Type::Int(value) => input_slider(value, (ir, is)).map(Type::Int),
+            Type::Float(value) => input_slider(value, (fr, fs)).map(Type::Float),
+            Type::VecFloat2(value) => input_slider2(value, (fr, fs)).map(Type::VecFloat2),
+            Type::VecFloat3(value) => input_slider3(value, (fr, fs)).map(Type::VecFloat3),
+            Type::Col3(value) => input_slider3(value, (0.0..=1.0, 0.05)).map(Type::Col3),
+            Type::VecFloat4(value) => input_slider4(value, (fr, fs)).map(Type::VecFloat4),
+            Type::Col4(value) => input_slider4(value, (0.0..=1.0, 0.05)).map(Type::Col4),
+            Type::VecInt2(value) => input_slider2(value, (ir, is)).map(Type::VecInt2),
+            Type::VecInt3(value) => input_slider3(value, (ir, is)).map(Type::VecInt3),
+            Type::VecInt4(value) => input_slider4(value, (ir, is)).map(Type::VecInt4),
         }
         .map(Message::ChangeValue);
 
@@ -123,6 +122,49 @@ impl Uniform {
     pub fn to_shader_line(&self) -> String {
         format!("{}: {}", self.name, self.value.to_shader_line())
     }
+}
+
+fn input_slider<'a, T: Input>(
+    value: T,
+    (range, step): (std::ops::RangeInclusive<T>, T),
+) -> Element<'a, T> {
+    value_slider((range, step), value, identity)
+}
+
+fn input_slider2<'a, T: Input>(
+    v: (T, T),
+    (range, step): (std::ops::RangeInclusive<T>, T),
+) -> Element<'a, (T, T)> {
+    row![
+        value_slider((range.clone(), step), v.0, move |v0| (v0, v.1)),
+        value_slider((range, step), v.1, move |v1| (v.0, v1)),
+    ]
+    .into()
+}
+
+fn input_slider3<'a, T: Input>(
+    v: (T, T, T),
+    (range, step): (std::ops::RangeInclusive<T>, T),
+) -> Element<'a, (T, T, T)> {
+    row![
+        value_slider((range.clone(), step), v.0, move |v0| (v0, v.1, v.2)),
+        value_slider((range.clone(), step), v.1, move |v1| (v.0, v1, v.2)),
+        value_slider((range, step), v.2, move |v2| (v.0, v.1, v2)),
+    ]
+    .into()
+}
+
+fn input_slider4<'a, T: Input>(
+    v: (T, T, T, T),
+    (range, step): (std::ops::RangeInclusive<T>, T),
+) -> Element<'a, (T, T, T, T)> {
+    row![
+        value_slider((range.clone(), step), v.0, move |v0| (v0, v.1, v.2, v.3)),
+        value_slider((range.clone(), step), v.1, move |v1| (v.0, v1, v.2, v.3)),
+        value_slider((range.clone(), step), v.2, move |v2| (v.0, v.1, v2, v.3)),
+        value_slider((range, step), v.3, move |v3| (v.0, v.1, v.2, v3)),
+    ]
+    .into()
 }
 
 trait Input:
@@ -147,84 +189,60 @@ impl<T> Input for T where
 {
 }
 
-fn input_slider<'a, T: Input>(
-    value: T,
-    range: std::ops::RangeInclusive<T>,
-    step: T,
-) -> Element<'a, T> {
-    labeled_slider("", (range, step), value, identity, |value| {
-        format!("{value:.2}")
-    })
-    .into()
-}
-
-fn input_slider2<'a, T: Input>(
-    v: (T, T),
-    range: std::ops::RangeInclusive<T>,
-    step: T,
-) -> Element<'a, (T, T)> {
-    let input_slider = |value: T, set: fn((T, T), T) -> (T, T)| {
-        labeled_slider(
-            "",
-            (range.clone(), step),
-            value,
-            move |value| set(v, value),
-            |value| format!("{value:.2}",),
+fn value_slider<'a, T, Message, Renderer>(
+    (range, step): (std::ops::RangeInclusive<T>, T),
+    current: T,
+    set: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message, Theme, Renderer>
+where
+    T: Input,
+    Message: Clone + 'a,
+    Renderer: iced::advanced::text::Renderer + 'a,
+{
+    stack![
+        container(
+            slider(range, current, set)
+                .step(step)
+                .width(Length::Fill)
+                .height(24)
+                .style(slider_style)
         )
-    };
-
-    row![
-        input_slider(v.0, |(_, v1), v0| (v0, v1)),
-        input_slider(v.1, |(v0, _), v1| (v0, v1)),
+        .style(|theme| container::Style::default()
+            .background(theme.palette().background.weak.color)
+            .border(border::rounded(2))),
+        row![space::horizontal(), text(format!("{current}")).size(14)]
+            .padding([0, 10])
+            .height(Length::Fill)
+            .align_y(Alignment::Center),
     ]
     .into()
 }
 
-fn input_slider3<'a, T: Input>(
-    v: (T, T, T),
-    range: std::ops::RangeInclusive<T>,
-    step: T,
-) -> Element<'a, (T, T, T)> {
-    let input_slider = |value: T, set: fn((T, T, T), T) -> (T, T, T)| {
-        labeled_slider(
-            "",
-            (range.clone(), step),
-            value,
-            move |value| set(v, value),
-            |value| format!("{value:.2}",),
-        )
-    };
+fn slider_style(theme: &Theme, status: slider::Status) -> slider::Style {
+    let palette = theme.palette();
 
-    row![
-        input_slider(v.0, |(_, v1, v2), v0| (v0, v1, v2)),
-        input_slider(v.1, |(v0, _, v2), v1| (v0, v1, v2)),
-        input_slider(v.2, |(v0, v1, _), v2| (v0, v1, v2)),
-    ]
-    .into()
-}
-
-fn input_slider4<'a, T: Input>(
-    v: (T, T, T, T),
-    range: std::ops::RangeInclusive<T>,
-    step: T,
-) -> Element<'a, (T, T, T, T)> {
-    let input_slider = |value: T, set: fn((T, T, T, T), T) -> (T, T, T, T)| {
-        labeled_slider(
-            "",
-            (range.clone(), step),
-            value,
-            move |value| set(v, value),
-            |value| format!("{value:.2}",),
-        )
-    };
-
-    row![
-        input_slider(v.0, |(_, v1, v2, v3), v0| (v0, v1, v2, v3)),
-        input_slider(v.1, |(v0, _, v2, v3), v1| (v0, v1, v2, v3)),
-        input_slider(v.2, |(v0, v1, _, v3), v2| (v0, v1, v2, v3)),
-        input_slider(v.3, |(v0, v1, v2, _), v3| (v0, v1, v2, v3)),
-    ]
-    .into()
+    slider::Style {
+        rail: slider::Rail {
+            backgrounds: (
+                match status {
+                    slider::Status::Active | slider::Status::Dragged => {
+                        palette.background.strongest.color
+                    }
+                    slider::Status::Hovered => palette.background.stronger.color,
+                }
+                .into(),
+                Color::TRANSPARENT.into(),
+            ),
+            width: 24.0,
+            border: border::rounded(2),
+        },
+        handle: slider::Handle {
+            shape: slider::HandleShape::Circle { radius: 0.0 },
+            background: Color::TRANSPARENT.into(),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+        },
+    }
 }
 
 impl TryFrom<Candidate> for Uniform {
