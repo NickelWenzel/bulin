@@ -3,7 +3,6 @@
 - ❌ VSCode debug configs for wasm
 
 # Iced text editor enhancements
->All of this should be implemented in the iced fork an potentially be upstreamed
 - ❌ Show line numbers: research if this can be added to existing `TextEditor`
 
 # Bulin text editor enhancements
@@ -30,6 +29,9 @@
 - ❌ Add preview for blocks
 
 # Application
-- ❌ Re-enable uniforms
 - ❌ Export to shadertoy etc.
 - ❌ Text window for shader error, possibly with correct line number
+
+# Performance
+- ❌ Improve framerate
+- ❌ Optimal packing for uniforms
