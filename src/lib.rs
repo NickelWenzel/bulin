@@ -8,6 +8,7 @@ mod util;
 mod viewer;
 
 use iced::keyboard::key;
+use iced::time::Instant;
 use iced::widget::{button, center, column, container, mouse_area, opaque, stack, text};
 use iced::{Color, Element, Event, Font, Length, Subscription, Task, Theme, keyboard};
 use util::Error;
@@ -54,13 +55,13 @@ impl Application {
         }
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
         match message {
             Message::Editor(message) => match message {
                 editor::Message::UpdatePipeline(update) => {
                     Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
                 }
-                _ => self.editor.update(message).map(Message::Editor),
+                _ => self.editor.update(message, now).map(Message::Editor),
             },
             Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
             Message::Layout(message) => self.layout.update(message).map(Message::Layout),
@@ -95,7 +96,7 @@ impl Application {
                 }
 
                 self.editor
-                    .update(editor::Message::ProjectOpened)
+                    .update(editor::Message::ProjectOpened, now)
                     .map(Message::Editor)
             }
             Message::ProjectOpened(result) => {
@@ -106,7 +107,7 @@ impl Application {
                         self.file = Some(path);
                         self.editor = editor;
                         self.editor
-                            .update(editor::Message::ProjectOpened)
+                            .update(editor::Message::ProjectOpened, now)
                             .map(Message::Editor)
                     } else {
                         Task::none()

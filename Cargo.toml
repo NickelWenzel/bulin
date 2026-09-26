@@ -10,7 +10,6 @@ iced = { version = "0.15.0-dev", default-features = false, features = [
     "web-colors",
     "x11",
     "wayland",
-    "highlighter",
     "tokio",
     "debug",
     "image",
@@ -18,6 +17,8 @@ iced = { version = "0.15.0-dev", default-features = false, features = [
     "fira-sans",
 ] }
 iced_palace = "0.15.0-dev"
+scrive-core = "0.3.0"
+scrive-iced = "0.3.0"
 bytemuck = "1.23"
 rfd = "0.17.2"
 once_cell = "1.21"
@@ -38,7 +39,9 @@ console_error_panic_hook = "0.1"
 console_log = "1.0"
 
 [patch.crates-io]
-iced = { git = "https://github.com/iced-rs/iced.git" }
-iced_core = { git = "https://github.com/iced-rs/iced.git" }
-iced_widget = { git = "https://github.com/iced-rs/iced.git" }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "10e9b995eb5af74dbac08ed62b01971fe7e495b2" }
+iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "10e9b995eb5af74dbac08ed62b01971fe7e495b2" }
+iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "10e9b995eb5af74dbac08ed62b01971fe7e495b2" }
 iced_palace = { git = "https://github.com/hecrj/iced_palace.git" }
+scrive-core = { git = "https://github.com/NickelWenzel/scrive.git", rev = "6cf4f2c9e066bcf398b371719c90173fae223dbf" }
+scrive-iced = { git = "https://github.com/NickelWenzel/scrive.git", rev = "6cf4f2c9e066bcf398b371719c90173fae223dbf" }

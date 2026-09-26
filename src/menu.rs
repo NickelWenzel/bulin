@@ -4,9 +4,9 @@ use crate::text_editor;
 use iced::widget::column;
 use iced::widget::container;
 use iced::widget::rule;
-use iced::widget::text_editor::Edit;
 use iced::widget::{Button, button, text};
 use iced::{Element, Length};
+use scrive_iced::{Action, Event};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -45,19 +45,15 @@ pub fn view() -> Element<'static, Message> {
         rule::horizontal(1),
         menu_item(
             "Undo",
-            Message::Editor(editor::Message::TextEditor(
-                text_editor::Message::ActionPerformed(iced::widget::text_editor::Action::Edit(
-                    Edit::Undo
-                ))
-            )),
+            Message::Editor(editor::Message::TextEditor(text_editor::Message::Editor(
+                Event::Editor(Action::Undo)
+            ))),
         ),
         menu_item(
             "Redo",
-            Message::Editor(editor::Message::TextEditor(
-                text_editor::Message::ActionPerformed(iced::widget::text_editor::Action::Edit(
-                    Edit::Redo
-                ))
-            )),
+            Message::Editor(editor::Message::TextEditor(text_editor::Message::Editor(
+                Event::Editor(Action::Redo)
+            ))),
         )
     ])
     .width(180.0)
