@@ -5,10 +5,11 @@
 //! widget blits the freshly finished texture to the screen. Until then, the
 //! previous frame keeps being shown.
 
-use std::sync::Arc;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll, Waker};
 
-use iced::futures::executor::block_on;
 use iced::wgpu;
 use iced::widget::shader::{self};
 use tracing::{debug, warn};
@@ -32,9 +33,31 @@ struct UniformsBuffer {
     uniforms_bind_group: wgpu::BindGroup,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+type ErrorCheck = Pin<Box<dyn Future<Output = Option<wgpu::Error>> + Send>>;
+#[cfg(target_arch = "wasm32")]
+type ErrorCheck = Pin<Box<dyn Future<Output = Option<wgpu::Error>>>>;
+
+/// An offscreen pipeline for an edited shader, kept aside until its
+/// validation result arrives. Browser WebGPU only reports it after control
+/// returns to the JS event loop, so it can't be awaited within a frame.
+struct PendingOffscreen {
+    pipeline: wgpu::RenderPipeline,
+    // `wgpu::Error` isn't `Sync`, which `Pipeline` must be on native
+    error_check: Mutex<ErrorCheck>,
+}
+
+enum Validation {
+    Idle,
+    Pending,
+    Accepted,
+    Rejected,
+}
+
 pub struct Pipeline {
     // GPU objects
     offscreen: wgpu::RenderPipeline,
+    pending: Option<PendingOffscreen>,
     blit: wgpu::RenderPipeline,
     uniforms: Option<UniformsBuffer>,
 
@@ -61,12 +84,12 @@ impl shader::Pipeline for Pipeline {
         let uniforms = create_uniforms_buffer(device, empty_primitive_data.uniforms_size());
 
         // --- Offscreen pipeline (the custom shader) -----------------------
+        // The bundled empty shader is known to be valid
         let offscreen = create_offscreen_pipeline(
             device,
             uniforms.as_ref().map(|u| &u.uniforms_layout),
             &empty_primitive_data.whole_shader(),
-        )
-        .expect("This should never fail");
+        );
 
         // --- Blit pipeline (offscreen texture -> widget) ------------------
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -183,6 +206,7 @@ impl shader::Pipeline for Pipeline {
 
         Self {
             offscreen,
+            pending: None,
             blit,
             uniforms,
             targets,
@@ -241,22 +265,19 @@ impl Pipeline {
                 || (self.primitive_data.uniforms.uniforms_str
                     != primitive_data.uniforms.uniforms_str)
             {
-                let offscreen = create_offscreen_pipeline(
+                self.pending = Some(PendingOffscreen::new(
                     device,
                     self.uniforms.as_ref().map(|u| &u.uniforms_layout),
                     &primitive_data.whole_shader(),
-                );
+                ));
+            }
 
-                match offscreen {
-                    Some(offscreen) => {
-                        self.offscreen = offscreen;
-                        needs_draw = true;
-                    }
-                    None => {
-                        // Shader invalid so we do not need to draw anything
-                        needs_draw = false;
-                    }
-                }
+            // Keep displaying the last valid shader until the edited one
+            // passes validation
+            match self.validate_pending() {
+                Validation::Idle => {}
+                Validation::Accepted => needs_draw = true,
+                Validation::Pending | Validation::Rejected => needs_draw = false,
             }
 
             self.primitive_data = primitive_data;
@@ -308,6 +329,38 @@ impl Pipeline {
         }
     }
 
+    pub fn is_validating(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    fn validate_pending(&mut self) -> Validation {
+        let Some(pending) = &mut self.pending else {
+            return Validation::Idle;
+        };
+
+        let error_check = pending
+            .error_check
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
+
+        let Poll::Ready(error) = error_check
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        else {
+            return Validation::Pending;
+        };
+
+        let pending = self.pending.take().expect("checked above");
+
+        if let Some(error) = error {
+            warn!("Error creating offscreen pipeline:\n{error}");
+            Validation::Rejected
+        } else {
+            self.offscreen = pending.pipeline;
+            Validation::Accepted
+        }
+    }
+
     pub fn draw(&self, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         // iced has already set viewport + scissor to the widget bounds.
         // Just blit the front texture.
@@ -319,17 +372,31 @@ impl Pipeline {
     }
 }
 
+impl PendingOffscreen {
+    fn new(
+        device: &wgpu::Device,
+        uniforms_layout: Option<&wgpu::BindGroupLayout>,
+        shader: &str,
+    ) -> Self {
+        // Guard shader compilation *and* pipeline creation: a shader that
+        // references a bind group the layout doesn't provide only errors at
+        // pipeline creation, so popping the scope earlier would let a broken
+        // pipeline through.
+        let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let pipeline = create_offscreen_pipeline(device, uniforms_layout, shader);
+
+        Self {
+            pipeline,
+            error_check: Mutex::new(Box::pin(error_scope.pop())),
+        }
+    }
+}
+
 fn create_offscreen_pipeline(
     device: &wgpu::Device,
     uniforms_layout: Option<&wgpu::BindGroupLayout>,
     shader: &str,
-) -> Option<wgpu::RenderPipeline> {
-    // Guard shader compilation *and* pipeline creation: a shader that
-    // references a bind group the layout doesn't provide only errors at
-    // pipeline creation, so popping the scope earlier would let a broken
-    // pipeline through.
-    let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-
+) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("bulin.shader"),
         source: wgpu::ShaderSource::Wgsl(shader.into()),
@@ -343,7 +410,7 @@ fn create_offscreen_pipeline(
         })
     });
 
-    let offscreen = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("bulin.offscreen.pipeline"),
         layout: offscreen_layout.as_ref(),
         vertex: wgpu::VertexState {
@@ -363,14 +430,7 @@ fn create_offscreen_pipeline(
         multisample: wgpu::MultisampleState::default(),
         cache: None,
         multiview_mask: None,
-    });
-
-    if let Some(error) = block_on(error_scope.pop()) {
-        warn!("Error creating offscreen pipeline:\n{error}");
-        return None;
-    }
-
-    Some(offscreen)
+    })
 }
 
 fn create_uniforms_buffer(device: &wgpu::Device, size: u64) -> Option<UniformsBuffer> {

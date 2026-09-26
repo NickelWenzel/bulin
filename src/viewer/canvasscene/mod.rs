@@ -3,6 +3,7 @@ mod pipeline;
 mod uniforms;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::shader_update::{ShaderUpdate, UniformsUpdate};
 use crate::uniforms_editor::uniform::Uniform;
@@ -19,6 +20,9 @@ const VERTEX_SHADER: &str = include_str!("shaders/vertex_shader.wgsl");
 pub struct CanvasScene {
     primitive_data: Arc<PrimitiveData>,
     uniforms: Vec<Uniform>,
+    // Set on every change and cleared by the pipeline once no edited shader
+    // awaits validation, keeping frames coming until its result is applied
+    validating: Arc<AtomicBool>,
 }
 
 impl CanvasScene {
@@ -26,6 +30,7 @@ impl CanvasScene {
         Self {
             primitive_data: Arc::new(PrimitiveData::new(shader, UniformRenderData::empty())),
             uniforms: Vec::new(),
+            validating: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -34,6 +39,8 @@ impl CanvasScene {
             ShaderUpdate::Shader(shader) => self.update_shader(shader),
             ShaderUpdate::Uniforms(uniforms) => self.update_uniforms(uniforms),
         }
+
+        self.validating.store(true, Ordering::Relaxed);
     }
 
     fn update_shader(&mut self, shader: String) {
@@ -91,6 +98,18 @@ impl<Message> shader::Program<Message> for CanvasScene {
     type State = ();
     type Primitive = Primitive;
 
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        _event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<shader::Action<Message>> {
+        self.validating
+            .load(Ordering::Relaxed)
+            .then(shader::Action::request_redraw)
+    }
+
     fn draw(
         &self,
         _state: &Self::State,
@@ -99,6 +118,7 @@ impl<Message> shader::Program<Message> for CanvasScene {
     ) -> Self::Primitive {
         Primitive {
             data: self.primitive_data.clone(),
+            validating: self.validating.clone(),
         }
     }
 }
@@ -106,6 +126,7 @@ impl<Message> shader::Program<Message> for CanvasScene {
 #[derive(Debug)]
 pub struct Primitive {
     data: Arc<PrimitiveData>,
+    validating: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -223,7 +244,9 @@ impl shader::Primitive for Primitive {
         _bounds: &Rectangle,
         _viewport: &Viewport,
     ) {
-        pipeline.prepare(device, queue, self.data.clone())
+        pipeline.prepare(device, queue, self.data.clone());
+        self.validating
+            .store(pipeline.is_validating(), Ordering::Relaxed);
     }
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
