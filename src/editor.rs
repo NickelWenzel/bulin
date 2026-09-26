@@ -3,6 +3,7 @@ use crate::text_editor;
 use crate::uniforms_editor;
 
 use iced::Subscription;
+use iced::time::Instant;
 use iced::widget::container;
 use iced::{Element, Task};
 use serde::{Deserialize, Serialize};
@@ -29,13 +30,16 @@ impl Editor {
         }
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
         match message {
             Message::TextEditor(message) => match message {
                 text_editor::Message::UpdatePipeline(shader) => {
                     Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(shader)))
                 }
-                _ => self.text_editor.update(message).map(Message::TextEditor),
+                _ => self
+                    .text_editor
+                    .update(message, now)
+                    .map(Message::TextEditor),
             },
             Message::UniformsEditor(message) => match message {
                 uniforms_editor::Message::Update(message) => {
@@ -69,8 +73,11 @@ impl Editor {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        self.uniforms_editor
-            .subscription()
-            .map(Message::UniformsEditor)
+        Subscription::batch([
+            self.text_editor.subscription().map(Message::TextEditor),
+            self.uniforms_editor
+                .subscription()
+                .map(Message::UniformsEditor),
+        ])
     }
 }
