@@ -1,7 +1,7 @@
 use iced::time::Instant;
 use iced::{Subscription, Theme, event, keyboard};
-use scrive_core::SyntaxDef;
-use scrive_iced::{CodeEditor, Event};
+use matcha_core::TreeSitterDef;
+use matcha_iced::{CodeEditor, Event};
 
 use crate::shader_update::FragmentShader;
 use crate::util::{self, FileName};
@@ -14,8 +14,6 @@ use iced::{
 use serde::{Deserialize, Serialize};
 
 use std::sync::Arc;
-
-const WGSL_SYNTAX: &str = include_str!("../../assets/WGSL.sublime-syntax");
 
 #[derive(Serialize, Deserialize)]
 pub struct TextEditor {
@@ -33,10 +31,11 @@ fn default_editor() -> CodeEditor {
 }
 
 fn wgsl_editor(source: &str) -> CodeEditor {
-    let wgsl = SyntaxDef::from_sublime_syntax(WGSL_SYNTAX).expect("bundled WGSL grammar parses");
+    let wesl = TreeSitterDef::new(tree_sitter_wesl::LANGUAGE, tree_sitter_wesl::HIGHLIGHTS_QUERY)
+        .expect("tree-sitter-wesl's highlights query compiles");
 
     CodeEditor::new(source)
-        .language(wgsl)
+        .language(wesl)
         .line_comment(Some("//"))
 }
 
@@ -174,7 +173,7 @@ impl TextEditor {
         ])
     }
 
-    // matches the bundled Scrive Dark syntax theme
+    // matches the bundled Matcha Dark syntax theme
     pub fn theme(&self) -> Theme {
         Theme::Dark
     }

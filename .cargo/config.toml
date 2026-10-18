@@ -1,3 +1,11 @@
 # It's recommended to set the flag on a per-target basis:
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+[env]
+# tree-sitter-wesl 0.1.0's scanner.c calls sprintf in valids(), a logging-only
+# helper it never calls. tree-sitter-language's wasm libc shim has no sprintf,
+# so the implicit declaration is an error; clang drops the unused static helper,
+# so no sprintf reaches the binary. Remove once upstream gates valids() behind
+# ENABLE_LOGGING.
+CFLAGS_wasm32_unknown_unknown = "-Wno-implicit-function-declaration"

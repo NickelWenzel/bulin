@@ -21,6 +21,6 @@ fn main() -> iced::Result {
         include_bytes!("../fonts/icons.ttf").as_slice(),
         include_bytes!("../fonts/menu.ttf").as_slice(),
     ])
-    .fonts(scrive_iced::required_fonts().iter().copied())
+    .fonts(matcha_iced::required_fonts().iter().copied())
     .run()
 }
