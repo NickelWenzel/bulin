@@ -6,7 +6,7 @@ use iced::widget::container;
 use iced::widget::rule;
 use iced::widget::{Button, button, text};
 use iced::{Element, Length};
-use scrive_iced::{Action, Event};
+use matcha_iced::{Action, Event};
 
 #[derive(Debug, Clone)]
 pub enum Message {
