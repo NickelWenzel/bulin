@@ -1,5 +1,5 @@
 use crate::editor;
-use crate::text_editor;
+use crate::shader;
 
 use iced::widget::column;
 use iced::widget::container;
@@ -21,21 +21,19 @@ pub fn view() -> Element<'static, Message> {
     container(column![
         menu_item(
             "Open File",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::OpenFile))
+            Message::Editor(editor::Message::TextEditor(shader::Message::OpenFile))
         ),
         menu_item(
             "New File",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::NewFile))
+            Message::Editor(editor::Message::TextEditor(shader::Message::NewFile))
         ),
         menu_item(
             "Save File",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::SaveFile))
+            Message::Editor(editor::Message::TextEditor(shader::Message::SaveFile))
         ),
         menu_item(
             "Save File as",
-            Message::Editor(editor::Message::TextEditor(
-                text_editor::Message::SaveFileAs
-            ))
+            Message::Editor(editor::Message::TextEditor(shader::Message::SaveFileAs))
         ),
         rule::horizontal(1),
         menu_item("Open Project", Message::OpenProject),
@@ -45,13 +43,13 @@ pub fn view() -> Element<'static, Message> {
         rule::horizontal(1),
         menu_item(
             "Undo",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::Editor(
+            Message::Editor(editor::Message::TextEditor(shader::Message::Editor(
                 Event::Editor(Action::Undo)
             ))),
         ),
         menu_item(
             "Redo",
-            Message::Editor(editor::Message::TextEditor(text_editor::Message::Editor(
+            Message::Editor(editor::Message::TextEditor(shader::Message::Editor(
                 Event::Editor(Action::Redo)
             ))),
         )

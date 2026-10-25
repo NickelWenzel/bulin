@@ -1,23 +1,21 @@
-// mod pipeline;
+//! The shader preview: renders the edited shader with its uniforms.
+
 mod pipeline;
-mod uniforms;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::shader_update::{ShaderUpdate, UniformsUpdate};
-use crate::uniforms_editor::uniform::Uniform;
+use crate::uniforms::uniform::Uniform;
 
-use iced::wgpu;
+use iced::widget::shader;
+use iced::widget::shader::Viewport;
+use iced::{Element, Fill, Rectangle, mouse, wgpu};
 
-use iced::Rectangle;
-use iced::mouse;
-use iced::widget::shader::{self, Viewport};
+const EMPTY_FRAG_WGSL: &str = include_str!("viewer/shaders/empty_frag.wgsl");
+const VERTEX_SHADER: &str = include_str!("viewer/shaders/vertex_shader.wgsl");
 
-const EMPTY_FRAG_WGSL: &str = include_str!("shaders/empty_frag.wgsl");
-const VERTEX_SHADER: &str = include_str!("shaders/vertex_shader.wgsl");
-
-pub struct CanvasScene {
+pub struct State {
     primitive_data: Arc<PrimitiveData>,
     uniforms: Vec<Uniform>,
     // Set on every change and cleared by the pipeline once no edited shader
@@ -25,7 +23,12 @@ pub struct CanvasScene {
     validating: Arc<AtomicBool>,
 }
 
-impl CanvasScene {
+#[derive(Debug, Clone)]
+pub enum Message {
+    UpdatePipeline(ShaderUpdate),
+}
+
+impl State {
     pub fn new(shader: String) -> Self {
         Self {
             primitive_data: Arc::new(PrimitiveData::new(shader, UniformRenderData::empty())),
@@ -34,13 +37,19 @@ impl CanvasScene {
         }
     }
 
-    pub fn update(&mut self, message: ShaderUpdate) {
+    pub fn update(&mut self, message: Message) {
         match message {
-            ShaderUpdate::Shader(shader) => self.update_shader(shader),
-            ShaderUpdate::Uniforms(uniforms) => self.update_uniforms(uniforms),
+            Message::UpdatePipeline(ShaderUpdate::Shader(shader)) => self.update_shader(shader),
+            Message::UpdatePipeline(ShaderUpdate::Uniforms(uniforms)) => {
+                self.update_uniforms(uniforms)
+            }
         }
 
         self.validating.store(true, Ordering::Relaxed);
+    }
+
+    pub fn view(&self) -> Element<'_, Message> {
+        shader(self).width(Fill).height(Fill).into()
     }
 
     fn update_shader(&mut self, shader: String) {
@@ -77,13 +86,6 @@ impl CanvasScene {
                     ));
                 }
             }
-            UniformsUpdate::Clear => {
-                self.uniforms.clear();
-                self.primitive_data = Arc::new(PrimitiveData::new(
-                    self.primitive_data.shader.clone(),
-                    UniformRenderData::empty(),
-                ));
-            }
             UniformsUpdate::Reset(uniforms) => {
                 self.primitive_data = Arc::new(PrimitiveData::new(
                     self.primitive_data.shader.clone(),
@@ -94,7 +96,7 @@ impl CanvasScene {
     }
 }
 
-impl<Message> shader::Program<Message> for CanvasScene {
+impl<Message> shader::Program<Message> for State {
     type State = ();
     type Primitive = Primitive;
 
@@ -257,7 +259,7 @@ impl shader::Primitive for Primitive {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::uniforms_editor::uniform::Type;
+    use crate::uniforms::uniform::Type;
 
     fn uniform(value: Type) -> Uniform {
         Uniform {

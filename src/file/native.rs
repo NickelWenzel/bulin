@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use super::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileName(PathBuf);
+pub struct Name(PathBuf);
 
-impl FileName {
+impl Name {
     pub fn as_str(&self) -> Option<&str> {
         self.0.to_str()
     }
@@ -19,13 +19,13 @@ impl FileName {
 }
 
 #[cfg(test)]
-impl From<&str> for FileName {
+impl From<&str> for Name {
     fn from(path: &str) -> Self {
         Self(PathBuf::from(path))
     }
 }
 
-pub async fn open_file() -> Result<(FileName, Arc<String>), Error> {
+pub async fn open_file() -> Result<(Name, Arc<String>), Error> {
     let picked_file = rfd::AsyncFileDialog::new()
         .set_title("Open a text file...")
         .pick_file()
@@ -36,12 +36,12 @@ pub async fn open_file() -> Result<(FileName, Arc<String>), Error> {
 
     tokio::fs::read_to_string(&path)
         .await
-        .map(|contents| (FileName(path), Arc::new(contents)))
+        .map(|contents| (Name(path), Arc::new(contents)))
         .map_err(Arc::new)
         .map_err(Error::Io)
 }
 
-pub async fn save_file(path: Option<FileName>, contents: String) -> Result<FileName, Error> {
+pub async fn save_file(path: Option<Name>, contents: String) -> Result<Name, Error> {
     let path = if let Some(path) = path {
         path.0
     } else {
@@ -56,7 +56,7 @@ pub async fn save_file(path: Option<FileName>, contents: String) -> Result<FileN
 
     tokio::fs::write(&path, contents)
         .await
-        .map(|()| FileName(path))
+        .map(|()| Name(path))
         .map_err(Arc::new)
         .map_err(Error::Io)
 }

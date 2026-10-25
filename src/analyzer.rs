@@ -17,7 +17,7 @@ use native::Link;
 #[cfg(target_arch = "wasm32")]
 use web::Link;
 
-use crate::util::FileName;
+use crate::file;
 
 /// The workspace manifest. `root = "."` keeps the documents at the workspace root instead of
 /// the default `./shaders`.
@@ -72,8 +72,8 @@ impl Analyzer {
 
     /// The URI under which `file` is analyzed: its name inside the workspace, with a `.wgsl`
     /// extension added when it has neither `.wgsl` nor `.wesl`.
-    pub fn document_uri(&self, file: Option<&FileName>) -> Uri {
-        let name = file.and_then(FileName::file_name).unwrap_or(UNTITLED);
+    pub fn document_uri(&self, file: Option<&file::Name>) -> Uri {
+        let name = file.and_then(file::Name::file_name).unwrap_or(UNTITLED);
         let name = if name.ends_with(".wgsl") || name.ends_with(".wesl") {
             name.to_owned()
         } else {
@@ -100,7 +100,7 @@ mod tests {
     use matcha_iced::lsp::{Update, update};
 
     use super::Analyzer;
-    use crate::util::FileName;
+    use crate::file;
 
     #[test]
     fn analyzer_reports_a_type_error() {
@@ -140,7 +140,7 @@ mod tests {
     fn documents_are_named_after_their_file_inside_the_workspace() {
         let (analyzer, _events) = Analyzer::start();
         let uri = |file: Option<&str>| {
-            let file = file.map(FileName::from);
+            let file = file.map(file::Name::from);
             analyzer.document_uri(file.as_ref()).to_string()
         };
         let root = analyzer.root.to_string();
