@@ -1,3 +1,5 @@
+use matcha_iced::lsp::{client, update};
+
 use crate::analyzer::Analyzer;
 use crate::shader_update::ShaderUpdate;
 use crate::text_editor;
@@ -31,7 +33,12 @@ impl Editor {
         }
     }
 
-    pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
+    pub fn update(
+        &mut self,
+        message: Message,
+        now: Instant,
+        analyzer: &mut Analyzer,
+    ) -> Task<Message> {
         match message {
             Message::TextEditor(message) => match message {
                 text_editor::Message::UpdatePipeline(shader) => {
@@ -39,7 +46,7 @@ impl Editor {
                 }
                 _ => self
                     .text_editor
-                    .update(message, now)
+                    .update(message, now, analyzer)
                     .map(Message::TextEditor),
             },
             Message::UniformsEditor(message) => match message {
@@ -51,20 +58,26 @@ impl Editor {
                     .update(message)
                     .map(Message::UniformsEditor),
             },
-            Message::ProjectOpened => Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(
-                self.text_editor.content(),
-            )))
-            .chain(Task::done(Message::UpdatePipeline(ShaderUpdate::Uniforms(
-                crate::shader_update::UniformsUpdate::Reset(self.uniforms_editor.uniforms()),
-            )))),
+            Message::ProjectOpened => {
+                self.text_editor.open_lsp(analyzer);
+
+                Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(
+                    self.text_editor.content(),
+                )))
+                .chain(Task::done(Message::UpdatePipeline(
+                    ShaderUpdate::Uniforms(crate::shader_update::UniformsUpdate::Reset(
+                        self.uniforms_editor.uniforms(),
+                    )),
+                )))
+            }
             Message::UpdatePipeline(_) => Task::none(),
         }
     }
 
-    pub fn view(&'_ self) -> Element<'_, Message> {
+    pub fn view(&self, analyzer: &client::Status) -> Element<'_, Message> {
         container(iced::widget::column![
             self.uniforms_editor.view().map(Message::UniformsEditor),
-            self.text_editor.view().map(Message::TextEditor),
+            self.text_editor.view(analyzer).map(Message::TextEditor),
         ])
         .into()
     }
@@ -72,6 +85,22 @@ impl Editor {
     /// Opens the shader on the language server.
     pub fn open_lsp(&mut self, analyzer: &mut Analyzer) {
         self.text_editor.open_lsp(analyzer);
+    }
+
+    /// Closes the shader on the language server.
+    pub fn close_lsp(&mut self, analyzer: &mut Analyzer) {
+        self.text_editor.close_lsp(analyzer);
+    }
+
+    /// Applies what the language server sent for the shader.
+    pub fn apply_lsp(
+        &mut self,
+        analyzer: &mut Analyzer,
+        document: update::Document,
+    ) -> Task<Message> {
+        self.text_editor
+            .apply_lsp(analyzer, document)
+            .map(Message::TextEditor)
     }
 
     pub fn text(&self) -> &text_editor::TextEditor {

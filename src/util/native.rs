@@ -18,6 +18,13 @@ impl FileName {
     }
 }
 
+#[cfg(test)]
+impl From<&str> for FileName {
+    fn from(path: &str) -> Self {
+        Self(PathBuf::from(path))
+    }
+}
+
 pub async fn open_file() -> Result<(FileName, Arc<String>), Error> {
     let picked_file = rfd::AsyncFileDialog::new()
         .set_title("Open a text file...")

@@ -8,7 +8,7 @@ mod native;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
-use matcha_iced::lsp::client::Events;
+use matcha_iced::lsp::client::{self, Events};
 use matcha_iced::lsp::gen_lsp_types::Uri;
 use matcha_iced::lsp::{Client, lsp_server};
 
@@ -49,6 +49,10 @@ impl Analyzer {
         &mut self.client
     }
 
+    pub fn status(&self) -> &client::Status {
+        self.client.status()
+    }
+
     /// Hands the server whatever the client queued since the last call.
     ///
     /// The host calls this after every update because a server in a web worker can only be
@@ -87,6 +91,7 @@ mod tests {
     use matcha_iced::lsp::{Update, update};
 
     use super::Analyzer;
+    use crate::util::FileName;
 
     #[test]
     fn analyzer_reports_a_type_error() {
@@ -120,5 +125,24 @@ mod tests {
                 None => thread::sleep(Duration::from_millis(10)),
             }
         }
+    }
+
+    #[test]
+    fn documents_are_named_after_their_file_inside_the_workspace() {
+        let (analyzer, _events) = Analyzer::start();
+        let uri = |file: Option<&str>| {
+            let file = file.map(FileName::from);
+            analyzer.document_uri(file.as_ref()).to_string()
+        };
+        let root = analyzer.root.to_string();
+
+        assert_eq!(uri(None), format!("{root}untitled.wgsl"));
+        assert_eq!(uri(Some("/a/b/sky.wgsl")), format!("{root}sky.wgsl"));
+        assert_eq!(uri(Some("/a/b/sky.wesl")), format!("{root}sky.wesl"));
+        assert_eq!(uri(Some("/a/b/sky.frag")), format!("{root}sky.frag.wgsl"));
+        assert_eq!(
+            uri(Some("/a/b/my sky#1.wgsl")),
+            format!("{root}my%20sky%231.wgsl")
+        );
     }
 }

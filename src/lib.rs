@@ -74,7 +74,10 @@ impl Application {
                 editor::Message::UpdatePipeline(update) => {
                     Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
                 }
-                _ => self.editor.update(message, now).map(Message::Editor),
+                _ => self
+                    .editor
+                    .update(message, now, &mut self.analyzer)
+                    .map(Message::Editor),
             },
             Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
             Message::Layout(message) => self.layout.update(message).map(Message::Layout),
@@ -103,24 +106,28 @@ impl Application {
                 }
             }
             Message::NewProject => {
-                if !self.is_loading {
+                if self.is_loading {
+                    Task::none()
+                } else {
+                    self.editor.close_lsp(&mut self.analyzer);
                     self.file = None;
                     self.editor = editor::Editor::new("");
-                }
 
-                self.editor
-                    .update(editor::Message::ProjectOpened, now)
-                    .map(Message::Editor)
+                    self.editor
+                        .update(editor::Message::ProjectOpened, now, &mut self.analyzer)
+                        .map(Message::Editor)
+                }
             }
             Message::ProjectOpened(result) => {
                 self.is_loading = false;
 
                 if let Ok((path, contents)) = result {
                     if let Ok(editor) = serde_json::from_str(&contents) {
+                        self.editor.close_lsp(&mut self.analyzer);
                         self.file = Some(path);
                         self.editor = editor;
                         self.editor
-                            .update(editor::Message::ProjectOpened, now)
+                            .update(editor::Message::ProjectOpened, now, &mut self.analyzer)
                             .map(Message::Editor)
                     } else {
                         Task::none()
@@ -169,21 +176,30 @@ impl Application {
                 _ => Task::none(),
             },
             Message::Analyzer(event) => {
+                let mut tasks = Vec::new();
                 for update in self.analyzer.client().receive(event) {
                     match update {
+                        lsp::Update::Document(document) => tasks.push(
+                            self.editor
+                                .apply_lsp(&mut self.analyzer, document)
+                                .map(Message::Editor),
+                        ),
                         lsp::Update::Status(status) => tracing::info!("wgsl-analyzer: {status:?}"),
+                        lsp::Update::Log(entry) if entry.is_shown() => {
+                            tracing::info!("wgsl-analyzer: {}", entry.text())
+                        }
                         lsp::Update::Log(entry) => {
                             tracing::debug!("wgsl-analyzer: {}", entry.text())
                         }
                         lsp::Update::Error(error) => tracing::warn!("wgsl-analyzer: {error}"),
-                        lsp::Update::Document(_)
-                        | lsp::Update::FileEdits(_)
+                        // Renames only reach the open shader, so edits for other files never come.
+                        lsp::Update::FileEdits(_)
                         | lsp::Update::Notification(_)
                         | lsp::Update::Trace(_) => {}
                     }
                 }
 
-                Task::none()
+                Task::batch(tasks)
             }
         };
 
@@ -196,7 +212,10 @@ impl Application {
             .layout
             .view(|_, pane, _| match pane {
                 layout::PaneContent::Editor => (
-                    self.editor.view().map(Message::Editor).into(),
+                    self.editor
+                        .view(self.analyzer.status())
+                        .map(Message::Editor)
+                        .into(),
                     self.editor
                         .text()
                         .filename_display_text()
