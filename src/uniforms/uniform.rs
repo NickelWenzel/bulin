@@ -1,218 +1,36 @@
-//! Runtime-defined shader uniform types and editor controls.
-//!
-//! Each [`Type`] has two representations: its WGSL member declaration and the
-//! numeric payload written to the GPU uniform buffer. Those representations must
-//! agree on both size and alignment. Payloads cannot simply be concatenated.
-//!
-//! For example, a `Float` followed by a `Col4` is laid out as follows because a
-//! WGSL `vec4<f32>` must begin at a 16-byte-aligned offset:
-//!
-//! ```text
-//! byte       0       4       8      12      16      20      24      28      32
-//!            +-------+-------+-------+-------+-------+-------+-------+-------+
-//! contents   | float |  pad  |  pad  |  pad  |   R   |   G   |   B   |   A   |
-//!            +-------+-------+-------+-------+-------+-------+-------+-------+
-//! ```
-//!
-//! A three-component vector has size 12 but alignment 16. It is therefore not
-//! unconditionally padded to 16 bytes: a following scalar can occupy byte offset
-//! 12. Padding is determined by the complete member sequence in
-//! `viewer::canvasscene::to_uniforms_bytes`, while this module supplies each
-//! member's layout metadata and payload bytes.
-//!
-//! See `docs/architecture/uniform-buffer-layout.md` for the full data flow,
-//! before-and-after diagrams, and extension invariants.
+//! The controls for one uniform and the row that adds new ones.
 
 use std::convert::identity;
 
 use iced::{
-    Alignment, Color, Element, Length, Task, Theme, border,
+    Alignment, Color, Element, Length, Theme, border,
     widget::{column, combo_box, container, row, slider, space, stack, text, text_input},
 };
 
-use serde::{Deserialize, Serialize};
+use crate::core::uniform::{Type, Uniform, Uniforms};
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    ChangeValue(Type),
-    ChangeName(String),
-}
+/// A uniform's name and sliders for its value.
+pub fn view(uniform: &Uniform) -> Element<'_, Type> {
+    let fr = -100.0..=100.0;
+    let fs = 0.1;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-pub enum Type {
-    Int(i32),
-    Float(f32),
-    VecFloat2((f32, f32)),
-    VecFloat3((f32, f32, f32)),
-    Col3((f32, f32, f32)),
-    VecFloat4((f32, f32, f32, f32)),
-    Col4((f32, f32, f32, f32)),
-    VecInt2((i32, i32)),
-    VecInt3((i32, i32, i32)),
-    VecInt4((i32, i32, i32, i32)),
-}
+    let ir = -100..=100;
+    let is = 1;
 
-impl Type {
-    pub const ALL: [Type; 10] = [
-        Type::Int(0),
-        Type::Float(0.0),
-        Type::VecFloat2((0.0, 0.0)),
-        Type::VecFloat3((0.0, 0.0, 0.0)),
-        Type::Col3((0.5, 0.5, 0.5)),
-        Type::VecFloat4((0.0, 0.0, 0.0, 0.0)),
-        Type::Col4((0.5, 0.5, 0.5, 1.0)),
-        Type::VecInt2((0, 0)),
-        Type::VecInt3((0, 0, 0)),
-        Type::VecInt4((0, 0, 0, 0)),
-    ];
+    let value = match uniform.value {
+        Type::Int(value) => input_slider(value, (ir, is)).map(Type::Int),
+        Type::Float(value) => input_slider(value, (fr, fs)).map(Type::Float),
+        Type::VecFloat2(value) => input_slider2(value, (fr, fs)).map(Type::VecFloat2),
+        Type::VecFloat3(value) => input_slider3(value, (fr, fs)).map(Type::VecFloat3),
+        Type::Col3(value) => input_slider3(value, (0.0..=1.0, 0.05)).map(Type::Col3),
+        Type::VecFloat4(value) => input_slider4(value, (fr, fs)).map(Type::VecFloat4),
+        Type::Col4(value) => input_slider4(value, (0.0..=1.0, 0.05)).map(Type::Col4),
+        Type::VecInt2(value) => input_slider2(value, (ir, is)).map(Type::VecInt2),
+        Type::VecInt3(value) => input_slider3(value, (ir, is)).map(Type::VecInt3),
+        Type::VecInt4(value) => input_slider4(value, (ir, is)).map(Type::VecInt4),
+    };
 
-    pub fn to_shader_line(self) -> String {
-        match self {
-            Self::Int(_) => String::from("i32"),
-            Self::Float(_) => String::from("f32"),
-            Self::VecFloat2(_) => String::from("vec2<f32>"),
-            Self::VecFloat3(_) => String::from("vec3<f32>"),
-            Self::Col3(_) => String::from("vec3<f32>"),
-            Self::VecFloat4(_) => String::from("vec4<f32>"),
-            Self::Col4(_) => String::from("vec4<f32>"),
-            Self::VecInt2(_) => String::from("vec2<i32>"),
-            Self::VecInt3(_) => String::from("vec3<i32>"),
-            Self::VecInt4(_) => String::from("vec4<i32>"),
-        }
-    }
-
-    /// Returns the WGSL payload size, excluding contextual structure padding.
-    pub(crate) fn wgsl_size(self) -> usize {
-        match self {
-            Self::Int(_) | Self::Float(_) => 4,
-            Self::VecFloat2(_) | Self::VecInt2(_) => 8,
-            Self::VecFloat3(_) | Self::Col3(_) | Self::VecInt3(_) => 12,
-            Self::VecFloat4(_) | Self::Col4(_) | Self::VecInt4(_) => 16,
-        }
-    }
-
-    /// Returns the alignment required for this member's offset in a WGSL struct.
-    pub(crate) fn wgsl_alignment(self) -> usize {
-        match self {
-            Self::Int(_) | Self::Float(_) => 4,
-            Self::VecFloat2(_) | Self::VecInt2(_) => 8,
-            Self::VecFloat3(_)
-            | Self::Col3(_)
-            | Self::VecInt3(_)
-            | Self::VecFloat4(_)
-            | Self::Col4(_)
-            | Self::VecInt4(_) => 16,
-        }
-    }
-
-    /// Appends only the variant payload in WGSL's little-endian representation.
-    ///
-    /// The caller is responsible for inserting member and trailing structure
-    /// padding based on [`Self::wgsl_alignment`]. The enum discriminant is never
-    /// written.
-    pub(crate) fn write_payload(self, bytes: &mut Vec<u8>) {
-        match self {
-            Self::Int(value) => bytes.extend_from_slice(&value.to_le_bytes()),
-            Self::Float(value) => bytes.extend_from_slice(&value.to_le_bytes()),
-            Self::VecFloat2(value) => {
-                bytes.extend_from_slice(&value.0.to_le_bytes());
-                bytes.extend_from_slice(&value.1.to_le_bytes());
-            }
-            Self::VecFloat3(value) | Self::Col3(value) => {
-                bytes.extend_from_slice(&value.0.to_le_bytes());
-                bytes.extend_from_slice(&value.1.to_le_bytes());
-                bytes.extend_from_slice(&value.2.to_le_bytes());
-            }
-            Self::VecFloat4(value) | Self::Col4(value) => {
-                bytes.extend_from_slice(&value.0.to_le_bytes());
-                bytes.extend_from_slice(&value.1.to_le_bytes());
-                bytes.extend_from_slice(&value.2.to_le_bytes());
-                bytes.extend_from_slice(&value.3.to_le_bytes());
-            }
-            Self::VecInt2(value) => {
-                bytes.extend_from_slice(&value.0.to_le_bytes());
-                bytes.extend_from_slice(&value.1.to_le_bytes());
-            }
-            Self::VecInt3(value) => {
-                bytes.extend_from_slice(&value.0.to_le_bytes());
-                bytes.extend_from_slice(&value.1.to_le_bytes());
-                bytes.extend_from_slice(&value.2.to_le_bytes());
-            }
-            Self::VecInt4(value) => {
-                bytes.extend_from_slice(&value.0.to_le_bytes());
-                bytes.extend_from_slice(&value.1.to_le_bytes());
-                bytes.extend_from_slice(&value.2.to_le_bytes());
-                bytes.extend_from_slice(&value.3.to_le_bytes());
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Int(_) => "Int",
-            Self::Float(_) => "Float",
-            Self::VecFloat2(_) => "VecFloat2",
-            Self::VecFloat3(_) => "VecFloat3",
-            Self::Col3(_) => "Col3",
-            Self::VecFloat4(_) => "VecFloat4",
-            Self::Col4(_) => "Col4",
-            Self::VecInt2(_) => "VecInt2",
-            Self::VecInt3(_) => "VecInt3",
-            Self::VecInt4(_) => "VecInt4",
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Uniform {
-    pub value: Type,
-    pub name: String,
-}
-
-impl Uniform {
-    pub fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::ChangeValue(value) => {
-                self.value = value;
-                Task::none()
-            }
-            Message::ChangeName(name) => {
-                self.name = name;
-                Task::none()
-            }
-        }
-    }
-
-    pub fn view(&'_ self) -> Element<'_, Message> {
-        let fr = -100.0..=100.0;
-        let fs = 0.1;
-
-        let ir = -100..=100;
-        let is = 1;
-
-        let name = text(&self.name);
-        let value_view = match self.value {
-            Type::Int(value) => input_slider(value, (ir, is)).map(Type::Int),
-            Type::Float(value) => input_slider(value, (fr, fs)).map(Type::Float),
-            Type::VecFloat2(value) => input_slider2(value, (fr, fs)).map(Type::VecFloat2),
-            Type::VecFloat3(value) => input_slider3(value, (fr, fs)).map(Type::VecFloat3),
-            Type::Col3(value) => input_slider3(value, (0.0..=1.0, 0.05)).map(Type::Col3),
-            Type::VecFloat4(value) => input_slider4(value, (fr, fs)).map(Type::VecFloat4),
-            Type::Col4(value) => input_slider4(value, (0.0..=1.0, 0.05)).map(Type::Col4),
-            Type::VecInt2(value) => input_slider2(value, (ir, is)).map(Type::VecInt2),
-            Type::VecInt3(value) => input_slider3(value, (ir, is)).map(Type::VecInt3),
-            Type::VecInt4(value) => input_slider4(value, (ir, is)).map(Type::VecInt4),
-        }
-        .map(Message::ChangeValue);
-
-        row![name, space::horizontal(), value_view].into()
-    }
-
-    pub fn to_shader_line(&self) -> String {
-        format!("{}: {}", self.name, self.value.to_shader_line())
-    }
+    row![text(uniform.name()), space::horizontal(), value].into()
 }
 
 fn input_slider<'a, T: Input>(
@@ -336,25 +154,10 @@ fn slider_style(theme: &Theme, status: slider::Status) -> slider::Style {
     }
 }
 
-impl TryFrom<Candidate> for Uniform {
-    type Error = &'static str;
-
-    fn try_from(candidate: Candidate) -> Result<Self, Self::Error> {
-        if let Some(value) = candidate.current_type {
-            Ok(Self {
-                value,
-                name: candidate.name,
-            })
-        } else {
-            Err("Value not present.")
-        }
-    }
-}
-
-#[derive(Clone)]
+/// The row for naming and typing a new uniform.
 pub struct Candidate {
     types: combo_box::State<Type>,
-    pub current_type: Option<Type>,
+    pub value: Type,
     pub name: String,
 }
 
@@ -368,37 +171,34 @@ impl Candidate {
     pub fn new() -> Self {
         Self {
             types: combo_box::State::new(Type::ALL.to_vec()),
-            current_type: Some(Type::Float(0.0)),
+            value: Type::Float(0.0),
             name: String::default(),
         }
     }
 
-    pub fn view<'a>(&'a self) -> Element<'a, CandidateMessage> {
-        let upper_left = row![
+    /// The input row, with why the typed name can't be added below it.
+    pub fn view<'a>(&'a self, uniforms: &Uniforms) -> Element<'a, CandidateMessage> {
+        let input = row![
             text_input("Name...", &self.name).on_input(CandidateMessage::NameChanged),
             combo_box(
                 &self.types,
                 "Select type",
-                self.current_type.as_ref(),
+                Some(&self.value),
                 CandidateMessage::Selected,
             ),
         ];
-        let lower_left = row![];
-        column![upper_left, lower_left]
-            .height(Length::Shrink)
-            .into()
+        let problem = match uniforms.check(&self.name) {
+            Err(error) if !self.name.is_empty() => Some(text(error.to_string()).size(12)),
+            _ => None,
+        };
+
+        column![input].push(problem).height(Length::Shrink).into()
     }
 
-    pub fn update(&mut self, message: CandidateMessage) -> Task<CandidateMessage> {
+    pub fn update(&mut self, message: CandidateMessage) {
         match message {
-            CandidateMessage::Selected(value) => {
-                self.current_type = Some(value);
-                Task::none()
-            }
-            CandidateMessage::NameChanged(name) => {
-                self.name = name;
-                Task::none()
-            }
+            CandidateMessage::Selected(value) => self.value = value,
+            CandidateMessage::NameChanged(name) => self.name = name,
         }
     }
 }

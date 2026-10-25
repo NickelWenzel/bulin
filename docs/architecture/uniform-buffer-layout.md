@@ -14,7 +14,7 @@ rounds the final structure size up to the structure's alignment.
 
 ```mermaid
 flowchart LR
-    Editor[Uniform editor] --> Types["Vec&lt;Uniform&gt;"]
+    Editor[Uniform editor] --> Types["Program: time + Uniforms"]
     Types --> Declaration[WGSL Customs declaration]
     Types --> Layout[Alignment-aware byte writer]
     Declaration --> Pipeline[Shader pipeline]
@@ -23,10 +23,10 @@ flowchart LR
     Buffer --> Read
 ```
 
-The implementation is split between [`Type`](../../src/uniforms_editor/uniform.rs),
-which knows how an individual value is represented, and the
-[canvas-scene serializer](../../src/viewer/canvasscene/mod.rs), which lays out the
-complete runtime-defined structure.
+Both representations live in the core crate. [`Type`](../../core/src/uniform.rs) knows how
+an individual value is represented and `pack` lays out a whole struct.
+[`Program`](../../core/src/program.rs) builds the declaration and the bytes from the same
+member list: the built-in `time` first when it is on, then the user's uniforms in order.
 
 ## WGSL layout rules used by Bulin
 
@@ -157,9 +157,9 @@ contents   | inten |  0x0  |  0x0  |  0x0  |   R   |   G   |   B   |   A   |
            +-------+-------+-------+-------+-------+-------+-------+-------+
 ```
 
-This layout is recalculated whenever the runtime uniform list changes. Existing
-pipeline logic compares the resulting buffer size and declaration text, then
-recreates the buffer or shader pipeline when required.
+The viewer recomputes both whenever it loads a new program. The pipeline compares the
+resulting buffer size, bytes and WGSL text, then recreates the buffer or shader pipeline
+when required.
 
 ## Invariants and verification
 
