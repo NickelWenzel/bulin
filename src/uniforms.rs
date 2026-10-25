@@ -5,8 +5,8 @@ use crate::shader_update::*;
 use uniform::*;
 
 use iced::{
-    widget::{button, row, space},
     Element, Subscription, Task,
+    widget::{button, row, space},
 };
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
@@ -24,7 +24,7 @@ pub enum Message {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct UniformsEditor {
+pub struct State {
     uniforms: Vec<EditorUniform>,
     #[serde(skip, default = "Candidate::new")]
     candidate: Candidate,
@@ -37,7 +37,7 @@ pub struct EditorUniform {
     visible: bool,
 }
 
-impl UniformsEditor {
+impl State {
     pub fn new() -> Self {
         Self {
             uniforms: Vec::new(),

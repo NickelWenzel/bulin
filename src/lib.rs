@@ -1,30 +1,27 @@
 mod analyzer;
 mod editor;
+mod file;
 mod layout;
 mod menu;
+mod shader;
 mod shader_update;
-mod text_editor;
-mod uniforms_editor;
-mod util;
+mod uniforms;
 mod viewer;
 
 use iced::keyboard::key;
 use iced::time::Instant;
 use iced::widget::{button, center, column, container, mouse_area, opaque, stack, text};
-use iced::{Color, Element, Event, Font, Length, Subscription, Task, Theme, keyboard};
+use iced::{Color, Element, Event, Font, Length, Subscription, Task, Theme, event, keyboard};
 use matcha_iced::lsp;
-use util::Error;
 
 use std::sync::Arc;
-
-use crate::util::FileName;
 
 pub struct Application {
     analyzer: analyzer::Analyzer,
     editor: editor::Editor,
-    viewer: viewer::Viewer,
-    layout: layout::Layout,
-    file: Option<FileName>,
+    viewer: viewer::State,
+    layout: layout::State,
+    file: Option<file::Name>,
     is_loading: bool,
     show_menu: bool,
 }
@@ -39,17 +36,16 @@ pub enum Message {
     Menu(menu::Message),
     OpenProject,
     NewProject,
-    ProjectOpened(Result<(FileName, Arc<String>), Error>),
+    ProjectOpened(Result<(file::Name, Arc<String>), file::Error>),
     SaveProject,
     SaveProjectAs,
-    ProjectSaved(Result<FileName, Error>),
-    Event(Event),
+    ProjectSaved(Result<file::Name, file::Error>),
     Analyzer(lsp::client::Event),
 }
 
 impl Application {
     pub fn new() -> (Self, Task<Message>) {
-        let shader = include_str!("viewer/canvasscene/shaders/empty_frag.wgsl");
+        let shader = include_str!("viewer/shaders/empty_frag.wgsl");
         let (mut analyzer, events) = analyzer::Analyzer::start();
         let mut editor = editor::Editor::new(shader);
         editor.open_lsp(&mut analyzer);
@@ -58,8 +54,8 @@ impl Application {
         let application = Self {
             analyzer,
             editor,
-            viewer: viewer::Viewer::new(shader.to_owned()),
-            layout: layout::Layout::new(),
+            viewer: viewer::State::new(shader.to_owned()),
+            layout: layout::State::new(),
             file: None,
             is_loading: false,
             show_menu: false,
@@ -79,8 +75,14 @@ impl Application {
                     .update(message, now, &mut self.analyzer)
                     .map(Message::Editor),
             },
-            Message::Viewer(message) => self.viewer.update(message).map(Message::Viewer),
-            Message::Layout(message) => self.layout.update(message).map(Message::Layout),
+            Message::Viewer(message) => {
+                self.viewer.update(message);
+                Task::none()
+            }
+            Message::Layout(message) => {
+                self.layout.update(message);
+                Task::none()
+            }
             Message::ShowMenu => {
                 self.show_menu = true;
                 Task::none()
@@ -102,7 +104,7 @@ impl Application {
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(util::open_file(), Message::ProjectOpened)
+                    Task::perform(file::open_file(), Message::ProjectOpened)
                 }
             }
             Message::NewProject => {
@@ -142,7 +144,7 @@ impl Application {
                 } else if let Ok(content) = serde_json::to_string(&self.editor) {
                     self.is_loading = true;
                     Task::perform(
-                        util::save_file(self.file.clone(), content),
+                        file::save_file(self.file.clone(), content),
                         Message::ProjectSaved,
                     )
                 } else {
@@ -154,7 +156,7 @@ impl Application {
                     Task::none()
                 } else if let Ok(content) = serde_json::to_string(&self.editor) {
                     self.is_loading = true;
-                    Task::perform(util::save_file(None, content), Message::ProjectSaved)
+                    Task::perform(file::save_file(None, content), Message::ProjectSaved)
                 } else {
                     Task::none()
                 }
@@ -168,13 +170,6 @@ impl Application {
 
                 Task::none()
             }
-            Message::Event(event) => match event {
-                Event::Keyboard(keyboard::Event::KeyPressed {
-                    key: keyboard::Key::Named(key::Named::Escape),
-                    ..
-                }) => Task::done(Message::CloseMenu),
-                _ => Task::none(),
-            },
             Message::Analyzer(event) => {
                 let mut tasks = Vec::new();
                 for update in self.analyzer.client().receive(event) {
@@ -212,10 +207,7 @@ impl Application {
             .layout
             .view(|_, pane, _| match pane {
                 layout::PaneContent::Editor => (
-                    self.editor
-                        .view(&self.analyzer)
-                        .map(Message::Editor)
-                        .into(),
+                    self.editor.view(&self.analyzer).map(Message::Editor).into(),
                     self.editor
                         .text()
                         .filename_display_text()
@@ -225,7 +217,6 @@ impl Application {
                     (self.viewer.view().map(Message::Viewer).into(), None)
                 }
             })
-            .on_click(|e| Message::Layout(layout::Message::Clicked(e)))
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
 
@@ -247,7 +238,16 @@ impl Application {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        self.editor.subscription().map(Message::Editor)
+        // Escape closes the menu even while the shader editor holds focus and captures keys.
+        let escape = event::listen_with(|event, _status, _window| match event {
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(key::Named::Escape),
+                ..
+            }) => Some(Message::CloseMenu),
+            _ => None,
+        });
+
+        Subscription::batch([self.editor.subscription().map(Message::Editor), escape])
     }
 }
 

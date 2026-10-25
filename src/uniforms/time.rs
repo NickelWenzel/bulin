@@ -1,7 +1,6 @@
 use iced::{
-    time,
+    Element, Length, Subscription, Task, time,
     widget::{button, row, text},
-    Element, Length, Subscription, Task,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

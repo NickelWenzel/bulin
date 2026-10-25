@@ -1,9 +1,9 @@
 use matcha_iced::lsp::update;
 
 use crate::analyzer::Analyzer;
+use crate::shader;
 use crate::shader_update::ShaderUpdate;
-use crate::text_editor;
-use crate::uniforms_editor;
+use crate::uniforms;
 
 use iced::Subscription;
 use iced::time::Instant;
@@ -13,23 +13,23 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    TextEditor(text_editor::Message),
-    UniformsEditor(uniforms_editor::Message),
+    TextEditor(shader::Message),
+    UniformsEditor(uniforms::Message),
     UpdatePipeline(ShaderUpdate),
     ProjectOpened,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Editor {
-    text_editor: text_editor::TextEditor,
-    uniforms_editor: uniforms_editor::UniformsEditor,
+    text_editor: shader::State,
+    uniforms_editor: uniforms::State,
 }
 
 impl Editor {
     pub fn new(shader: &str) -> Self {
         Self {
-            text_editor: text_editor::TextEditor::new(shader),
-            uniforms_editor: uniforms_editor::UniformsEditor::new(),
+            text_editor: shader::State::new(shader),
+            uniforms_editor: uniforms::State::new(),
         }
     }
 
@@ -41,7 +41,7 @@ impl Editor {
     ) -> Task<Message> {
         match message {
             Message::TextEditor(message) => match message {
-                text_editor::Message::UpdatePipeline(shader) => {
+                shader::Message::UpdatePipeline(shader) => {
                     Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(shader)))
                 }
                 _ => self
@@ -50,9 +50,7 @@ impl Editor {
                     .map(Message::TextEditor),
             },
             Message::UniformsEditor(message) => match message {
-                uniforms_editor::Message::Update(message) => {
-                    Task::done(Message::UpdatePipeline(message))
-                }
+                uniforms::Message::Update(message) => Task::done(Message::UpdatePipeline(message)),
                 _ => self
                     .uniforms_editor
                     .update(message)
@@ -103,7 +101,7 @@ impl Editor {
             .map(Message::TextEditor)
     }
 
-    pub fn text(&self) -> &text_editor::TextEditor {
+    pub fn text(&self) -> &shader::State {
         &self.text_editor
     }
 

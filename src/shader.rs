@@ -5,8 +5,8 @@ use matcha_iced::lsp::{client, update};
 use matcha_iced::{CodeEditor, Event};
 
 use crate::analyzer::Analyzer;
+use crate::file;
 use crate::shader_update::FragmentShader;
-use crate::util::{self, FileName};
 
 use iced::{
     Center, Element, Font, Task,
@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize)]
-pub struct TextEditor {
-    file: Option<FileName>,
+pub struct State {
+    file: Option<file::Name>,
     #[serde(default = "default_editor", skip)]
     editor: CodeEditor,
     #[serde(default = "bool::default", skip)]
@@ -60,14 +60,14 @@ pub enum Message {
     Editor(Event),
     NewFile,
     OpenFile,
-    FileOpened(Result<(FileName, Arc<String>), util::Error>),
+    FileOpened(Result<(file::Name, Arc<String>), file::Error>),
     SaveFile,
     SaveFileAs,
-    FileSaved(Result<FileName, util::Error>),
+    FileSaved(Result<file::Name, file::Error>),
     UpdatePipeline(FragmentShader),
 }
 
-impl TextEditor {
+impl State {
     pub fn new(shader: &str) -> Self {
         Self {
             file: None,
@@ -153,7 +153,7 @@ impl TextEditor {
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(util::open_file(), Message::FileOpened)
+                    Task::perform(file::open_file(), Message::FileOpened)
                 }
             }
             Message::FileOpened(result) => {
@@ -176,7 +176,7 @@ impl TextEditor {
                     self.is_loading = true;
 
                     Task::perform(
-                        util::save_file(self.file.clone(), self.content()),
+                        file::save_file(self.file.clone(), self.content()),
                         Message::FileSaved,
                     )
                 }
@@ -187,7 +187,7 @@ impl TextEditor {
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(util::save_file(None, self.content()), Message::FileSaved)
+                    Task::perform(file::save_file(None, self.content()), Message::FileSaved)
                 }
             }
             Message::FileSaved(result) => {
@@ -354,18 +354,18 @@ mod tests {
     use iced::time::Instant;
     use matcha_iced::lsp::Update;
 
-    use super::{Message, TextEditor};
+    use super::{Message, State};
     use crate::analyzer::Analyzer;
-    use crate::util::FileName;
+    use crate::file;
 
     #[test]
     fn an_opened_file_is_analyzed_in_place_of_the_previous_shader() {
         let (mut analyzer, mut events) = Analyzer::start();
-        let mut editor = TextEditor::new("fn f() -> i32 { return 1; }");
+        let mut editor = State::new("fn f() -> i32 { return 1; }");
         editor.open_lsp(&mut analyzer);
 
         let opened = Ok((
-            FileName::from("/shaders/broken.wgsl"),
+            file::Name::from("/shaders/broken.wgsl"),
             Arc::new("fn f() -> i32 { return 1.0; }".to_owned()),
         ));
         let _ = editor.update(Message::FileOpened(opened), Instant::now(), &mut analyzer);

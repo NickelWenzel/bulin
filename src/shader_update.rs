@@ -1,4 +1,4 @@
-use crate::uniforms_editor::uniform::*;
+use crate::uniforms::uniform::Uniform;
 
 pub type FragmentShader = String;
 
@@ -14,5 +14,4 @@ pub enum UniformsUpdate {
     Update(String, Uniform),
     Remove(String),
     Reset(Vec<Uniform>),
-    Clear,
 }
