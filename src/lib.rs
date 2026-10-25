@@ -1,3 +1,4 @@
+mod analyzer;
 mod editor;
 mod layout;
 mod menu;
@@ -11,6 +12,7 @@ use iced::keyboard::key;
 use iced::time::Instant;
 use iced::widget::{button, center, column, container, mouse_area, opaque, stack, text};
 use iced::{Color, Element, Event, Font, Length, Subscription, Task, Theme, keyboard};
+use matcha_iced::lsp;
 use util::Error;
 
 use std::sync::Arc;
@@ -18,6 +20,7 @@ use std::sync::Arc;
 use crate::util::FileName;
 
 pub struct Application {
+    analyzer: analyzer::Analyzer,
     editor: editor::Editor,
     viewer: viewer::Viewer,
     layout: layout::Layout,
@@ -41,22 +44,32 @@ pub enum Message {
     SaveProjectAs,
     ProjectSaved(Result<FileName, Error>),
     Event(Event),
+    Analyzer(lsp::client::Event),
 }
 
 impl Application {
-    pub fn new(shader: String) -> Self {
-        Self {
-            editor: editor::Editor::new(&shader),
-            viewer: viewer::Viewer::new(shader),
+    pub fn new() -> (Self, Task<Message>) {
+        let shader = include_str!("viewer/canvasscene/shaders/empty_frag.wgsl");
+        let (mut analyzer, events) = analyzer::Analyzer::start();
+        let mut editor = editor::Editor::new(shader);
+        editor.open_lsp(&mut analyzer);
+        analyzer.flush();
+
+        let application = Self {
+            analyzer,
+            editor,
+            viewer: viewer::Viewer::new(shader.to_owned()),
             layout: layout::Layout::new(),
             file: None,
             is_loading: false,
             show_menu: false,
-        }
+        };
+
+        (application, Task::run(events, Message::Analyzer))
     }
 
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
-        match message {
+        let task = match message {
             Message::Editor(message) => match message {
                 editor::Message::UpdatePipeline(update) => {
                     Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
@@ -155,7 +168,27 @@ impl Application {
                 }) => Task::done(Message::CloseMenu),
                 _ => Task::none(),
             },
-        }
+            Message::Analyzer(event) => {
+                for update in self.analyzer.client().receive(event) {
+                    match update {
+                        lsp::Update::Status(status) => tracing::info!("wgsl-analyzer: {status:?}"),
+                        lsp::Update::Log(entry) => {
+                            tracing::debug!("wgsl-analyzer: {}", entry.text())
+                        }
+                        lsp::Update::Error(error) => tracing::warn!("wgsl-analyzer: {error}"),
+                        lsp::Update::Document(_)
+                        | lsp::Update::FileEdits(_)
+                        | lsp::Update::Notification(_)
+                        | lsp::Update::Trace(_) => {}
+                    }
+                }
+
+                Task::none()
+            }
+        };
+
+        self.analyzer.flush();
+        task
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -196,12 +229,6 @@ impl Application {
 
     pub fn subscription(&self) -> Subscription<Message> {
         self.editor.subscription().map(Message::Editor)
-    }
-}
-
-impl Default for Application {
-    fn default() -> Self {
-        Self::new(include_str!("viewer/canvasscene/shaders/empty_frag.wgsl").to_string())
     }
 }
 
