@@ -1,8 +1,8 @@
 use matcha_iced::lsp::update;
 
 use crate::analyzer::Analyzer;
+use crate::core::Program;
 use crate::shader;
-use crate::shader_update::ShaderUpdate;
 use crate::uniforms;
 
 use iced::Subscription;
@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 pub enum Message {
     TextEditor(shader::Message),
     UniformsEditor(uniforms::Message),
-    UpdatePipeline(ShaderUpdate),
+    /// The shader or its uniforms changed.
+    Changed,
     ProjectOpened,
 }
 
@@ -41,16 +42,14 @@ impl Editor {
     ) -> Task<Message> {
         match message {
             Message::TextEditor(message) => match message {
-                shader::Message::UpdatePipeline(shader) => {
-                    Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(shader)))
-                }
+                shader::Message::Changed => Task::done(Message::Changed),
                 _ => self
                     .text_editor
                     .update(message, now, analyzer)
                     .map(Message::TextEditor),
             },
             Message::UniformsEditor(message) => match message {
-                uniforms::Message::Update(message) => Task::done(Message::UpdatePipeline(message)),
+                uniforms::Message::Changed => Task::done(Message::Changed),
                 _ => self
                     .uniforms_editor
                     .update(message)
@@ -58,17 +57,9 @@ impl Editor {
             },
             Message::ProjectOpened => {
                 self.text_editor.open_lsp(analyzer);
-
-                Task::done(Message::UpdatePipeline(ShaderUpdate::Shader(
-                    self.text_editor.content(),
-                )))
-                .chain(Task::done(Message::UpdatePipeline(
-                    ShaderUpdate::Uniforms(crate::shader_update::UniformsUpdate::Reset(
-                        self.uniforms_editor.uniforms(),
-                    )),
-                )))
+                Task::done(Message::Changed)
             }
-            Message::UpdatePipeline(_) => Task::none(),
+            Message::Changed => Task::none(),
         }
     }
 
@@ -99,6 +90,15 @@ impl Editor {
         self.text_editor
             .apply_lsp(analyzer, document)
             .map(Message::TextEditor)
+    }
+
+    /// The program the viewer runs for the current shader and uniforms.
+    pub fn program(&self) -> Program {
+        Program::new(
+            self.text_editor.content(),
+            self.uniforms_editor.uniforms().clone(),
+            self.uniforms_editor.time(),
+        )
     }
 
     pub fn text(&self) -> &shader::State {

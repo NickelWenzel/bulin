@@ -14,7 +14,9 @@ use iced::wgpu;
 use iced::widget::shader::{self};
 use tracing::{debug, warn};
 
-use super::PrimitiveData;
+use crate::core::Program;
+
+use super::Compiled;
 
 const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const BLIT_WGSL: &str = include_str!("shaders/blit.wgsl");
@@ -70,25 +72,25 @@ pub struct Pipeline {
     in_flight: Option<u64>,
     done: Arc<AtomicU64>,
 
-    // Primitive data
-    primitive_data: Arc<PrimitiveData>,
+    // What the offscreen pipeline and uniform buffer currently hold
+    compiled: Arc<Compiled>,
 }
 
 impl shader::Pipeline for Pipeline {
     fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         device.on_uncaptured_error(Arc::new(|e| debug!("WGPU error: {e:#}")));
 
-        let empty_primitive_data = PrimitiveData::empty();
+        let compiled = Compiled::from(&Program::default());
 
         // --- Uniforms -----------------------------------------------------
-        let uniforms = create_uniforms_buffer(device, empty_primitive_data.uniforms_size());
+        let uniforms = create_uniforms_buffer(device, compiled.uniforms.len() as u64);
 
         // --- Offscreen pipeline (the custom shader) -----------------------
-        // The bundled empty shader is known to be valid
+        // The bundled default shader is known to be valid
         let offscreen = create_offscreen_pipeline(
             device,
             uniforms.as_ref().map(|u| &u.uniforms_layout),
-            &empty_primitive_data.whole_shader(),
+            &compiled.wgsl,
         );
 
         // --- Blit pipeline (offscreen texture -> widget) ------------------
@@ -214,7 +216,7 @@ impl shader::Pipeline for Pipeline {
             generation: 0,
             in_flight: None,
             done: Arc::new(AtomicU64::new(0)),
-            primitive_data: Arc::new(empty_primitive_data),
+            compiled: Arc::new(compiled),
         }
     }
 }
@@ -224,7 +226,7 @@ impl Pipeline {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        primitive_data: Arc<PrimitiveData>,
+        compiled: Arc<Compiled>,
     ) {
         // 1. If the offscreen render we kicked off earlier has completed,
         //    swap front and back. From now on `draw()` samples the new frame.
@@ -242,33 +244,25 @@ impl Pipeline {
 
             //The order of the operations matters here
             // 1. Check if buffer needs to be re-allocated
-            if self.primitive_data.uniforms_size() != primitive_data.uniforms_size() {
-                self.uniforms = create_uniforms_buffer(device, primitive_data.uniforms_size());
+            if self.compiled.uniforms.len() != compiled.uniforms.len() {
+                self.uniforms = create_uniforms_buffer(device, compiled.uniforms.len() as u64);
                 needs_draw = true;
             }
 
             // 2. Check if buffer content changed
             if let Some(uniforms) = &self.uniforms
-                && self.primitive_data.uniforms.uniforms_bytes
-                    != primitive_data.uniforms.uniforms_bytes
+                && self.compiled.uniforms != compiled.uniforms
             {
-                queue.write_buffer(
-                    &uniforms.uniforms,
-                    0,
-                    &primitive_data.uniforms.uniforms_bytes,
-                );
+                queue.write_buffer(&uniforms.uniforms, 0, &compiled.uniforms);
                 needs_draw = true;
             }
 
             // 3. Check if shader changed
-            if (self.primitive_data.shader != primitive_data.shader)
-                || (self.primitive_data.uniforms.uniforms_str
-                    != primitive_data.uniforms.uniforms_str)
-            {
+            if self.compiled.wgsl != compiled.wgsl {
                 self.pending = Some(PendingOffscreen::new(
                     device,
                     self.uniforms.as_ref().map(|u| &u.uniforms_layout),
-                    &primitive_data.whole_shader(),
+                    &compiled.wgsl,
                 ));
             }
 
@@ -280,7 +274,7 @@ impl Pipeline {
                 Validation::Pending | Validation::Rejected => needs_draw = false,
             }
 
-            self.primitive_data = primitive_data;
+            self.compiled = compiled;
 
             if needs_draw {
                 let back = &self.targets[self.front ^ 1];

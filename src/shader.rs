@@ -6,7 +6,6 @@ use matcha_iced::{CodeEditor, Event};
 
 use crate::analyzer::Analyzer;
 use crate::file;
-use crate::shader_update::FragmentShader;
 
 use iced::{
     Center, Element, Font, Task,
@@ -64,7 +63,8 @@ pub enum Message {
     SaveFile,
     SaveFileAs,
     FileSaved(Result<file::Name, file::Error>),
-    UpdatePipeline(FragmentShader),
+    /// The shader text changed.
+    Changed,
 }
 
 impl State {
@@ -113,7 +113,7 @@ impl State {
 
         if self.editor.take_dirty() {
             self.is_dirty = true;
-            Task::done(Message::UpdatePipeline(self.content()))
+            Task::done(Message::Changed)
         } else {
             Task::none()
         }
@@ -132,7 +132,7 @@ impl State {
 
                 if self.editor.take_dirty() {
                     self.is_dirty = true;
-                    Task::batch([task, Task::done(Message::UpdatePipeline(self.content()))])
+                    Task::batch([task, Task::done(Message::Changed)])
                 } else {
                     task
                 }
@@ -145,7 +145,7 @@ impl State {
                     self.open_lsp(analyzer);
                 }
 
-                Task::done(Message::UpdatePipeline(self.content()))
+                Task::done(Message::Changed)
             }
             Message::OpenFile => {
                 if self.is_loading {
@@ -167,7 +167,7 @@ impl State {
                     self.open_lsp(analyzer);
                 }
 
-                Task::done(Message::UpdatePipeline(self.content()))
+                Task::done(Message::Changed)
             }
             Message::SaveFile => {
                 if self.is_loading {
@@ -209,7 +209,7 @@ impl State {
 
                 Task::none()
             }
-            Message::UpdatePipeline(_) => Task::none(),
+            Message::Changed => Task::none(),
         }
     }
 

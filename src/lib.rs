@@ -1,10 +1,11 @@
+pub use bulin_core as core;
+
 mod analyzer;
 mod editor;
 mod file;
 mod layout;
 mod menu;
 mod shader;
-mod shader_update;
 mod uniforms;
 mod viewer;
 
@@ -29,7 +30,6 @@ pub struct Application {
 #[derive(Debug, Clone)]
 pub enum Message {
     Editor(editor::Message),
-    Viewer(viewer::Message),
     Layout(layout::Message),
     ShowMenu,
     CloseMenu,
@@ -45,16 +45,16 @@ pub enum Message {
 
 impl Application {
     pub fn new() -> (Self, Task<Message>) {
-        let shader = include_str!("viewer/shaders/empty_frag.wgsl");
         let (mut analyzer, events) = analyzer::Analyzer::start();
-        let mut editor = editor::Editor::new(shader);
+        let mut editor = editor::Editor::new(core::program::DEFAULT_SOURCE);
         editor.open_lsp(&mut analyzer);
         analyzer.flush();
+        let viewer = viewer::State::new(&editor.program());
 
         let application = Self {
             analyzer,
             editor,
-            viewer: viewer::State::new(shader.to_owned()),
+            viewer,
             layout: layout::State::new(),
             file: None,
             is_loading: false,
@@ -67,18 +67,15 @@ impl Application {
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
         let task = match message {
             Message::Editor(message) => match message {
-                editor::Message::UpdatePipeline(update) => {
-                    Task::done(Message::Viewer(viewer::Message::UpdatePipeline(update)))
+                editor::Message::Changed => {
+                    self.viewer.load(&self.editor.program());
+                    Task::none()
                 }
                 _ => self
                     .editor
                     .update(message, now, &mut self.analyzer)
                     .map(Message::Editor),
             },
-            Message::Viewer(message) => {
-                self.viewer.update(message);
-                Task::none()
-            }
             Message::Layout(message) => {
                 self.layout.update(message);
                 Task::none()
@@ -213,9 +210,7 @@ impl Application {
                         .filename_display_text()
                         .or(Some(String::from("New file"))),
                 ),
-                layout::PaneContent::Viewer => {
-                    (self.viewer.view().map(Message::Viewer).into(), None)
-                }
+                layout::PaneContent::Viewer => (self.viewer.view().into(), None),
             })
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
