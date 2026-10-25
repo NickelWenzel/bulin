@@ -227,7 +227,12 @@ impl Application {
 
                     (container(editors).into(), Some(title))
                 }
-                layout::PaneContent::Viewer => (self.viewer.view().into(), None),
+                layout::PaneContent::Viewer => (
+                    self.viewer.view().into(),
+                    self.viewer
+                        .error()
+                        .map(|error| format!("Shader error: {error}")),
+                ),
             })
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
