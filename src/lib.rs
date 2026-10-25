@@ -52,8 +52,7 @@ impl Application {
         let (mut analyzer, events) = analyzer::Analyzer::start();
         let project = core::Project::untitled();
         let mut shader = shader::State::new(&project.shader);
-        shader.open_lsp(&mut analyzer);
-        analyzer.flush();
+        shader.attach(&mut analyzer);
         let uniforms = uniforms::State::new(project.uniforms, project.clock);
         let viewer = viewer::State::new(&program(&shader, &uniforms));
 
@@ -73,7 +72,7 @@ impl Application {
     }
 
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
-        let task = match message {
+        match message {
             Message::Shader(message) => {
                 let action = self.shader.update(message, now, &mut self.analyzer);
                 if let Some(shader::Instruction::Changed) = action.instruction {
@@ -190,44 +189,20 @@ impl Application {
                 Task::none()
             }
             Message::Analyzer(event) => {
-                let mut tasks = Vec::new();
-                for update in self.analyzer.client().receive(event) {
-                    match update {
-                        lsp::Update::Document(document) => {
-                            let action = self.shader.apply_lsp(&mut self.analyzer, document);
-                            if let Some(shader::Instruction::Changed) = action.instruction {
-                                self.viewer.load(&program(&self.shader, &self.uniforms));
-                            }
-                            tasks.push(action.task.map(Message::Shader));
-                        }
-                        lsp::Update::Status(status) => tracing::info!("wgsl-analyzer: {status:?}"),
-                        lsp::Update::Log(entry) if entry.is_shown() => {
-                            tracing::info!("wgsl-analyzer: {}", entry.text())
-                        }
-                        lsp::Update::Log(entry) => {
-                            tracing::debug!("wgsl-analyzer: {}", entry.text())
-                        }
-                        lsp::Update::Error(error) => tracing::warn!("wgsl-analyzer: {error}"),
-                        // Renames only reach the open shader, so edits for other files never come.
-                        lsp::Update::FileEdits(_)
-                        | lsp::Update::Notification(_)
-                        | lsp::Update::Trace(_) => {}
-                    }
+                let action = self.shader.lsp(&mut self.analyzer, event);
+                if let Some(shader::Instruction::Changed) = action.instruction {
+                    self.viewer.load(&program(&self.shader, &self.uniforms));
                 }
-
-                Task::batch(tasks)
+                action.task.map(Message::Shader)
             }
-        };
-
-        self.analyzer.flush();
-        task
+        }
     }
 
     /// Replaces the shader and uniforms with `project`'s.
     fn load(&mut self, project: core::Project) {
-        self.shader.close_lsp(&mut self.analyzer);
+        self.shader.detach(&mut self.analyzer);
         self.shader = shader::State::new(&project.shader);
-        self.shader.open_lsp(&mut self.analyzer);
+        self.shader.attach(&mut self.analyzer);
         self.uniforms = uniforms::State::new(project.uniforms, project.clock);
         self.viewer.load(&program(&self.shader, &self.uniforms));
     }

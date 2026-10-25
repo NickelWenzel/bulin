@@ -1,7 +1,7 @@
 use iced::time::Instant;
 use iced::{Subscription, Theme, event, keyboard};
 use matcha_core::{Severity, TreeSitterDef};
-use matcha_iced::lsp::{client, update};
+use matcha_iced::lsp::client;
 use matcha_iced::{CodeEditor, Event};
 
 use crate::action::Action;
@@ -73,28 +73,25 @@ impl State {
         }
     }
 
-    /// Opens the shader on the language server under its file's name.
-    pub fn open_lsp(&mut self, analyzer: &mut Analyzer) {
-        let uri = analyzer.document_uri(self.file.as_ref());
-        if let Err(error) = self.editor.open_lsp(analyzer.client(), &uri, "wgsl") {
-            tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
-        }
+    /// Starts analyzing the shader under its file's name.
+    pub fn attach(&mut self, analyzer: &mut Analyzer) {
+        analyzer.attach(&mut self.editor, self.file.as_ref());
     }
 
-    /// Closes the shader on the language server, clearing what it reported.
-    pub fn close_lsp(&mut self, analyzer: &mut Analyzer) {
-        self.editor.close_lsp(analyzer.client());
+    /// Stops analyzing the shader, clearing what the analyzer reported.
+    pub fn detach(&mut self, analyzer: &mut Analyzer) {
+        analyzer.detach(&mut self.editor);
         self.problems = Problems::default();
     }
 
-    /// Applies what the language server sent for the shader. Its edits, such as formatting or a
-    /// rename, update the pipeline like typing does.
-    pub fn apply_lsp(
+    /// Applies an analyzer event. Its edits, such as formatting or a rename, change the shader
+    /// like typing does.
+    pub fn lsp(
         &mut self,
         analyzer: &mut Analyzer,
-        document: update::Document,
+        event: client::Event,
     ) -> Action<Instruction, Message> {
-        log_refusal(self.editor.apply_lsp(analyzer.client(), document));
+        analyzer.receive(event, &mut self.editor);
 
         let diagnostics = self.editor.document().diagnostics_in(0..u32::MAX);
         self.problems = diagnostics.fold(Problems::default(), |mut problems, (_, severity, _)| {
@@ -123,7 +120,7 @@ impl State {
         match message {
             Message::Editor(event) => {
                 let action = Action::task(self.editor.update(event, now).map(Message::Editor));
-                log_refusal(self.editor.sync_lsp(analyzer.client()));
+                analyzer.sync(&mut self.editor);
 
                 if self.editor.take_dirty() {
                     self.is_dirty = true;
@@ -144,10 +141,10 @@ impl State {
             ),
             Message::NewFile => {
                 if !self.is_loading {
-                    self.close_lsp(analyzer);
+                    self.detach(analyzer);
                     self.file = None;
                     self.editor = wgsl_editor("");
-                    self.open_lsp(analyzer);
+                    self.attach(analyzer);
                 }
 
                 Action::instruction(Instruction::Changed)
@@ -166,10 +163,10 @@ impl State {
                 self.is_dirty = false;
 
                 if let Ok((path, contents)) = result {
-                    self.close_lsp(analyzer);
+                    self.detach(analyzer);
                     self.file = Some(path);
                     self.editor = wgsl_editor(&contents);
-                    self.open_lsp(analyzer);
+                    self.attach(analyzer);
                 }
 
                 Action::instruction(Instruction::Changed)
@@ -202,16 +199,8 @@ impl State {
                 self.is_loading = false;
 
                 if let Ok(path) = result {
-                    let renamed = analyzer.document_uri(self.file.as_ref())
-                        != analyzer.document_uri(Some(&path));
-                    if renamed {
-                        self.close_lsp(analyzer);
-                        self.file = Some(path);
-                        self.open_lsp(analyzer);
-                    } else {
-                        self.file = Some(path);
-                        log_refusal(self.editor.save_lsp(analyzer.client()));
-                    }
+                    analyzer.saved(&mut self.editor, self.file.as_ref(), &path);
+                    self.file = Some(path);
                     self.is_dirty = false;
                 }
 
@@ -302,14 +291,6 @@ impl State {
     }
 }
 
-/// Logs an update the editor refused. Its jump, a definition in another document, is dropped:
-/// the editor holds one shader.
-fn log_refusal(applied: update::Applied) {
-    if let Some(refusal) = applied.refused {
-        tracing::debug!("wgsl-analyzer update not applied: {refusal}");
-    }
-}
-
 fn action<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
     label: &'a str,
@@ -359,7 +340,6 @@ mod tests {
 
     use iced::futures::{FutureExt, StreamExt};
     use iced::time::Instant;
-    use matcha_iced::lsp::Update;
 
     use super::{Instruction, Message, State};
     use crate::analyzer::Analyzer;
@@ -369,7 +349,7 @@ mod tests {
     fn an_opened_file_is_analyzed_in_place_of_the_previous_shader() {
         let (mut analyzer, mut events) = Analyzer::start();
         let mut editor = State::new("fn f() -> i32 { return 1; }");
-        editor.open_lsp(&mut analyzer);
+        editor.attach(&mut analyzer);
 
         let opened = Ok((
             file::Name::from("/shaders/broken.wgsl"),
@@ -381,15 +361,10 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(30);
         while editor.problems.errors == 0 {
             assert!(Instant::now() < deadline, "no error within 30 s");
-            analyzer.flush();
 
             match events.next().now_or_never() {
                 Some(Some(event)) => {
-                    for update in analyzer.client().receive(event) {
-                        if let Update::Document(document) = update {
-                            let _ = editor.apply_lsp(&mut analyzer, document);
-                        }
-                    }
+                    let _ = editor.lsp(&mut analyzer, event);
                 }
                 Some(None) => panic!("the server stopped"),
                 None => thread::sleep(Duration::from_millis(10)),
