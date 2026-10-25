@@ -25,6 +25,8 @@ pub struct Application {
     file: Option<file::Name>,
     is_loading: bool,
     show_menu: bool,
+    /// Why the last project action failed, until the next one.
+    notice: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,7 +48,7 @@ pub enum Message {
 impl Application {
     pub fn new() -> (Self, Task<Message>) {
         let (mut analyzer, events) = analyzer::Analyzer::start();
-        let mut editor = editor::Editor::new(core::program::DEFAULT_SOURCE);
+        let mut editor = editor::Editor::new(core::Project::untitled());
         editor.open_lsp(&mut analyzer);
         analyzer.flush();
         let viewer = viewer::State::new(&editor.program());
@@ -59,6 +61,7 @@ impl Application {
             file: None,
             is_loading: false,
             show_menu: false,
+            notice: None,
         };
 
         (application, Task::run(events, Message::Analyzer))
@@ -100,6 +103,7 @@ impl Application {
                     Task::none()
                 } else {
                     self.is_loading = true;
+                    self.notice = None;
 
                     Task::perform(file::open_file(), Message::ProjectOpened)
                 }
@@ -110,7 +114,8 @@ impl Application {
                 } else {
                     self.editor.close_lsp(&mut self.analyzer);
                     self.file = None;
-                    self.editor = editor::Editor::new("");
+                    self.notice = None;
+                    self.editor = editor::Editor::new(core::Project::untitled());
 
                     self.editor
                         .update(editor::Message::ProjectOpened, now, &mut self.analyzer)
@@ -120,49 +125,55 @@ impl Application {
             Message::ProjectOpened(result) => {
                 self.is_loading = false;
 
-                if let Ok((path, contents)) = result {
-                    if let Ok(editor) = serde_json::from_str(&contents) {
+                let project = match result {
+                    Err(file::Error::DialogClosed) => Err(None),
+                    Err(error) => Err(Some(error.to_string())),
+                    Ok((path, json)) => core::Project::from_json(&json)
+                        .map(|project| (path, project))
+                        .map_err(|error| Some(error.to_string())),
+                };
+                match project {
+                    Ok((path, project)) => {
                         self.editor.close_lsp(&mut self.analyzer);
                         self.file = Some(path);
-                        self.editor = editor;
+                        self.editor = editor::Editor::new(project);
                         self.editor
                             .update(editor::Message::ProjectOpened, now, &mut self.analyzer)
                             .map(Message::Editor)
-                    } else {
+                    }
+                    Err(error) => {
+                        self.notice =
+                            error.map(|error| format!("Could not open the project: {error}"));
                         Task::none()
                     }
-                } else {
-                    Task::none()
                 }
             }
-            Message::SaveProject => {
+            Message::SaveProject | Message::SaveProjectAs => {
                 if self.is_loading {
                     Task::none()
-                } else if let Ok(content) = serde_json::to_string(&self.editor) {
+                } else {
                     self.is_loading = true;
+                    self.notice = None;
+                    let file = match message {
+                        Message::SaveProject => self.file.clone(),
+                        _ => None,
+                    };
+
                     Task::perform(
-                        file::save_file(self.file.clone(), content),
+                        file::save_file(file, self.editor.project().to_json()),
                         Message::ProjectSaved,
                     )
-                } else {
-                    Task::none()
-                }
-            }
-            Message::SaveProjectAs => {
-                if self.is_loading {
-                    Task::none()
-                } else if let Ok(content) = serde_json::to_string(&self.editor) {
-                    self.is_loading = true;
-                    Task::perform(file::save_file(None, content), Message::ProjectSaved)
-                } else {
-                    Task::none()
                 }
             }
             Message::ProjectSaved(result) => {
                 self.is_loading = false;
 
-                if let Ok(path) = result {
-                    self.file = Some(path);
+                match result {
+                    Ok(path) => self.file = Some(path),
+                    Err(file::Error::DialogClosed) => {}
+                    Err(error) => {
+                        self.notice = Some(format!("Could not save the project: {error}"))
+                    }
                 }
 
                 Task::none()
@@ -205,10 +216,17 @@ impl Application {
             .view(|_, pane, _| match pane {
                 layout::PaneContent::Editor => (
                     self.editor.view(&self.analyzer).map(Message::Editor).into(),
-                    self.editor
-                        .text()
-                        .filename_display_text()
-                        .or(Some(String::from("New file"))),
+                    {
+                        let file = self
+                            .editor
+                            .text()
+                            .filename_display_text()
+                            .unwrap_or_else(|| String::from("New file"));
+                        Some(match &self.notice {
+                            Some(notice) => format!("{file} · {notice}"),
+                            None => file,
+                        })
+                    },
                 ),
                 layout::PaneContent::Viewer => (self.viewer.view().into(), None),
             })

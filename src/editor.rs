@@ -1,7 +1,7 @@
 use matcha_iced::lsp::update;
 
 use crate::analyzer::Analyzer;
-use crate::core::Program;
+use crate::core::{Program, Project};
 use crate::shader;
 use crate::uniforms;
 
@@ -9,7 +9,6 @@ use iced::Subscription;
 use iced::time::Instant;
 use iced::widget::container;
 use iced::{Element, Task};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -20,18 +19,26 @@ pub enum Message {
     ProjectOpened,
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct Editor {
     text_editor: shader::State,
     uniforms_editor: uniforms::State,
 }
 
 impl Editor {
-    pub fn new(shader: &str) -> Self {
+    pub fn new(project: Project) -> Self {
         Self {
-            text_editor: shader::State::new(shader),
-            uniforms_editor: uniforms::State::new(),
+            text_editor: shader::State::new(&project.shader),
+            uniforms_editor: uniforms::State::new(project.uniforms, project.clock),
         }
+    }
+
+    /// The project to save for the current shader and uniforms.
+    pub fn project(&self) -> Project {
+        Project::new(
+            self.text_editor.content(),
+            self.uniforms_editor.uniforms().clone(),
+            self.uniforms_editor.clock(),
+        )
     }
 
     pub fn update(

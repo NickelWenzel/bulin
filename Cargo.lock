@@ -520,7 +520,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bulin-core",
- "bytemuck",
  "console_error_panic_hook",
  "console_log",
  "getrandom 0.4.3",
@@ -533,7 +532,6 @@ dependencies = [
  "paths",
  "rayon",
  "rfd",
- "serde",
  "serde_json",
  "thiserror 2.0.21",
  "tokio",

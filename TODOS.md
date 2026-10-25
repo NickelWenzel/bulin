@@ -35,3 +35,6 @@
 # Performance
 - ❌ Improve framerate
 - ❌ Optimal packing for uniforms
+
+# Projects
+- ❌ Mark a project unsaved when its shader or uniforms change, and ask before discarding it

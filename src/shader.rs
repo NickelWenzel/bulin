@@ -12,20 +12,13 @@ use iced::{
     widget::{button, column, container, row, space, text, tooltip},
 };
 
-use serde::{Deserialize, Serialize};
-
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize)]
 pub struct State {
     file: Option<file::Name>,
-    #[serde(default = "default_editor", skip)]
     editor: CodeEditor,
-    #[serde(default = "bool::default", skip)]
     is_loading: bool,
-    #[serde(default = "bool::default", skip)]
     is_dirty: bool,
-    #[serde(skip)]
     problems: Problems,
 }
 
@@ -34,10 +27,6 @@ pub struct State {
 struct Problems {
     errors: usize,
     warnings: usize,
-}
-
-fn default_editor() -> CodeEditor {
-    wgsl_editor("")
 }
 
 fn wgsl_editor(source: &str) -> CodeEditor {

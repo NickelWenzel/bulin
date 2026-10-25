@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-
 use super::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Name(String);
 
 impl Name {
