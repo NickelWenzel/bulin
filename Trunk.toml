@@ -1,0 +1,17 @@
+[build]
+target = "index.html"
+
+# Fetch the pinned wgsl-analyzer-web build that index.html copies into dist.
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["web/fetch-wgsl-analyzer.sh"]
+
+[watch]
+ignore = ["web/vendor"]
+
+# The analyzer worker needs SharedArrayBuffer, which only a cross-origin isolated page gets.
+# Any other host must send the same two headers (docs/web.md).
+[serve.headers]
+"Cross-Origin-Opener-Policy" = "same-origin"
+"Cross-Origin-Embedder-Policy" = "require-corp"
