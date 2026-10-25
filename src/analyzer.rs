@@ -19,6 +19,10 @@ use web::Link;
 
 use crate::util::FileName;
 
+/// The workspace manifest. `root = "."` keeps the documents at the workspace root instead of
+/// the default `./shaders`.
+const MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n";
+
 /// The document name of a shader that has no file yet.
 const UNTITLED: &str = "untitled.wgsl";
 
@@ -51,6 +55,11 @@ impl Analyzer {
 
     pub fn status(&self) -> &client::Status {
         self.client.status()
+    }
+
+    /// Why the server could not start or stopped, when this side knows.
+    pub fn failure(&self) -> Option<String> {
+        self.link.failure()
     }
 
     /// Hands the server whatever the client queued since the last call.

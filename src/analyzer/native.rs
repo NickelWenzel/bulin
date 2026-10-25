@@ -8,16 +8,16 @@ use matcha_iced::lsp::lsp_server::Connection;
 use paths::{AbsPathBuf, Utf8PathBuf};
 use wgsl_analyzer::config::Config;
 
-/// The workspace manifest. `root = "."` keeps the documents at the workspace root instead of
-/// the default `./shaders`.
-const MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n";
+use super::MANIFEST;
 
 /// wgsl-analyzer's own binary gives its threads 16 MiB because salsa's queries recurse deeply.
 const STACK_SIZE: usize = 16 << 20;
 
 /// The server runs on its own thread and reads its end of the connection directly, so there is
 /// nothing to forward.
-pub struct Link;
+pub struct Link {
+    failure: Option<String>,
+}
 
 impl Link {
     /// Writes the workspace manifest into a scratch directory and starts the server there.
@@ -25,14 +25,19 @@ impl Link {
         let root = env::temp_dir().join("bulin");
         let uri = Uri::from_directory_path(&root).expect("invariant: the temp dir is absolute");
 
-        if let Err(error) = spawn(root, connection) {
+        let failure = spawn(root, connection).err().map(|error| {
             tracing::error!("wgsl-analyzer could not start: {error}");
-        }
+            error.to_string()
+        });
 
-        (Self, uri)
+        (Self { failure }, uri)
     }
 
     pub fn flush(&mut self) {}
+
+    pub fn failure(&self) -> Option<String> {
+        self.failure.clone()
+    }
 }
 
 /// Dropping `connection` on failure ends the client's connection, so the client reports the

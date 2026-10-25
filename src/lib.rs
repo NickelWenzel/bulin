@@ -213,7 +213,7 @@ impl Application {
             .view(|_, pane, _| match pane {
                 layout::PaneContent::Editor => (
                     self.editor
-                        .view(self.analyzer.status())
+                        .view(&self.analyzer)
                         .map(Message::Editor)
                         .into(),
                     self.editor

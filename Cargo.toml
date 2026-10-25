@@ -47,6 +47,9 @@ rayon = "1.12"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 console_error_panic_hook = "0.1"
 console_log = "1.0"
+wasm-bindgen = "0.2.108"
+# console_log is a `log` backend; this forwards tracing's events to it.
+tracing = { version = "0.1", features = ["log"] }
 
 [patch.crates-io]
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "10e9b995eb5af74dbac08ed62b01971fe7e495b2" }
