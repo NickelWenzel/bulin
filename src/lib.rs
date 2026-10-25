@@ -1,7 +1,7 @@
 pub use bulin_core as core;
 
+mod action;
 mod analyzer;
-mod editor;
 mod file;
 mod layout;
 mod menu;
@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 pub struct Application {
     analyzer: analyzer::Analyzer,
-    editor: editor::Editor,
+    shader: shader::State,
+    uniforms: uniforms::State,
     viewer: viewer::State,
     layout: layout::State,
     file: Option<file::Name>,
@@ -31,7 +32,8 @@ pub struct Application {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Editor(editor::Message),
+    Shader(shader::Message),
+    Uniforms(uniforms::Message),
     Layout(layout::Message),
     ShowMenu,
     CloseMenu,
@@ -48,14 +50,17 @@ pub enum Message {
 impl Application {
     pub fn new() -> (Self, Task<Message>) {
         let (mut analyzer, events) = analyzer::Analyzer::start();
-        let mut editor = editor::Editor::new(core::Project::untitled());
-        editor.open_lsp(&mut analyzer);
+        let project = core::Project::untitled();
+        let mut shader = shader::State::new(&project.shader);
+        shader.open_lsp(&mut analyzer);
         analyzer.flush();
-        let viewer = viewer::State::new(&editor.program());
+        let uniforms = uniforms::State::new(project.uniforms, project.clock);
+        let viewer = viewer::State::new(&program(&shader, &uniforms));
 
         let application = Self {
             analyzer,
-            editor,
+            shader,
+            uniforms,
             viewer,
             layout: layout::State::new(),
             file: None,
@@ -69,16 +74,19 @@ impl Application {
 
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
         let task = match message {
-            Message::Editor(message) => match message {
-                editor::Message::Changed => {
-                    self.viewer.load(&self.editor.program());
-                    Task::none()
+            Message::Shader(message) => {
+                let action = self.shader.update(message, now, &mut self.analyzer);
+                if let Some(shader::Instruction::Changed) = action.instruction {
+                    self.viewer.load(&program(&self.shader, &self.uniforms));
                 }
-                _ => self
-                    .editor
-                    .update(message, now, &mut self.analyzer)
-                    .map(Message::Editor),
-            },
+                action.task.map(Message::Shader)
+            }
+            Message::Uniforms(message) => {
+                if let Some(uniforms::Instruction::Changed) = self.uniforms.update(message) {
+                    self.viewer.load(&program(&self.shader, &self.uniforms));
+                }
+                Task::none()
+            }
             Message::Layout(message) => {
                 self.layout.update(message);
                 Task::none()
@@ -91,13 +99,21 @@ impl Application {
                 self.show_menu = false;
                 Task::none()
             }
-            Message::Menu(message) => match message {
-                menu::Message::OpenProject => Task::done(Message::OpenProject),
-                menu::Message::NewProject => Task::done(Message::NewProject),
-                menu::Message::SaveProject => Task::done(Message::SaveProject),
-                menu::Message::SaveProjectAs => Task::done(Message::SaveProjectAs),
-                menu::Message::Editor(message) => Task::done(Message::Editor(message)),
-            },
+            Message::Menu(message) => {
+                let message = match message {
+                    menu::Message::OpenFile => Message::Shader(shader::Message::OpenFile),
+                    menu::Message::NewFile => Message::Shader(shader::Message::NewFile),
+                    menu::Message::SaveFile => Message::Shader(shader::Message::SaveFile),
+                    menu::Message::SaveFileAs => Message::Shader(shader::Message::SaveFileAs),
+                    menu::Message::Undo => Message::Shader(shader::Message::Undo),
+                    menu::Message::Redo => Message::Shader(shader::Message::Redo),
+                    menu::Message::OpenProject => Message::OpenProject,
+                    menu::Message::NewProject => Message::NewProject,
+                    menu::Message::SaveProject => Message::SaveProject,
+                    menu::Message::SaveProjectAs => Message::SaveProjectAs,
+                };
+                self.update(message, now)
+            }
             Message::OpenProject => {
                 if self.is_loading {
                     Task::none()
@@ -109,18 +125,12 @@ impl Application {
                 }
             }
             Message::NewProject => {
-                if self.is_loading {
-                    Task::none()
-                } else {
-                    self.editor.close_lsp(&mut self.analyzer);
+                if !self.is_loading {
                     self.file = None;
                     self.notice = None;
-                    self.editor = editor::Editor::new(core::Project::untitled());
-
-                    self.editor
-                        .update(editor::Message::ProjectOpened, now, &mut self.analyzer)
-                        .map(Message::Editor)
+                    self.load(core::Project::untitled());
                 }
+                Task::none()
             }
             Message::ProjectOpened(result) => {
                 self.is_loading = false;
@@ -134,19 +144,15 @@ impl Application {
                 };
                 match project {
                     Ok((path, project)) => {
-                        self.editor.close_lsp(&mut self.analyzer);
                         self.file = Some(path);
-                        self.editor = editor::Editor::new(project);
-                        self.editor
-                            .update(editor::Message::ProjectOpened, now, &mut self.analyzer)
-                            .map(Message::Editor)
+                        self.load(project);
                     }
                     Err(error) => {
                         self.notice =
                             error.map(|error| format!("Could not open the project: {error}"));
-                        Task::none()
                     }
                 }
+                Task::none()
             }
             Message::SaveProject | Message::SaveProjectAs => {
                 if self.is_loading {
@@ -158,9 +164,14 @@ impl Application {
                         Message::SaveProject => self.file.clone(),
                         _ => None,
                     };
+                    let project = core::Project::new(
+                        self.shader.content(),
+                        self.uniforms.uniforms().clone(),
+                        self.uniforms.clock(),
+                    );
 
                     Task::perform(
-                        file::save_file(file, self.editor.project().to_json()),
+                        file::save_file(file, project.to_json()),
                         Message::ProjectSaved,
                     )
                 }
@@ -182,11 +193,13 @@ impl Application {
                 let mut tasks = Vec::new();
                 for update in self.analyzer.client().receive(event) {
                     match update {
-                        lsp::Update::Document(document) => tasks.push(
-                            self.editor
-                                .apply_lsp(&mut self.analyzer, document)
-                                .map(Message::Editor),
-                        ),
+                        lsp::Update::Document(document) => {
+                            let action = self.shader.apply_lsp(&mut self.analyzer, document);
+                            if let Some(shader::Instruction::Changed) = action.instruction {
+                                self.viewer.load(&program(&self.shader, &self.uniforms));
+                            }
+                            tasks.push(action.task.map(Message::Shader));
+                        }
                         lsp::Update::Status(status) => tracing::info!("wgsl-analyzer: {status:?}"),
                         lsp::Update::Log(entry) if entry.is_shown() => {
                             tracing::info!("wgsl-analyzer: {}", entry.text())
@@ -210,24 +223,35 @@ impl Application {
         task
     }
 
+    /// Replaces the shader and uniforms with `project`'s.
+    fn load(&mut self, project: core::Project) {
+        self.shader.close_lsp(&mut self.analyzer);
+        self.shader = shader::State::new(&project.shader);
+        self.shader.open_lsp(&mut self.analyzer);
+        self.uniforms = uniforms::State::new(project.uniforms, project.clock);
+        self.viewer.load(&program(&self.shader, &self.uniforms));
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         let panes = self
             .layout
             .view(|_, pane, _| match pane {
-                layout::PaneContent::Editor => (
-                    self.editor.view(&self.analyzer).map(Message::Editor).into(),
-                    {
-                        let file = self
-                            .editor
-                            .text()
-                            .filename_display_text()
-                            .unwrap_or_else(|| String::from("New file"));
-                        Some(match &self.notice {
-                            Some(notice) => format!("{file} · {notice}"),
-                            None => file,
-                        })
-                    },
-                ),
+                layout::PaneContent::Editor => {
+                    let file = self
+                        .shader
+                        .filename_display_text()
+                        .unwrap_or_else(|| String::from("New file"));
+                    let title = match &self.notice {
+                        Some(notice) => format!("{file} · {notice}"),
+                        None => file,
+                    };
+                    let editors = column![
+                        self.uniforms.view().map(Message::Uniforms),
+                        self.shader.view(&self.analyzer).map(Message::Shader),
+                    ];
+
+                    (container(editors).into(), Some(title))
+                }
                 layout::PaneContent::Viewer => (self.viewer.view().into(), None),
             })
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
@@ -247,7 +271,7 @@ impl Application {
     }
 
     pub fn theme(&self) -> Theme {
-        self.editor.text().theme()
+        self.shader.theme()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -260,8 +284,21 @@ impl Application {
             _ => None,
         });
 
-        Subscription::batch([self.editor.subscription().map(Message::Editor), escape])
+        Subscription::batch([
+            self.shader.subscription().map(Message::Shader),
+            self.uniforms.subscription().map(Message::Uniforms),
+            escape,
+        ])
     }
+}
+
+/// The program the viewer runs for the current shader and uniforms.
+fn program(shader: &shader::State, uniforms: &uniforms::State) -> core::Program {
+    core::Program::new(
+        shader.content(),
+        uniforms.uniforms().clone(),
+        uniforms.time(),
+    )
 }
 
 fn menu_icon<'a>() -> Element<'a, Message> {

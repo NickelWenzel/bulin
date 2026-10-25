@@ -4,7 +4,7 @@ mod clock;
 mod uniform;
 
 use iced::widget::{button, column, row, space};
-use iced::{Element, Subscription, Task};
+use iced::{Element, Subscription};
 
 use crate::core::uniform::Type;
 use crate::core::{Clock, Uniforms};
@@ -18,6 +18,10 @@ pub enum Message {
     Remove(String),
     AddTime,
     RemoveTime,
+}
+
+pub enum Instruction {
+    /// A uniform or the clock changed.
     Changed,
 }
 
@@ -36,18 +40,18 @@ impl State {
         }
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Option<Instruction> {
         match message {
             Message::Clock(message) => {
                 let Some(clock) = &mut self.clock else {
-                    return Task::none();
+                    return None;
                 };
                 clock.update(message);
             }
             Message::Set(name, value) => self.uniforms.set(&name, value),
             Message::Candidate(message) => {
                 self.candidate.update(message);
-                return Task::none();
+                return None;
             }
             Message::Add => {
                 if let Err(error) = self
@@ -55,17 +59,16 @@ impl State {
                     .add(&self.candidate.name, self.candidate.value)
                 {
                     tracing::debug!("uniform not added: {error}");
-                    return Task::none();
+                    return None;
                 }
                 self.candidate.name.clear();
             }
             Message::Remove(name) => self.uniforms.remove(&name),
             Message::AddTime => self.clock = Some(clock::State::new()),
             Message::RemoveTime => self.clock = None,
-            Message::Changed => return Task::none(),
         }
 
-        Task::done(Message::Changed)
+        Some(Instruction::Changed)
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -119,5 +122,68 @@ impl State {
         } else {
             Subscription::none()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name(state: &mut State, name: &str) -> Option<Instruction> {
+        state.update(Message::Candidate(uniform::CandidateMessage::NameChanged(
+            name.to_owned(),
+        )))
+    }
+
+    #[test]
+    fn adding_a_uniform_changes_the_program() {
+        let mut state = State::new(Uniforms::default(), None);
+
+        assert!(name(&mut state, "radius").is_none());
+        assert!(matches!(
+            state.update(Message::Add),
+            Some(Instruction::Changed)
+        ));
+        assert_eq!(state.uniforms().iter().count(), 1);
+    }
+
+    #[test]
+    fn a_taken_name_is_not_added() {
+        let mut state = State::new(Uniforms::default(), None);
+        name(&mut state, "radius");
+        let _ = state.update(Message::Add);
+        name(&mut state, "radius");
+
+        assert!(state.update(Message::Add).is_none());
+        assert_eq!(state.uniforms().iter().count(), 1);
+    }
+
+    #[test]
+    fn moving_a_slider_changes_the_program() {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("radius", Type::Float(0.5)).unwrap();
+        let mut state = State::new(uniforms, None);
+
+        let instruction = state.update(Message::Set("radius".to_owned(), Type::Float(0.7)));
+
+        assert!(matches!(instruction, Some(Instruction::Changed)));
+        let radius = state.uniforms().iter().next().unwrap();
+        assert_eq!(radius.value, Type::Float(0.7));
+    }
+
+    #[test]
+    fn turning_time_on_and_off_changes_the_program() {
+        let mut state = State::new(Uniforms::default(), None);
+
+        assert!(matches!(
+            state.update(Message::AddTime),
+            Some(Instruction::Changed)
+        ));
+        assert_eq!(state.time(), Some(0.0));
+        assert!(matches!(
+            state.update(Message::RemoveTime),
+            Some(Instruction::Changed)
+        ));
+        assert_eq!(state.time(), None);
     }
 }
