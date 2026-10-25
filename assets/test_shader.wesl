@@ -1,5 +1,6 @@
-@fragment
-fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+import uniforms::customs;
+
+fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {
     let time = customs.time;
     let radius = 0.3;
     let leaves = 7.0;
@@ -7,7 +8,7 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let flower_color = vec3<f32>(0.9, 0.1, 0.2);
     let test = vec3<f32>(0.1, 0.2, 0.1);
 
-    let st = uv;
+    let st = pixel.uv;
 
     let d = 0.25 + 0.5 * (0.5 + 0.5 * sin(2.0 * time));
     let pos = vec2<f32>(d) - st;

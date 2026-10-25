@@ -20,16 +20,27 @@ pub struct State {
 
 impl State {
     pub fn new(program: &Program) -> Self {
-        Self {
-            compiled: Arc::new(Compiled::from(program)),
+        let mut state = Self {
+            compiled: Arc::new(Compiled::default()),
             validating: Arc::new(AtomicBool::new(true)),
-        }
+        };
+        state.load(program);
+        state
     }
 
-    /// Shows `program` from the next frame on.
+    /// Shows `program` from the next frame on. A program that doesn't compile leaves the last
+    /// one showing.
     pub fn load(&mut self, program: &Program) {
-        self.compiled = Arc::new(Compiled::from(program));
-        self.validating.store(true, Ordering::Relaxed);
+        match program.compile() {
+            Ok(wgsl) => {
+                self.compiled = Arc::new(Compiled {
+                    wgsl,
+                    uniforms: program.bytes(),
+                });
+                self.validating.store(true, Ordering::Relaxed);
+            }
+            Err(error) => tracing::warn!("the shader doesn't compile: {error}"),
+        }
     }
 
     pub fn view<Message: 'static>(&self) -> Element<'_, Message> {
@@ -79,10 +90,14 @@ struct Compiled {
     uniforms: Vec<u8>,
 }
 
-impl From<&Program> for Compiled {
-    fn from(program: &Program) -> Self {
+impl Default for Compiled {
+    /// The default program, which always compiles.
+    fn default() -> Self {
+        let program = Program::default();
         Self {
-            wgsl: program.wgsl(),
+            wgsl: program
+                .compile()
+                .expect("invariant: the default program compiles"),
             uniforms: program.bytes(),
         }
     }
@@ -106,5 +121,43 @@ impl shader::Primitive for Primitive {
 
     fn draw(&self, pipeline: &Self::Pipeline, render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         pipeline.draw(render_pass)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::wgpu::naga;
+
+    use crate::core::{Program, Project};
+
+    /// What the GPU checks before the pipeline accepts a shader.
+    fn validate(wgsl: &str) {
+        let module = naga::front::wgsl::parse_str(wgsl).unwrap_or_else(|error| {
+            panic!("{}\n{wgsl}", error.emit_to_string(wgsl));
+        });
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|error| panic!("{error:?}\n{wgsl}"));
+    }
+
+    #[test]
+    fn compiled_programs_are_valid_wgsl() {
+        validate(&Program::default().compile().unwrap());
+
+        for json in [
+            include_str!("../assets/test_project.bulin"),
+            include_str!("../assets/test_project_2.bulin"),
+        ] {
+            let project = Project::from_json(json).unwrap();
+            let program = Program::new(
+                project.shader,
+                project.uniforms,
+                project.clock.map(|clock| clock.seconds()),
+            );
+            validate(&program.compile().unwrap());
+        }
     }
 }

@@ -1,8 +1,11 @@
+import bulin::Pixel;
+import package::shader::mainBulin;
+
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
 }
- 
+
 @vertex
 fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
     // Fullscreen triangle
@@ -11,4 +14,9 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
     out.uv = uv;
     out.pos = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
     return out;
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return mainBulin(Pixel(in.uv, in.pos));
 }

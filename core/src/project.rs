@@ -68,6 +68,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::Program;
     use crate::uniform::Type;
 
     #[test]
@@ -100,8 +101,12 @@ mod tests {
             include_str!("../../assets/test_project_2.bulin"),
         ] {
             let project = Project::from_json(json).unwrap();
-            assert!(project.shader.contains("customs.radius"));
-            assert!(project.clock.is_some());
+            let program = Program::new(
+                project.shader,
+                project.uniforms,
+                project.clock.map(|clock| clock.seconds()),
+            );
+            assert_eq!(program.compile().map(|_| ()), Ok(()));
         }
     }
 }

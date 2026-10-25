@@ -17,6 +17,8 @@ bulin-core = { path = "core" }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
+# naga-ext matches the wgsl-types feature wgsl-analyzer turns on; without it wgsl-parse fails to build.
+wesl = { version = "0.6", features = ["naga-ext"] }
 
 [dependencies]
 bulin-core = { workspace = true }

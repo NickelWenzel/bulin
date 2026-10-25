@@ -5,7 +5,7 @@
 Bulin lets users add uniforms at runtime. The selected values are used to build
 two representations of the same `Customs` structure:
 
-1. a WGSL declaration compiled into the fragment shader; and
+1. a WGSL declaration in the generated `uniforms` package, which shaders import; and
 2. a byte buffer uploaded to the GPU.
 
 Both representations must assign every member the same byte offset. Matching
@@ -15,7 +15,7 @@ rounds the final structure size up to the structure's alignment.
 ```mermaid
 flowchart LR
     Editor[Uniform editor] --> Types["Program: time + Uniforms"]
-    Types --> Declaration[WGSL Customs declaration]
+    Types --> Declaration["uniforms package: Customs declaration"]
     Types --> Layout[Alignment-aware byte writer]
     Declaration --> Pipeline[Shader pipeline]
     Layout --> Buffer[GPU uniform buffer]
@@ -25,7 +25,7 @@ flowchart LR
 
 Both representations live in the core crate. [`Type`](../../core/src/uniform.rs) knows how
 an individual value is represented and `pack` lays out a whole struct.
-[`Program`](../../core/src/program.rs) builds the declaration and the bytes from the same
+[`Program`](../../core/src/program.rs) builds the uniforms package and the bytes from the same
 member list: the built-in `time` first when it is on, then the user's uniforms in order.
 
 ## WGSL layout rules used by Bulin
