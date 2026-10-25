@@ -5,10 +5,9 @@ mod uniform;
 
 use iced::widget::{button, column, row, space};
 use iced::{Element, Subscription, Task};
-use serde::{Deserialize, Serialize};
 
-use crate::core::Uniforms;
 use crate::core::uniform::Type;
+use crate::core::{Clock, Uniforms};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -22,20 +21,17 @@ pub enum Message {
     Changed,
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct State {
     uniforms: Uniforms,
-    #[serde(rename = "time")]
     clock: Option<clock::State>,
-    #[serde(skip)]
     candidate: uniform::Candidate,
 }
 
 impl State {
-    pub fn new() -> Self {
+    pub fn new(uniforms: Uniforms, clock: Option<Clock>) -> Self {
         Self {
-            uniforms: Uniforms::default(),
-            clock: None,
+            uniforms,
+            clock: clock.map(clock::State::from),
             candidate: uniform::Candidate::new(),
         }
     }
@@ -105,6 +101,11 @@ impl State {
 
     pub fn uniforms(&self) -> &Uniforms {
         &self.uniforms
+    }
+
+    /// The clock behind `time`, when it is on.
+    pub fn clock(&self) -> Option<Clock> {
+        self.clock.as_ref().map(clock::State::clock)
     }
 
     /// Seconds on the clock, when `time` is on.

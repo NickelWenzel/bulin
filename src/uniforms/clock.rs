@@ -10,7 +10,6 @@ use wasmtimer::std::Instant;
 use iced::time;
 use iced::widget::{button, row, text};
 use iced::{Element, Length, Subscription};
-use serde::{Deserialize, Serialize};
 
 use crate::core::Clock;
 
@@ -21,8 +20,6 @@ pub enum Message {
     Tick(Instant),
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(from = "Clock", into = "Clock")]
 pub struct State {
     clock: Clock,
     /// When the previous tick arrived; ticks advance the clock by the time between them.
@@ -71,6 +68,10 @@ impl State {
     pub fn seconds(&self) -> f32 {
         self.clock.seconds()
     }
+
+    pub fn clock(&self) -> Clock {
+        self.clock
+    }
 }
 
 impl From<Clock> for State {
@@ -79,11 +80,5 @@ impl From<Clock> for State {
             clock,
             last_tick: None,
         }
-    }
-}
-
-impl From<State> for Clock {
-    fn from(state: State) -> Self {
-        state.clock
     }
 }
