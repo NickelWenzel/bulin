@@ -213,8 +213,8 @@ impl TextEditor {
         }
     }
 
-    pub fn view(&self, analyzer: &client::Status) -> Element<'_, Message> {
-        let status = match analyzer {
+    pub fn view(&self, analyzer: &Analyzer) -> Element<'_, Message> {
+        let status = match analyzer.status() {
             client::Status::Starting | client::Status::Restarting { .. } => {
                 "wgsl-analyzer: starting…".to_owned()
             }
@@ -229,7 +229,10 @@ impl TextEditor {
                     if warnings == 1 { "warning" } else { "warnings" },
                 ),
             },
-            client::Status::Stopped(_) => "wgsl-analyzer: unavailable".to_owned(),
+            client::Status::Stopped(_) => match analyzer.failure() {
+                Some(failure) => format!("wgsl-analyzer: unavailable, {failure}"),
+                None => "wgsl-analyzer: unavailable".to_owned(),
+            },
         };
 
         let controls = row![

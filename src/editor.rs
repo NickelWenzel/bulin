@@ -1,4 +1,4 @@
-use matcha_iced::lsp::{client, update};
+use matcha_iced::lsp::update;
 
 use crate::analyzer::Analyzer;
 use crate::shader_update::ShaderUpdate;
@@ -74,7 +74,7 @@ impl Editor {
         }
     }
 
-    pub fn view(&self, analyzer: &client::Status) -> Element<'_, Message> {
+    pub fn view(&self, analyzer: &Analyzer) -> Element<'_, Message> {
         container(iced::widget::column![
             self.uniforms_editor.view().map(Message::UniformsEditor),
             self.text_editor.view(analyzer).map(Message::TextEditor),
