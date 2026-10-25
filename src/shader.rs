@@ -4,6 +4,7 @@ use matcha_core::{Severity, TreeSitterDef};
 use matcha_iced::lsp::{client, update};
 use matcha_iced::{CodeEditor, Event};
 
+use crate::action::Action;
 use crate::analyzer::Analyzer;
 use crate::file;
 
@@ -52,6 +53,11 @@ pub enum Message {
     SaveFile,
     SaveFileAs,
     FileSaved(Result<file::Name, file::Error>),
+    Undo,
+    Redo,
+}
+
+pub enum Instruction {
     /// The shader text changed.
     Changed,
 }
@@ -87,7 +93,7 @@ impl State {
         &mut self,
         analyzer: &mut Analyzer,
         document: update::Document,
-    ) -> Task<Message> {
+    ) -> Action<Instruction, Message> {
         log_refusal(self.editor.apply_lsp(analyzer.client(), document));
 
         let diagnostics = self.editor.document().diagnostics_in(0..u32::MAX);
@@ -102,9 +108,9 @@ impl State {
 
         if self.editor.take_dirty() {
             self.is_dirty = true;
-            Task::done(Message::Changed)
+            Action::instruction(Instruction::Changed)
         } else {
-            Task::none()
+            Action::none()
         }
     }
 
@@ -113,19 +119,29 @@ impl State {
         message: Message,
         now: Instant,
         analyzer: &mut Analyzer,
-    ) -> Task<Message> {
+    ) -> Action<Instruction, Message> {
         match message {
             Message::Editor(event) => {
-                let task = self.editor.update(event, now).map(Message::Editor);
+                let action = Action::task(self.editor.update(event, now).map(Message::Editor));
                 log_refusal(self.editor.sync_lsp(analyzer.client()));
 
                 if self.editor.take_dirty() {
                     self.is_dirty = true;
-                    Task::batch([task, Task::done(Message::Changed)])
+                    action.with_instruction(Instruction::Changed)
                 } else {
-                    task
+                    action
                 }
             }
+            Message::Undo => self.update(
+                Message::Editor(Event::Editor(matcha_iced::Action::Undo)),
+                now,
+                analyzer,
+            ),
+            Message::Redo => self.update(
+                Message::Editor(Event::Editor(matcha_iced::Action::Redo)),
+                now,
+                analyzer,
+            ),
             Message::NewFile => {
                 if !self.is_loading {
                     self.close_lsp(analyzer);
@@ -134,15 +150,15 @@ impl State {
                     self.open_lsp(analyzer);
                 }
 
-                Task::done(Message::Changed)
+                Action::instruction(Instruction::Changed)
             }
             Message::OpenFile => {
                 if self.is_loading {
-                    Task::none()
+                    Action::none()
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(file::open_file(), Message::FileOpened)
+                    Action::task(Task::perform(file::open_file(), Message::FileOpened))
                 }
             }
             Message::FileOpened(result) => {
@@ -156,27 +172,30 @@ impl State {
                     self.open_lsp(analyzer);
                 }
 
-                Task::done(Message::Changed)
+                Action::instruction(Instruction::Changed)
             }
             Message::SaveFile => {
                 if self.is_loading {
-                    Task::none()
+                    Action::none()
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(
+                    Action::task(Task::perform(
                         file::save_file(self.file.clone(), self.content()),
                         Message::FileSaved,
-                    )
+                    ))
                 }
             }
             Message::SaveFileAs => {
                 if self.is_loading {
-                    Task::none()
+                    Action::none()
                 } else {
                     self.is_loading = true;
 
-                    Task::perform(file::save_file(None, self.content()), Message::FileSaved)
+                    Action::task(Task::perform(
+                        file::save_file(None, self.content()),
+                        Message::FileSaved,
+                    ))
                 }
             }
             Message::FileSaved(result) => {
@@ -196,9 +215,8 @@ impl State {
                     self.is_dirty = false;
                 }
 
-                Task::none()
+                Action::none()
             }
-            Message::Changed => Task::none(),
         }
     }
 
@@ -343,7 +361,7 @@ mod tests {
     use iced::time::Instant;
     use matcha_iced::lsp::Update;
 
-    use super::{Message, State};
+    use super::{Instruction, Message, State};
     use crate::analyzer::Analyzer;
     use crate::file;
 
@@ -357,7 +375,8 @@ mod tests {
             file::Name::from("/shaders/broken.wgsl"),
             Arc::new("fn f() -> i32 { return 1.0; }".to_owned()),
         ));
-        let _ = editor.update(Message::FileOpened(opened), Instant::now(), &mut analyzer);
+        let action = editor.update(Message::FileOpened(opened), Instant::now(), &mut analyzer);
+        assert!(matches!(action.instruction, Some(Instruction::Changed)));
 
         let deadline = Instant::now() + Duration::from_secs(30);
         while editor.problems.errors == 0 {

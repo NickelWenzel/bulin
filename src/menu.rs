@@ -1,58 +1,34 @@
-use crate::editor;
-use crate::shader;
-
-use iced::widget::column;
-use iced::widget::container;
-use iced::widget::rule;
-use iced::widget::{Button, button, text};
+use iced::widget::{Button, button, column, container, rule, text};
 use iced::{Element, Length};
-use matcha_iced::{Action, Event};
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    NewProject,
+    OpenFile,
+    NewFile,
+    SaveFile,
+    SaveFileAs,
     OpenProject,
+    NewProject,
     SaveProject,
     SaveProjectAs,
-    Editor(editor::Message),
+    Undo,
+    Redo,
 }
 
 pub fn view() -> Element<'static, Message> {
     container(column![
-        menu_item(
-            "Open File",
-            Message::Editor(editor::Message::TextEditor(shader::Message::OpenFile))
-        ),
-        menu_item(
-            "New File",
-            Message::Editor(editor::Message::TextEditor(shader::Message::NewFile))
-        ),
-        menu_item(
-            "Save File",
-            Message::Editor(editor::Message::TextEditor(shader::Message::SaveFile))
-        ),
-        menu_item(
-            "Save File as",
-            Message::Editor(editor::Message::TextEditor(shader::Message::SaveFileAs))
-        ),
+        menu_item("Open File", Message::OpenFile),
+        menu_item("New File", Message::NewFile),
+        menu_item("Save File", Message::SaveFile),
+        menu_item("Save File as", Message::SaveFileAs),
         rule::horizontal(1),
         menu_item("Open Project", Message::OpenProject),
         menu_item("New Project", Message::NewProject),
         menu_item("Save Project", Message::SaveProject),
         menu_item("Save Project as", Message::SaveProjectAs),
         rule::horizontal(1),
-        menu_item(
-            "Undo",
-            Message::Editor(editor::Message::TextEditor(shader::Message::Editor(
-                Event::Editor(Action::Undo)
-            ))),
-        ),
-        menu_item(
-            "Redo",
-            Message::Editor(editor::Message::TextEditor(shader::Message::Editor(
-                Event::Editor(Action::Redo)
-            ))),
-        )
+        menu_item("Undo", Message::Undo),
+        menu_item("Redo", Message::Redo),
     ])
     .width(180.0)
     .padding(10)
