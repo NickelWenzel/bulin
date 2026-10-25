@@ -16,6 +16,8 @@ pub struct State {
     // Set on every change and cleared by the pipeline once no edited shader
     // awaits validation, keeping frames coming until its result is applied
     validating: Arc<AtomicBool>,
+    /// Why the last loaded program didn't compile, until one does.
+    error: Option<String>,
 }
 
 impl State {
@@ -23,6 +25,7 @@ impl State {
         let mut state = Self {
             compiled: Arc::new(Compiled::default()),
             validating: Arc::new(AtomicBool::new(true)),
+            error: None,
         };
         state.load(program);
         state
@@ -38,9 +41,23 @@ impl State {
                     uniforms: program.bytes(),
                 });
                 self.validating.store(true, Ordering::Relaxed);
+                self.error = None;
             }
-            Err(error) => tracing::warn!("the shader doesn't compile: {error}"),
+            Err(error) => {
+                tracing::debug!("the shader doesn't compile: {error}");
+                self.error = Some(error.to_string());
+            }
         }
+    }
+
+    /// Why the shader doesn't compile, in one line.
+    pub fn error(&self) -> Option<&str> {
+        let line = self
+            .error
+            .as_deref()?
+            .lines()
+            .find(|line| !line.trim().is_empty())?;
+        Some(line.strip_prefix("error: ").unwrap_or(line))
     }
 
     pub fn view<Message: 'static>(&self) -> Element<'_, Message> {
@@ -128,7 +145,8 @@ impl shader::Primitive for Primitive {
 mod tests {
     use iced::wgpu::naga;
 
-    use crate::core::{Program, Project};
+    use super::State;
+    use crate::core::{Program, Project, Uniforms};
 
     /// What the GPU checks before the pipeline accepts a shader.
     fn validate(wgsl: &str) {
@@ -159,5 +177,19 @@ mod tests {
             );
             validate(&program.compile().unwrap());
         }
+    }
+
+    #[test]
+    fn a_broken_shader_is_reported_until_one_compiles() {
+        let mut viewer = State::new(&Program::default());
+        let broken = Program::new("fn mainBulin(", Uniforms::default(), None);
+
+        viewer.load(&broken);
+        let error = viewer.error().expect("a broken shader is reported");
+        assert!(error.contains("unexpected end of file"), "{error}");
+        assert!(!error.starts_with("error:"), "{error}");
+
+        viewer.load(&Program::default());
+        assert_eq!(viewer.error(), None);
     }
 }
