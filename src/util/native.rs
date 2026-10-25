@@ -12,6 +12,10 @@ impl FileName {
     pub fn as_str(&self) -> Option<&str> {
         self.0.to_str()
     }
+
+    pub fn file_name(&self) -> Option<&str> {
+        self.0.file_name()?.to_str()
+    }
 }
 
 pub async fn open_file() -> Result<(FileName, Arc<String>), Error> {

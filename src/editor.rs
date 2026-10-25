@@ -1,3 +1,4 @@
+use crate::analyzer::Analyzer;
 use crate::shader_update::ShaderUpdate;
 use crate::text_editor;
 use crate::uniforms_editor;
@@ -66,6 +67,11 @@ impl Editor {
             self.text_editor.view().map(Message::TextEditor),
         ])
         .into()
+    }
+
+    /// Opens the shader on the language server.
+    pub fn open_lsp(&mut self, analyzer: &mut Analyzer) {
+        self.text_editor.open_lsp(analyzer);
     }
 
     pub fn text(&self) -> &text_editor::TextEditor {

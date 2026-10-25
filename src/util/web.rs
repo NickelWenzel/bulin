@@ -11,6 +11,10 @@ impl FileName {
     pub fn as_str(&self) -> Option<&str> {
         Some(&self.0)
     }
+
+    pub fn file_name(&self) -> Option<&str> {
+        Some(&self.0)
+    }
 }
 
 pub async fn open_file() -> Result<(FileName, Arc<String>), Error> {

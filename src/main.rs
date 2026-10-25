@@ -11,7 +11,7 @@ fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
 
     iced::application::timed(
-        Application::default,
+        Application::new,
         Application::update,
         Application::subscription,
         Application::view,

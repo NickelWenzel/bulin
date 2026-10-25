@@ -3,6 +3,7 @@ use iced::{Subscription, Theme, event, keyboard};
 use matcha_core::TreeSitterDef;
 use matcha_iced::{CodeEditor, Event};
 
+use crate::analyzer::Analyzer;
 use crate::shader_update::FragmentShader;
 use crate::util::{self, FileName};
 
@@ -31,8 +32,11 @@ fn default_editor() -> CodeEditor {
 }
 
 fn wgsl_editor(source: &str) -> CodeEditor {
-    let wesl = TreeSitterDef::new(tree_sitter_wesl::LANGUAGE, tree_sitter_wesl::HIGHLIGHTS_QUERY)
-        .expect("tree-sitter-wesl's highlights query compiles");
+    let wesl = TreeSitterDef::new(
+        tree_sitter_wesl::LANGUAGE,
+        tree_sitter_wesl::HIGHLIGHTS_QUERY,
+    )
+    .expect("tree-sitter-wesl's highlights query compiles");
 
     CodeEditor::new(source)
         .language(wesl)
@@ -58,6 +62,14 @@ impl TextEditor {
             editor: wgsl_editor(shader),
             is_loading: false,
             is_dirty: false,
+        }
+    }
+
+    /// Opens the shader on the language server under its file's name.
+    pub fn open_lsp(&mut self, analyzer: &mut Analyzer) {
+        let uri = analyzer.document_uri(self.file.as_ref());
+        if let Err(error) = self.editor.open_lsp(analyzer.client(), &uri, "wgsl") {
+            tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
         }
     }
 
