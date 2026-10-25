@@ -63,10 +63,11 @@ pub enum Error {
 /// Names the program declares itself.
 const RESERVED: [&str; 1] = ["time"];
 
-/// WGSL keywords and the type names a member could be confused with.
-const KEYWORDS: [&str; 34] = [
+/// WGSL and WESL keywords, and the type names a member could be confused with.
+const KEYWORDS: [&str; 38] = [
     "alias",
     "array",
+    "as",
     "bool",
     "break",
     "case",
@@ -86,12 +87,15 @@ const KEYWORDS: [&str; 34] = [
     "for",
     "i32",
     "if",
+    "import",
     "let",
     "loop",
     "override",
+    "package",
     "requires",
     "return",
     "struct",
+    "super",
     "switch",
     "true",
     "u32",
@@ -405,6 +409,10 @@ mod tests {
         );
         assert_eq!(uniforms.check("__x"), Err(Error::Invalid("__x".into())));
         assert_eq!(uniforms.check("fn"), Err(Error::Keyword("fn".into())));
+        assert_eq!(
+            uniforms.check("import"),
+            Err(Error::Keyword("import".into()))
+        );
         assert_eq!(uniforms.check("time"), Err(Error::Reserved("time".into())));
         assert_eq!(
             uniforms.check("radius"),

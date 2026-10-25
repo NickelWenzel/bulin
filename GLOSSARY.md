@@ -1,13 +1,37 @@
-# Glossary
+# bulin
 
-- **Shader**: the fragment shader the user edits. It defines `fs_main` and reads its inputs
-  from `customs`.
-- **Uniform**: a named value the user adds and adjusts with sliders, such as a radius or a
-  color. Its value also fixes its WGSL type. Names are unique WGSL identifiers.
-- **Time**: the built-in uniform, the seconds on the clock. While it is on, it is always the
-  first member of Customs, under the name `time`.
-- **Customs**: the WGSL struct bulin generates from time and the uniforms, bound as
-  `customs` at `@group(0) @binding(0)`.
-- **Program**: the shader together with the uniforms and time. The viewer compiles and runs
-  it: a fixed vertex stage, then the Customs declaration, then the shader.
-- **Project**: the saved file holding a shader, its uniforms and the clock.
+bulin is a live editor for fragment shaders: the user writes a shader, adjusts the values it
+reads with sliders, and watches the result.
+
+## Language
+
+**Shader**:
+The WESL module the user edits. It defines `mainBulin`, which bulin calls for every pixel, and
+imports the uniforms it reads from the uniforms package.
+_Avoid_: fragment shader, entry point
+
+**Uniform**:
+A named value the user adds and adjusts with sliders, such as a radius or a color. A shader reads
+it as a member of the imported `customs` struct, as in `customs.radius`.
+_Avoid_: custom, parameter
+
+**Time**:
+The built-in uniform: the seconds on the clock, read as `customs.time` while the clock is on.
+
+**Uniforms package**:
+The package bulin generates from the uniforms and time, named `uniforms`. It holds one struct
+value, `customs`, that a shader imports with `import uniforms::customs;`.
+
+**Pixel**:
+What bulin tells `mainBulin` about the pixel it draws: its normalized coordinates `uv` and its
+framebuffer `position`.
+
+**bulin package**:
+The fixed package bulin provides to every shader, named `bulin`. It holds `Pixel`.
+
+**Program**:
+The shader together with the uniforms package and the bulin package. The viewer compiles and runs
+it.
+
+**Project**:
+The saved file holding a shader, its uniforms and the clock.

@@ -1,21 +1,42 @@
-//! The program the viewer runs: the user's shader with the uniforms it reads.
+//! The program the viewer runs: the user's shader compiled with the packages it imports.
+
+use std::borrow::Cow;
+
+use wesl::error::{ResolveError, UsageError};
+use wesl::syntax::{ModulePath, PathOrigin};
+use wesl::{CompileOptions, Compiler, Resolver};
 
 use crate::uniform::{self, Type, Uniforms};
 
 /// The shader a new project starts with.
-pub const DEFAULT_SOURCE: &str = include_str!("program/default.wgsl");
+pub const DEFAULT_SOURCE: &str = include_str!("program/default.wesl");
 
-/// The fullscreen-triangle vertex stage every shader is compiled with.
-const PRELUDE: &str = include_str!("program/prelude.wgsl");
+/// The `bulin` package every shader can import.
+pub const BULIN_PACKAGE: &str = include_str!("program/bulin.wesl");
 
-/// A user shader and the values of the `Customs` struct it reads.
+/// bulin's main module: the vertex stage and the fragment entry point calling `mainBulin`.
+const MAIN: &str = include_str!("program/main.wesl");
+
+/// The function every shader defines.
+const MAIN_BULIN: &str = "mainBulin";
+
+/// A user shader and the values of the uniforms it reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    /// The user's fragment shader.
+    /// The user's shader, a WESL module.
     pub source: String,
     pub uniforms: Uniforms,
-    /// Seconds on the clock, declared as `customs.time` when present.
+    /// Seconds on the clock, the `time` member of `customs` when present.
     pub time: Option<f32>,
+}
+
+/// Why a shader doesn't compile.
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    #[error("the shader must define `fn mainBulin(pixel: bulin::Pixel) -> vec4<f32>`")]
+    MissingMain,
+    #[error("{0}")]
+    Compile(String),
 }
 
 impl Program {
@@ -27,8 +48,9 @@ impl Program {
         }
     }
 
-    /// The complete WGSL module: vertex stage, `Customs` declaration and user source.
-    pub fn wgsl(&self) -> String {
+    /// The `uniforms` package: the `Customs` struct and its `customs` binding, or nothing when
+    /// there are no members.
+    pub fn uniforms_package(&self) -> String {
         let members = self
             .time
             .map(|_| "time: f32".to_owned())
@@ -41,15 +63,42 @@ impl Program {
             .collect::<Vec<_>>();
 
         if members.is_empty() {
-            return format!("{PRELUDE}\n\n{}", self.source);
+            return String::new();
         }
 
         format!(
-            "{PRELUDE}\n\nstruct Customs {{\n    {},\n}}\n\n\
-             @group(0) @binding(0) var<uniform> customs: Customs;\n\n{}",
+            "struct Customs {{\n    {},\n}}\n\n\
+             @group(0) @binding(0) var<uniform> customs: Customs;\n",
             members.join(",\n    "),
-            self.source
         )
+    }
+
+    /// The complete WGSL module: bulin's entry points, the shader and what it imports.
+    pub fn compile(&self) -> Result<String, Error> {
+        let options = CompileOptions {
+            // wgsl-analyzer can't parse `public`, so packages are written without it.
+            visibility: false,
+            ..CompileOptions::default()
+        };
+        let modules = Modules {
+            shader: &self.source,
+            uniforms: self.uniforms_package(),
+        };
+
+        Compiler::new_with_resolver(options, modules)
+            .compile_root()
+            .map(|compiled| compiled.to_string())
+            .map_err(|error| {
+                let diagnostic = error.diagnostic();
+                match &*diagnostic.error {
+                    wesl::Error::UsageError(UsageError::NotFound(module, name))
+                        if is_shader(module) && name == MAIN_BULIN =>
+                    {
+                        Error::MissingMain
+                    }
+                    _ => Error::Compile(diagnostic.render_plain()),
+                }
+            })
     }
 
     /// The `Customs` struct's bytes for the GPU uniform buffer; empty without members.
@@ -69,17 +118,72 @@ impl Default for Program {
     }
 }
 
+/// The modules a program compiles from, all in memory.
+struct Modules<'a> {
+    shader: &'a str,
+    uniforms: String,
+}
+
+impl Resolver for Modules<'_> {
+    fn resolve_source<'a>(&'a self, path: &ModulePath) -> Result<Cow<'a, str>, ResolveError> {
+        let source = match (&path.origin, path.components.as_slice()) {
+            (PathOrigin::Absolute, []) => MAIN,
+            _ if is_shader(path) => self.shader,
+            (PathOrigin::Package(package), []) if package == "uniforms" => &self.uniforms,
+            (PathOrigin::Package(package), []) if package == "bulin" => BULIN_PACKAGE,
+            _ => {
+                return Err(ResolveError::ModuleNotFound(
+                    path.clone(),
+                    "bulin provides only the `uniforms` and `bulin` packages".to_owned(),
+                ));
+            }
+        };
+        Ok(Cow::Borrowed(source))
+    }
+
+    fn display_name(&self, path: &ModulePath) -> Option<String> {
+        Some(if is_shader(path) {
+            "shader".to_owned()
+        } else {
+            path.to_string()
+        })
+    }
+}
+
+/// Whether `path` is the user's shader, `package::shader`.
+fn is_shader(path: &ModulePath) -> bool {
+    matches!(
+        (&path.origin, path.components.as_slice()),
+        (PathOrigin::Absolute, [module]) if module == "shader"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_program_without_members_declares_no_customs() {
-        let program = Program::default();
+    fn the_default_shader_compiles_with_both_entry_points() {
+        let wgsl = Program::default().compile().unwrap();
 
-        assert!(!program.wgsl().contains("Customs"));
-        assert!(program.wgsl().ends_with(DEFAULT_SOURCE));
-        assert!(program.bytes().is_empty());
+        assert!(wgsl.contains("fn vs_main("));
+        assert!(wgsl.contains("fn fs_main("));
+        assert!(!wgsl.contains("customs"));
+    }
+
+    #[test]
+    fn a_shader_reads_imported_uniforms() {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("color", Type::Col3((1.0, 0.0, 0.0))).unwrap();
+        let source = "import uniforms::customs;\n\
+                      fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {\n\
+                          return vec4<f32>(customs.color * sin(customs.time), pixel.uv.x);\n\
+                      }\n";
+        let wgsl = Program::new(source, uniforms, Some(1.0)).compile().unwrap();
+
+        assert!(wgsl.contains("@group(0) @binding(0)"));
+        assert!(wgsl.contains("time: f32"));
+        assert!(wgsl.contains("color: vec3<f32>"));
     }
 
     #[test]
@@ -87,13 +191,11 @@ mod tests {
         let mut uniforms = Uniforms::default();
         uniforms.add("color", Type::Col3((1.0, 0.0, 0.0))).unwrap();
         uniforms.add("leaves", Type::Int(5)).unwrap();
-        let program = Program::new("// user", uniforms, Some(2.0));
+        let program = Program::new("", uniforms, Some(2.0));
 
-        assert!(program.wgsl().contains(
+        assert!(program.uniforms_package().starts_with(
             "struct Customs {\n    time: f32,\n    color: vec3<f32>,\n    leaves: i32,\n}"
         ));
-        assert!(program.wgsl().contains("var<uniform> customs: Customs;"));
-        assert!(program.wgsl().ends_with("// user"));
 
         // `leaves` fills the four bytes `color`'s vec3 leaves free.
         let bytes = program.bytes();
@@ -101,5 +203,34 @@ mod tests {
         assert_eq!(&bytes[0..4], &2.0f32.to_le_bytes());
         assert_eq!(&bytes[16..20], &1.0f32.to_le_bytes());
         assert_eq!(&bytes[28..32], &5i32.to_le_bytes());
+    }
+
+    #[test]
+    fn a_program_without_members_has_an_empty_uniforms_package() {
+        assert!(Program::default().uniforms_package().is_empty());
+        assert!(Program::default().bytes().is_empty());
+    }
+
+    #[test]
+    fn a_shader_without_main_bulin_is_told_what_to_define() {
+        let fragment = "@fragment\n\
+                        fn fs_main() -> @location(0) vec4<f32> { return vec4<f32>(1.0); }\n";
+
+        assert_eq!(
+            Program::new(fragment, Uniforms::default(), None).compile(),
+            Err(Error::MissingMain)
+        );
+    }
+
+    #[test]
+    fn a_syntax_error_reports_the_shader() {
+        let broken = "fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> { return }\n";
+
+        let Err(Error::Compile(message)) =
+            Program::new(broken, Uniforms::default(), None).compile()
+        else {
+            panic!("a syntax error must not compile");
+        };
+        assert!(message.contains("shader"), "{message}");
     }
 }

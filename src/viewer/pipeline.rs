@@ -14,8 +14,6 @@ use iced::wgpu;
 use iced::widget::shader::{self};
 use tracing::{debug, warn};
 
-use crate::core::Program;
-
 use super::Compiled;
 
 const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -80,7 +78,7 @@ impl shader::Pipeline for Pipeline {
     fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         device.on_uncaptured_error(Arc::new(|e| debug!("WGPU error: {e:#}")));
 
-        let compiled = Compiled::from(&Program::default());
+        let compiled = Compiled::default();
 
         // --- Uniforms -----------------------------------------------------
         let uniforms = create_uniforms_buffer(device, compiled.uniforms.len() as u64);
