@@ -1,7 +1,7 @@
 //! Double-buffered render-to-texture shader widget.
 //!
-//! The flower shader is rendered into an offscreen "back" texture. Once the
-//! GPU confirms that submission is complete, front/back are swapped and the
+//! The program is rendered into an offscreen "back" texture. Once the GPU
+//! confirms that submission is complete, front/back are swapped and the
 //! widget blits the freshly finished texture to the screen. Until then, the
 //! previous frame keeps being shown.
 

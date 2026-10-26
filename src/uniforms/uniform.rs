@@ -7,7 +7,7 @@ use iced::{
     widget::{column, combo_box, container, row, slider, space, stack, text, text_input},
 };
 
-use crate::core::uniform::{Type, Uniform, Uniforms};
+use crate::core::uniform::{Error, Type, Uniform, Uniforms};
 
 /// A uniform's name and sliders for its value.
 pub fn view(uniform: &Uniform) -> Element<'_, Type> {
@@ -157,8 +157,8 @@ fn slider_style(theme: &Theme, status: slider::Status) -> slider::Style {
 /// The row for naming and typing a new uniform.
 pub struct Candidate {
     types: combo_box::State<Type>,
-    pub value: Type,
-    pub name: String,
+    value: Type,
+    name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -176,8 +176,19 @@ impl Candidate {
         }
     }
 
-    /// The input row, with why the typed name can't be added below it.
-    pub fn view<'a>(&'a self, uniforms: &Uniforms) -> Element<'a, CandidateMessage> {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Adds the candidate to `uniforms` and clears its name for the next one.
+    pub fn submit(&mut self, uniforms: &mut Uniforms) -> Result<(), Error> {
+        uniforms.add(&self.name, self.value)?;
+        self.name.clear();
+        Ok(())
+    }
+
+    /// The input row, with `check`'s complaint about the typed name below it.
+    pub fn view<'a>(&'a self, check: &Result<(), Error>) -> Element<'a, CandidateMessage> {
         let input = row![
             text_input("Name...", &self.name).on_input(CandidateMessage::NameChanged),
             combo_box(
@@ -187,7 +198,7 @@ impl Candidate {
                 CandidateMessage::Selected,
             ),
         ];
-        let problem = match uniforms.check(&self.name) {
+        let problem = match check {
             Err(error) if !self.name.is_empty() => Some(text(error.to_string()).size(12)),
             _ => None,
         };
