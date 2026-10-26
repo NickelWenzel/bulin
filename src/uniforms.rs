@@ -68,10 +68,7 @@ impl State {
                 self.candidate.name.clear();
                 Some(Instruction::Layout)
             }
-            Message::Remove(name) => {
-                self.uniforms.remove(&name);
-                Some(Instruction::Layout)
-            }
+            Message::Remove(name) => self.uniforms.remove(&name).then_some(Instruction::Layout),
             Message::AddTime => {
                 self.clock = Some(clock::State::new());
                 Some(Instruction::Layout)
@@ -168,6 +165,13 @@ mod tests {
 
         assert!(state.update(Message::Add).is_none());
         assert_eq!(state.uniforms().iter().count(), 1);
+    }
+
+    #[test]
+    fn removing_an_unknown_uniform_changes_nothing() {
+        let mut state = State::new(Uniforms::default(), None);
+
+        assert!(state.update(Message::Remove("radius".to_owned())).is_none());
     }
 
     #[test]

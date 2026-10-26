@@ -320,4 +320,30 @@ mod tests {
             assert!(Arc::ptr_eq(&good, &viewer.compiled.wgsl));
         }
     }
+
+    #[test]
+    fn every_name_a_uniform_can_take_runs_on_the_gpu() {
+        let uniforms = Uniforms::default();
+        for word in iced::wgpu::naga::keywords::wgsl::RESERVED {
+            assert!(uniforms.check(word).is_err(), "`{word}` must be refused");
+        }
+
+        let mut uniforms = Uniforms::default();
+        let names = ["vec3", "color", "time2", "f32", "position", "uv", "_x"];
+        for name in names {
+            uniforms.add(name, Type::Float(1.0)).unwrap();
+        }
+        let reads = names
+            .iter()
+            .map(|name| format!("customs.{name}"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let source = format!(
+            "import uniforms::customs;\n\
+             fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {{\n\
+                 return vec4<f32>({reads});\n\
+             }}\n"
+        );
+        super::compile(&Program::new(source, uniforms, Some(0.0))).unwrap();
+    }
 }

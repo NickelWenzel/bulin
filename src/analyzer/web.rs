@@ -11,7 +11,7 @@ use matcha_iced::lsp::gen_lsp_types::Uri;
 use matcha_iced::lsp::lsp_server::{Connection, Message};
 use wasm_bindgen::prelude::{Closure, wasm_bindgen};
 
-use super::FILES;
+use super::files;
 
 #[wasm_bindgen(module = "/web/analyzer.js")]
 extern "C" {
@@ -67,9 +67,9 @@ impl Link {
         });
 
         let files = serde_json::Value::Object(
-            FILES
-                .iter()
-                .map(|(path, contents)| ((*path).to_owned(), (*contents).into()))
+            files()
+                .into_iter()
+                .map(|(path, contents)| (path, contents.into()))
                 .collect(),
         )
         .to_string();
