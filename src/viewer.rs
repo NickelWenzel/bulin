@@ -21,25 +21,18 @@ pub struct State {
     // Set on every change and cleared by the pipeline once no edited shader
     // awaits validation, keeping frames coming until its result is applied
     validating: Arc<AtomicBool>,
-    /// Why the last loaded program didn't compile, until one does.
+    /// Why the last loaded program doesn't run, in one line, until one does.
     error: Option<String>,
 }
 
 impl State {
     pub fn new(program: &Program) -> Self {
-        let (compiled, package, error) = match program.compile() {
-            Ok(wgsl) => (
-                Compiled {
-                    wgsl: wgsl.into(),
-                    uniforms: program.bytes(),
-                },
-                program.uniforms_package(),
-                None,
-            ),
+        let (compiled, package, error) = match compile(program) {
+            Ok(compiled) => (compiled, program.uniforms_package(), None),
             Err(error) => (
                 Compiled::default(),
                 Program::default().uniforms_package(),
-                Some(error.to_string()),
+                Some(error),
             ),
         };
 
@@ -56,12 +49,9 @@ impl State {
     /// one showing, with `program`'s values when its layout is the same.
     pub fn load(&mut self, program: &Program) {
         let package = program.uniforms_package();
-        match program.compile() {
-            Ok(wgsl) => {
-                self.compiled = Arc::new(Compiled {
-                    wgsl: wgsl.into(),
-                    uniforms: program.bytes(),
-                });
+        match compile(program) {
+            Ok(compiled) => {
+                self.compiled = Arc::new(compiled);
                 self.package = package;
                 self.layout_matches = true;
                 self.error = None;
@@ -69,7 +59,7 @@ impl State {
             }
             Err(error) => {
                 tracing::debug!("the shader doesn't compile: {error}");
-                self.error = Some(error.to_string());
+                self.error = Some(error);
                 self.layout_matches = package == self.package;
                 self.set_values(program.bytes());
             }
@@ -89,14 +79,9 @@ impl State {
         self.validating.store(true, Ordering::Relaxed);
     }
 
-    /// Why the shader doesn't compile, in one line.
+    /// Why the shader doesn't run, in one line.
     pub fn error(&self) -> Option<&str> {
-        let line = self
-            .error
-            .as_deref()?
-            .lines()
-            .find(|line| !line.trim().is_empty())?;
-        Some(line.strip_prefix("error: ").unwrap_or(line))
+        self.error.as_deref()
     }
 
     pub fn view<Message: 'static>(&self) -> Element<'_, Message> {
@@ -146,6 +131,50 @@ struct Compiled {
     uniforms: Vec<u8>,
 }
 
+/// Compiles `program` and checks the result as the GPU will, so a program the device would reject
+/// is reported instead of silently not showing. Errors are one line, in the shader's own names.
+fn compile(program: &Program) -> Result<Compiled, String> {
+    let wgsl = program.compile().map_err(|error| {
+        let error = error.to_string();
+        let line = error
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default();
+        line.strip_prefix("error: ").unwrap_or(line).to_owned()
+    })?;
+
+    // iced's `webgl` feature is what makes wgpu re-export naga on wasm.
+    let module =
+        wgpu::naga::front::wgsl::parse_str(&wgsl).map_err(|error| unmangle(error.message()))?;
+    // A device created without optional features validates with the default capabilities.
+    wgpu::naga::valid::Validator::new(
+        wgpu::naga::valid::ValidationFlags::all(),
+        wgpu::naga::valid::Capabilities::default(),
+    )
+    .validate(&module)
+    .map_err(|error| {
+        let error = error.into_inner();
+        let mut cause: &dyn std::error::Error = &error;
+        while let Some(source) = cause.source() {
+            cause = source;
+        }
+        unmangle(&cause.to_string())
+    })?;
+
+    Ok(Compiled {
+        wgsl: wgsl.into(),
+        uniforms: program.bytes(),
+    })
+}
+
+/// Turns wesl's mangled names in `message` back into the names the shader uses.
+fn unmangle(message: &str) -> String {
+    message
+        .replace("package_shader_", "")
+        .replace("uniforms_", "uniforms::")
+        .replace("bulin_", "bulin::")
+}
+
 impl Default for Compiled {
     /// The default program, which always compiles.
     fn default() -> Self {
@@ -185,8 +214,6 @@ impl shader::Primitive for Primitive {
 mod tests {
     use std::sync::Arc;
 
-    use iced::wgpu::naga;
-
     use super::State;
     use crate::core::uniform::Type;
     use crate::core::{Program, Project, Uniforms};
@@ -202,22 +229,9 @@ mod tests {
         uniforms
     }
 
-    /// What the GPU checks before the pipeline accepts a shader.
-    fn validate(wgsl: &str) {
-        let module = naga::front::wgsl::parse_str(wgsl).unwrap_or_else(|error| {
-            panic!("{}\n{wgsl}", error.emit_to_string(wgsl));
-        });
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .unwrap_or_else(|error| panic!("{error:?}\n{wgsl}"));
-    }
-
     #[test]
-    fn compiled_programs_are_valid_wgsl() {
-        validate(&Program::default().compile().unwrap());
+    fn the_default_and_sample_programs_run() {
+        super::compile(&Program::default()).unwrap();
 
         for json in [
             include_str!("../assets/test_project.bulin"),
@@ -229,7 +243,7 @@ mod tests {
                 project.uniforms,
                 project.clock.map(|clock| clock.seconds()),
             );
-            validate(&program.compile().unwrap());
+            super::compile(&program).unwrap();
         }
     }
 
@@ -287,5 +301,23 @@ mod tests {
         viewer.load(&Program::new(READS_RADIUS, radius(1.0), None));
 
         assert_eq!(viewer.error(), None);
+    }
+
+    #[test]
+    fn errors_only_the_gpu_would_catch_are_reported() {
+        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+        let good = Arc::clone(&viewer.compiled.wgsl);
+
+        for source in [
+            READS_RADIUS.replace("customs.radius", "customs.nope"),
+            READS_RADIUS.replace("vec4<f32>(customs.radius)", "1.0"),
+        ] {
+            viewer.load(&Program::new(source, radius(1.0), None));
+
+            let error = viewer.error().expect("the GPU would reject this shader");
+            assert!(!error.contains("package_shader_"), "{error}");
+            assert!(!error.contains('['), "{error}");
+            assert!(Arc::ptr_eq(&good, &viewer.compiled.wgsl));
+        }
     }
 }

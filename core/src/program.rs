@@ -17,6 +17,9 @@ pub const BULIN_PACKAGE: &str = include_str!("program/bulin.wesl");
 /// bulin's main module: the vertex stage and the fragment entry point calling `mainBulin`.
 const MAIN: &str = include_str!("program/main.wesl");
 
+/// What bulin's main module declares.
+const MAIN_DECLARATIONS: [&str; 3] = ["VsOut", "vs_main", "fs_main"];
+
 /// The function every shader defines.
 const MAIN_BULIN: &str = "mainBulin";
 
@@ -96,7 +99,19 @@ impl Program {
                     {
                         Error::MissingMain
                     }
-                    _ => Error::Compile(diagnostic.render_plain()),
+                    _ => match (&diagnostic.detail, diagnostic.detail.span) {
+                        (detail, Some(span)) if in_shader(detail) => {
+                            let before = &self.source[..span.start.min(self.source.len())];
+                            let line = before.matches('\n').count() + 1;
+                            let column = before
+                                .rsplit('\n')
+                                .next()
+                                .map_or(0, |line| line.chars().count())
+                                + 1;
+                            Error::Compile(format!("{line}:{column}: {}", diagnostic.error))
+                        }
+                        _ => Error::Compile(diagnostic.render_plain()),
+                    },
                 }
             })
     }
@@ -151,6 +166,18 @@ impl Resolver for Modules<'_> {
         } else {
             path.to_string()
         })
+    }
+}
+
+/// Whether a diagnostic's span points into the shader's text. Validation errors name only the
+/// declaration they're in, and condcomp errors carry a span without either, so a span counts as
+/// the shader's when the shader module is named, or when the declaration isn't one of the main
+/// module's.
+fn in_shader(detail: &wesl::error::Detail) -> bool {
+    match (&detail.module_path, &detail.declaration) {
+        (Some(module), _) => is_shader(module),
+        (None, Some(declaration)) => !MAIN_DECLARATIONS.contains(&declaration.as_str()),
+        (None, None) => false,
     }
 }
 
@@ -227,14 +254,27 @@ mod tests {
     }
 
     #[test]
-    fn a_syntax_error_reports_the_shader() {
-        let broken = "fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> { return }\n";
+    fn a_syntax_error_reports_its_line_and_column_in_the_shader() {
+        let broken = "// ünïcode\nfn mainBulin(pixel: bulin::Pixel) -> vec4<f32> { return }\n";
 
         let Err(Error::Compile(message)) =
             Program::new(broken, Uniforms::default(), None).compile()
         else {
             panic!("a syntax error must not compile");
         };
-        assert!(message.contains("shader"), "{message}");
+        assert!(message.starts_with("2:"), "{message}");
+        assert!(!message.contains('\n'), "{message}");
+    }
+
+    #[test]
+    fn an_undefined_name_reports_its_line_in_the_shader() {
+        let source = "fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {\n    return nothing;\n}\n";
+
+        let Err(Error::Compile(message)) =
+            Program::new(source, Uniforms::default(), None).compile()
+        else {
+            panic!("an undefined name must not compile");
+        };
+        assert!(message.starts_with("2:"), "{message}");
     }
 }
