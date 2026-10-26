@@ -83,8 +83,12 @@ impl Application {
                 action.task.map(Message::Shader)
             }
             Message::Uniforms(message) => {
-                if let Some(uniforms::Instruction::Changed) = self.uniforms.update(message) {
-                    self.program_changed();
+                match self.uniforms.update(message) {
+                    Some(uniforms::Instruction::Values) => self.viewer.set_values(
+                        core::program::bytes(self.uniforms.time(), self.uniforms.uniforms()),
+                    ),
+                    Some(uniforms::Instruction::Layout) => self.program_changed(),
+                    None => {}
                 }
                 Task::none()
             }

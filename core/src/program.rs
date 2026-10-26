@@ -103,12 +103,7 @@ impl Program {
 
     /// The `Customs` struct's bytes for the GPU uniform buffer; empty without members.
     pub fn bytes(&self) -> Vec<u8> {
-        uniform::pack(
-            self.time
-                .map(Type::Float)
-                .into_iter()
-                .chain(self.uniforms.iter().map(|uniform| uniform.value)),
-        )
+        bytes(self.time, &self.uniforms)
     }
 }
 
@@ -116,6 +111,15 @@ impl Default for Program {
     fn default() -> Self {
         Self::new(DEFAULT_SOURCE, Uniforms::default(), None)
     }
+}
+
+/// The `Customs` struct's bytes for `time` and `uniforms`, without building a [`Program`].
+pub fn bytes(time: Option<f32>, uniforms: &Uniforms) -> Vec<u8> {
+    uniform::pack(
+        time.map(Type::Float)
+            .into_iter()
+            .chain(uniforms.iter().map(|uniform| uniform.value)),
+    )
 }
 
 /// The modules a program compiles from, all in memory.

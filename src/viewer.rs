@@ -13,6 +13,11 @@ use crate::core::Program;
 
 pub struct State {
     compiled: Arc<Compiled>,
+    /// The uniforms package of the program `compiled` came from.
+    package: String,
+    /// Whether the last loaded program has the layout of `compiled`, so its values can be shown
+    /// with it even when it doesn't compile.
+    layout_matches: bool,
     // Set on every change and cleared by the pipeline once no edited shader
     // awaits validation, keeping frames coming until its result is applied
     validating: Arc<AtomicBool>,
@@ -22,32 +27,66 @@ pub struct State {
 
 impl State {
     pub fn new(program: &Program) -> Self {
-        let mut state = Self {
-            compiled: Arc::new(Compiled::default()),
-            validating: Arc::new(AtomicBool::new(true)),
-            error: None,
+        let (compiled, package, error) = match program.compile() {
+            Ok(wgsl) => (
+                Compiled {
+                    wgsl: wgsl.into(),
+                    uniforms: program.bytes(),
+                },
+                program.uniforms_package(),
+                None,
+            ),
+            Err(error) => (
+                Compiled::default(),
+                Program::default().uniforms_package(),
+                Some(error.to_string()),
+            ),
         };
-        state.load(program);
-        state
+
+        Self {
+            layout_matches: package == program.uniforms_package(),
+            compiled: Arc::new(compiled),
+            package,
+            validating: Arc::new(AtomicBool::new(true)),
+            error,
+        }
     }
 
     /// Shows `program` from the next frame on. A program that doesn't compile leaves the last
-    /// one showing.
+    /// one showing, with `program`'s values when its layout is the same.
     pub fn load(&mut self, program: &Program) {
+        let package = program.uniforms_package();
         match program.compile() {
             Ok(wgsl) => {
                 self.compiled = Arc::new(Compiled {
-                    wgsl,
+                    wgsl: wgsl.into(),
                     uniforms: program.bytes(),
                 });
-                self.validating.store(true, Ordering::Relaxed);
+                self.package = package;
+                self.layout_matches = true;
                 self.error = None;
+                self.validating.store(true, Ordering::Relaxed);
             }
             Err(error) => {
                 tracing::debug!("the shader doesn't compile: {error}");
                 self.error = Some(error.to_string());
+                self.layout_matches = package == self.package;
+                self.set_values(program.bytes());
             }
         }
+    }
+
+    /// Shows new uniform values with the current program, without compiling. Ignored while the
+    /// last loaded program's layout differs from the one showing.
+    pub fn set_values(&mut self, uniforms: Vec<u8>) {
+        if !self.layout_matches || self.compiled.uniforms == uniforms {
+            return;
+        }
+        self.compiled = Arc::new(Compiled {
+            wgsl: Arc::clone(&self.compiled.wgsl),
+            uniforms,
+        });
+        self.validating.store(true, Ordering::Relaxed);
     }
 
     /// Why the shader doesn't compile, in one line.
@@ -103,7 +142,7 @@ pub struct Primitive {
 /// What the GPU needs from a program, computed once per change instead of every frame.
 #[derive(Debug)]
 struct Compiled {
-    wgsl: String,
+    wgsl: Arc<str>,
     uniforms: Vec<u8>,
 }
 
@@ -114,7 +153,8 @@ impl Default for Compiled {
         Self {
             wgsl: program
                 .compile()
-                .expect("invariant: the default program compiles"),
+                .expect("invariant: the default program compiles")
+                .into(),
             uniforms: program.bytes(),
         }
     }
@@ -143,10 +183,24 @@ impl shader::Primitive for Primitive {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use iced::wgpu::naga;
 
     use super::State;
+    use crate::core::uniform::Type;
     use crate::core::{Program, Project, Uniforms};
+
+    const READS_RADIUS: &str = "import uniforms::customs;\n\
+        fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {\n\
+            return vec4<f32>(customs.radius);\n\
+        }\n";
+
+    fn radius(value: f32) -> Uniforms {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("radius", Type::Float(value)).unwrap();
+        uniforms
+    }
 
     /// What the GPU checks before the pipeline accepts a shader.
     fn validate(wgsl: &str) {
@@ -190,6 +244,48 @@ mod tests {
         assert!(!error.starts_with("error:"), "{error}");
 
         viewer.load(&Program::default());
+        assert_eq!(viewer.error(), None);
+    }
+
+    #[test]
+    fn new_values_keep_the_compiled_program() {
+        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+        let wgsl = Arc::clone(&viewer.compiled.wgsl);
+
+        viewer.set_values(crate::core::program::bytes(None, &radius(2.0)));
+
+        assert!(Arc::ptr_eq(&wgsl, &viewer.compiled.wgsl));
+        assert_eq!(viewer.compiled.uniforms, 2.0f32.to_le_bytes());
+    }
+
+    #[test]
+    fn values_still_show_while_the_shader_is_broken() {
+        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+
+        viewer.load(&Program::new("fn mainBulin(", radius(1.0), None));
+        viewer.set_values(crate::core::program::bytes(None, &radius(2.0)));
+
+        assert!(viewer.error().is_some());
+        assert_eq!(viewer.compiled.uniforms, 2.0f32.to_le_bytes());
+    }
+
+    #[test]
+    fn values_of_another_layout_wait_for_a_compiling_shader() {
+        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+
+        viewer.load(&Program::new("fn mainBulin(", radius(1.0), Some(5.0)));
+        viewer.set_values(crate::core::program::bytes(Some(6.0), &radius(2.0)));
+
+        assert_eq!(viewer.compiled.uniforms, 1.0f32.to_le_bytes());
+    }
+
+    #[test]
+    fn fixing_the_shader_clears_the_error() {
+        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+
+        viewer.load(&Program::new("fn mainBulin(", radius(1.0), None));
+        viewer.load(&Program::new(READS_RADIUS, radius(1.0), None));
+
         assert_eq!(viewer.error(), None);
     }
 }

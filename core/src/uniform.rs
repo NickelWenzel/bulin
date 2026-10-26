@@ -55,13 +55,13 @@ pub enum Error {
     #[error("`{0}` is a WGSL keyword")]
     Keyword(String),
     #[error("`{0}` is built in")]
-    Reserved(String),
+    BuiltIn(String),
     #[error("there already is a uniform named `{0}`")]
     Duplicate(String),
 }
 
 /// Names the program declares itself.
-const RESERVED: [&str; 1] = ["time"];
+const BUILT_IN: [&str; 1] = ["time"];
 
 /// WGSL and WESL keywords, and the type names a member could be confused with.
 const KEYWORDS: [&str; 38] = [
@@ -223,8 +223,8 @@ impl Uniforms {
         if KEYWORDS.contains(&name) {
             return Err(Error::Keyword(name.to_owned()));
         }
-        if RESERVED.contains(&name) {
-            return Err(Error::Reserved(name.to_owned()));
+        if BUILT_IN.contains(&name) {
+            return Err(Error::BuiltIn(name.to_owned()));
         }
         if self.0.iter().any(|uniform| uniform.name == name) {
             return Err(Error::Duplicate(name.to_owned()));
@@ -247,11 +247,17 @@ impl Uniforms {
         self.0.retain(|uniform| uniform.name != name);
     }
 
-    /// Sets the value of the uniform named `name`, if there is one.
-    pub fn set(&mut self, name: &str, value: Type) {
-        if let Some(uniform) = self.0.iter_mut().find(|uniform| uniform.name == name) {
-            uniform.value = value;
+    /// Sets the value of the uniform named `name`, returning whether it changed. A value of
+    /// another WGSL type is refused, since it would change the layout.
+    pub fn set(&mut self, name: &str, value: Type) -> bool {
+        let Some(uniform) = self.0.iter_mut().find(|uniform| uniform.name == name) else {
+            return false;
+        };
+        if uniform.value.wgsl() != value.wgsl() || uniform.value == value {
+            return false;
         }
+        uniform.value = value;
+        true
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Uniform> {
@@ -413,12 +419,24 @@ mod tests {
             uniforms.check("import"),
             Err(Error::Keyword("import".into()))
         );
-        assert_eq!(uniforms.check("time"), Err(Error::Reserved("time".into())));
+        assert_eq!(uniforms.check("time"), Err(Error::BuiltIn("time".into())));
         assert_eq!(
             uniforms.check("radius"),
             Err(Error::Duplicate("radius".into()))
         );
         assert_eq!(uniforms.check("_leaves2"), Ok(()));
+    }
+
+    #[test]
+    fn setting_a_value_keeps_the_type() {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("radius", Type::Float(1.0)).unwrap();
+
+        assert!(uniforms.set("radius", Type::Float(2.0)));
+        assert!(!uniforms.set("radius", Type::Float(2.0)));
+        assert!(!uniforms.set("radius", Type::Int(3)));
+        assert!(!uniforms.set("missing", Type::Float(1.0)));
+        assert_eq!(uniforms.iter().next().unwrap().value, Type::Float(2.0));
     }
 
     #[test]
