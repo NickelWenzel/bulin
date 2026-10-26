@@ -8,10 +8,8 @@ use crate::action::Action;
 use crate::analyzer::Analyzer;
 use crate::file;
 
-use iced::{
-    Center, Element, Font, Task,
-    widget::{button, column, container, row, space, text, tooltip},
-};
+use iced::widget::container;
+use iced::{Element, Task};
 
 use std::sync::Arc;
 
@@ -236,8 +234,9 @@ impl State {
         }
     }
 
-    pub fn view(&self, analyzer: &Analyzer) -> Element<'_, Message> {
-        let status = match analyzer.status() {
+    /// What the analyzer says about the shader: its error and warning counts while it runs.
+    pub fn status(&self, analyzer: &Analyzer) -> String {
+        match analyzer.status() {
             client::Status::Starting | client::Status::Restarting { .. } => {
                 "wgsl-analyzer: starting…".to_owned()
             }
@@ -256,28 +255,11 @@ impl State {
                 Some(failure) => format!("wgsl-analyzer: unavailable, {failure}"),
                 None => "wgsl-analyzer: unavailable".to_owned(),
             },
-        };
+        }
+    }
 
-        let controls = row![
-            action(new_icon(), "New file", Some(Message::NewFile)),
-            action(
-                open_icon(),
-                "Open file",
-                (!self.is_loading).then_some(Message::OpenFile)
-            ),
-            action(
-                save_icon(),
-                "Save file",
-                self.is_dirty.then_some(Message::SaveFile)
-            ),
-            space::horizontal(),
-            text(status).size(14),
-        ]
-        .spacing(10)
-        .align_y(Center);
-
-        column![controls, self.editor.view().map(Message::Editor)]
-            .spacing(10)
+    pub fn view(&self) -> Element<'_, Message> {
+        container(self.editor.view().map(Message::Editor))
             .padding(10)
             .into()
     }
@@ -335,47 +317,6 @@ fn shorten(path: &str) -> String {
     } else {
         path.to_owned()
     }
-}
-
-fn action<'a, Message: Clone + 'a>(
-    content: impl Into<Element<'a, Message>>,
-    label: &'a str,
-    on_press: Option<Message>,
-) -> Element<'a, Message> {
-    let action = button(container(content).center_x(30));
-
-    if let Some(on_press) = on_press {
-        tooltip(
-            action.on_press(on_press),
-            label,
-            tooltip::Position::FollowCursor,
-        )
-        .style(container::rounded_box)
-        .into()
-    } else {
-        action.style(button::secondary).into()
-    }
-}
-
-fn new_icon<'a, Message>() -> Element<'a, Message> {
-    icon('\u{0e800}')
-}
-
-fn save_icon<'a, Message>() -> Element<'a, Message> {
-    icon('\u{0e801}')
-}
-
-fn open_icon<'a, Message>() -> Element<'a, Message> {
-    icon('\u{0f115}')
-}
-
-fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
-    const ICON_FONT: Font = Font::new("editor-icons");
-
-    text(codepoint)
-        .font(ICON_FONT)
-        .shaping(text::Shaping::Basic)
-        .into()
 }
 
 #[cfg(test)]

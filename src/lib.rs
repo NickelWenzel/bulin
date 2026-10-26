@@ -11,8 +11,10 @@ mod viewer;
 
 use iced::keyboard::key;
 use iced::time::Instant;
-use iced::widget::{button, center, column, container, mouse_area, opaque, stack, text};
-use iced::{Color, Element, Event, Font, Length, Subscription, Task, Theme, event, keyboard};
+use iced::widget::{button, center, column, container, mouse_area, opaque, row, stack, text};
+use iced::{
+    Center, Color, Element, Event, Fill, Font, Length, Subscription, Task, Theme, event, keyboard,
+};
 use matcha_iced::lsp;
 
 use std::sync::Arc;
@@ -237,18 +239,12 @@ impl Application {
             .layout
             .view(|_, pane, _| match pane {
                 layout::PaneContent::Editor => {
-                    let title = [Some(self.shader.title().as_str()), self.notice.as_deref()]
-                        .into_iter()
-                        .chain([self.shader.failure()])
-                        .flatten()
-                        .collect::<Vec<_>>()
-                        .join(" · ");
                     let editors = column![
                         self.uniforms.view().map(Message::Uniforms),
-                        self.shader.view(&self.analyzer).map(Message::Shader),
+                        self.shader.view().map(Message::Shader),
                     ];
 
-                    (container(editors).into(), Some(title))
+                    (container(editors).into(), None)
                 }
                 layout::PaneContent::Viewer => (
                     self.viewer.view().into(),
@@ -260,10 +256,27 @@ impl Application {
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
 
-        let content = column!(
-            menu_icon(),
+        let title = [Some(self.shader.title().as_str()), self.notice.as_deref()]
+            .into_iter()
+            .chain([self.shader.failure()])
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ");
+        // Equal-width sides keep the title centered whatever the menu and status measure.
+        let header = row![
+            container(menu_icon()).width(Fill),
+            text(title),
+            container(text(self.shader.status(&self.analyzer)).size(14))
+                .width(Fill)
+                .align_right(Fill),
+        ]
+        .align_y(Center)
+        .padding([0, 10]);
+
+        let content = column![
+            header,
             container(panes).width(Length::Fill).height(Length::Fill),
-        )
+        ]
         .into();
 
         if self.show_menu {
