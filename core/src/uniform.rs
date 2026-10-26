@@ -54,6 +54,8 @@ pub enum Error {
     Invalid(String),
     #[error("`{0}` is a WGSL keyword")]
     Keyword(String),
+    #[error("`{0}` is reserved in WGSL")]
+    Reserved(String),
     #[error("`{0}` is built in")]
     BuiltIn(String),
     #[error("there already is a uniform named `{0}`")]
@@ -63,12 +65,9 @@ pub enum Error {
 /// Names the program declares itself.
 const BUILT_IN: [&str; 1] = ["time"];
 
-/// WGSL and WESL keywords, and the type names a member could be confused with.
-const KEYWORDS: [&str; 38] = [
+/// WGSL's keywords. Its reserved words, which include WESL's keywords, come from wgsl-types.
+const KEYWORDS: [&str; 26] = [
     "alias",
-    "array",
-    "as",
-    "bool",
     "break",
     "case",
     "const",
@@ -80,28 +79,19 @@ const KEYWORDS: [&str; 38] = [
     "discard",
     "else",
     "enable",
-    "f16",
-    "f32",
     "false",
     "fn",
     "for",
-    "i32",
     "if",
-    "import",
     "let",
     "loop",
     "override",
-    "package",
     "requires",
     "return",
     "struct",
-    "super",
     "switch",
     "true",
-    "u32",
     "var",
-    "vec2",
-    "vec4",
     "while",
 ];
 
@@ -223,6 +213,9 @@ impl Uniforms {
         if KEYWORDS.contains(&name) {
             return Err(Error::Keyword(name.to_owned()));
         }
+        if wgsl_types::idents::RESERVED_WORDS.contains(&name) {
+            return Err(Error::Reserved(name.to_owned()));
+        }
         if BUILT_IN.contains(&name) {
             return Err(Error::BuiltIn(name.to_owned()));
         }
@@ -242,9 +235,11 @@ impl Uniforms {
         Ok(())
     }
 
-    /// Removes the uniform named `name`, if there is one.
-    pub fn remove(&mut self, name: &str) {
+    /// Removes the uniform named `name`, returning whether there was one.
+    pub fn remove(&mut self, name: &str) -> bool {
+        let count = self.0.len();
         self.0.retain(|uniform| uniform.name != name);
+        self.0.len() != count
     }
 
     /// Sets the value of the uniform named `name`, returning whether it changed. A value of
@@ -417,8 +412,10 @@ mod tests {
         assert_eq!(uniforms.check("fn"), Err(Error::Keyword("fn".into())));
         assert_eq!(
             uniforms.check("import"),
-            Err(Error::Keyword("import".into()))
+            Err(Error::Reserved("import".into()))
         );
+        assert_eq!(uniforms.check("self"), Err(Error::Reserved("self".into())));
+        assert_eq!(uniforms.check("mut"), Err(Error::Reserved("mut".into())));
         assert_eq!(uniforms.check("time"), Err(Error::BuiltIn("time".into())));
         assert_eq!(
             uniforms.check("radius"),

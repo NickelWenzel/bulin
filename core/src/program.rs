@@ -11,8 +11,14 @@ use crate::uniform::{self, Type, Uniforms};
 /// The shader a new project starts with.
 pub const DEFAULT_SOURCE: &str = include_str!("program/default.wesl");
 
-/// The `bulin` package every shader can import.
-pub const BULIN_PACKAGE: &str = include_str!("program/bulin.wesl");
+/// The name of the package generated from the uniforms.
+pub const UNIFORMS_PACKAGE_NAME: &str = "uniforms";
+
+/// The name of the fixed package every shader can import.
+pub const BULIN_PACKAGE_NAME: &str = "bulin";
+
+/// The `bulin` package's source.
+pub const BULIN_PACKAGE_SOURCE: &str = include_str!("program/bulin.wesl");
 
 /// bulin's main module: the vertex stage and the fragment entry point calling `mainBulin`.
 const MAIN: &str = include_str!("program/main.wesl");
@@ -148,12 +154,19 @@ impl Resolver for Modules<'_> {
         let source = match (&path.origin, path.components.as_slice()) {
             (PathOrigin::Absolute, []) => MAIN,
             _ if is_shader(path) => self.shader,
-            (PathOrigin::Package(package), []) if package == "uniforms" => &self.uniforms,
-            (PathOrigin::Package(package), []) if package == "bulin" => BULIN_PACKAGE,
+            (PathOrigin::Package(package), []) if package == UNIFORMS_PACKAGE_NAME => {
+                &self.uniforms
+            }
+            (PathOrigin::Package(package), []) if package == BULIN_PACKAGE_NAME => {
+                BULIN_PACKAGE_SOURCE
+            }
             _ => {
                 return Err(ResolveError::ModuleNotFound(
                     path.clone(),
-                    "bulin provides only the `uniforms` and `bulin` packages".to_owned(),
+                    format!(
+                        "bulin provides only the `{UNIFORMS_PACKAGE_NAME}` and \
+                         `{BULIN_PACKAGE_NAME}` packages"
+                    ),
                 ));
             }
         };

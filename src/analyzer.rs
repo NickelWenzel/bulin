@@ -21,24 +21,36 @@ use native::Link;
 #[cfg(target_arch = "wasm32")]
 use web::Link;
 
+use crate::core::program::{BULIN_PACKAGE_NAME, BULIN_PACKAGE_SOURCE, UNIFORMS_PACKAGE_NAME};
 use crate::file;
 
 /// The manifest of a package whose modules sit next to it, instead of in the default `./shaders`.
 const PACKAGE_MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n";
 
-/// The workspace manifest, depending on the packages bulin provides.
-const WORKSPACE_MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n\n[dependencies]\n\
-                                  bulin = { path = \"bulin\" }\nuniforms = { path = \"uniforms\" }\n";
-
-/// The files the workspace starts with, relative to its root. The uniforms package's module is
-/// empty here: its text is the open document.
-const FILES: [(&str, &str); 5] = [
-    ("wesl.toml", WORKSPACE_MANIFEST),
-    ("bulin/wesl.toml", PACKAGE_MANIFEST),
-    ("bulin/package.wesl", crate::core::program::BULIN_PACKAGE),
-    ("uniforms/wesl.toml", PACKAGE_MANIFEST),
-    ("uniforms/package.wesl", ""),
-];
+/// The files the workspace starts with, relative to its root: its manifest, depending on the
+/// packages bulin provides, and each package as a directory of its own. The uniforms package's
+/// module is empty here: its text is the open document.
+fn files() -> [(String, String); 5] {
+    let uniforms = UNIFORMS_PACKAGE_NAME;
+    let bulin = BULIN_PACKAGE_NAME;
+    [
+        (
+            "wesl.toml".to_owned(),
+            format!(
+                "{PACKAGE_MANIFEST}\n[dependencies]\n\
+                 {bulin} = {{ path = \"{bulin}\" }}\n\
+                 {uniforms} = {{ path = \"{uniforms}\" }}\n"
+            ),
+        ),
+        (format!("{bulin}/wesl.toml"), PACKAGE_MANIFEST.to_owned()),
+        (
+            format!("{bulin}/package.wesl"),
+            BULIN_PACKAGE_SOURCE.to_owned(),
+        ),
+        (format!("{uniforms}/wesl.toml"), PACKAGE_MANIFEST.to_owned()),
+        (format!("{uniforms}/package.wesl"), String::new()),
+    ]
+}
 
 /// The document name of a shader that has no file yet.
 const UNTITLED: &str = "untitled.wesl";
@@ -92,7 +104,7 @@ impl Analyzer {
         uri.path_segments_mut()
             .expect("invariant: the workspace root is a file URI")
             .pop_if_empty()
-            .extend(["uniforms", "package.wesl"]);
+            .extend([UNIFORMS_PACKAGE_NAME, "package.wesl"]);
         if let Err(error) = self.uniforms.open_lsp(&mut self.client, &uri, "wesl") {
             tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
         }

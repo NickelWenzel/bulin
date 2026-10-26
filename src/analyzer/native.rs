@@ -8,7 +8,7 @@ use matcha_iced::lsp::lsp_server::Connection;
 use paths::{AbsPathBuf, Utf8PathBuf};
 use wgsl_analyzer::config::Config;
 
-use super::FILES;
+use super::files;
 
 /// wgsl-analyzer's own binary gives its threads 16 MiB because salsa's queries recurse deeply.
 const STACK_SIZE: usize = 16 << 20;
@@ -43,7 +43,7 @@ impl Link {
 /// Dropping `connection` on failure ends the client's connection, so the client reports the
 /// server as stopped.
 fn spawn(root: PathBuf, connection: Connection) -> io::Result<()> {
-    for (path, contents) in FILES {
+    for (path, contents) in files() {
         let path = root.join(path);
         if let Some(directory) = path.parent() {
             fs::create_dir_all(directory)?;
