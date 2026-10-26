@@ -18,6 +18,10 @@ _Avoid_: custom, parameter
 **Time**:
 The built-in uniform: the seconds on the clock, read as `customs.time` while the clock is on.
 
+**Layout**:
+The shape of the uniforms a shader can read: whether time is on, and each uniform's name and type,
+in order. Moving a slider or the clock ticking changes values, not the layout.
+
 **Uniforms package**:
 The package bulin generates from the uniforms and time, named `uniforms`. It holds one struct
 value, `customs`, that a shader imports with `import uniforms::customs;`.

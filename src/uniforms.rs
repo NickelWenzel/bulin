@@ -21,8 +21,10 @@ pub enum Message {
 }
 
 pub enum Instruction {
-    /// A uniform or the clock changed.
-    Changed,
+    /// Uniform values or the clock changed; the layout is the same.
+    Values,
+    /// Uniforms or time were added or removed.
+    Layout,
 }
 
 pub struct State {
@@ -43,15 +45,17 @@ impl State {
     pub fn update(&mut self, message: Message) -> Option<Instruction> {
         match message {
             Message::Clock(message) => {
-                let Some(clock) = &mut self.clock else {
-                    return None;
-                };
+                let clock = self.clock.as_mut()?;
                 clock.update(message);
+                Some(Instruction::Values)
             }
-            Message::Set(name, value) => self.uniforms.set(&name, value),
+            Message::Set(name, value) => self
+                .uniforms
+                .set(&name, value)
+                .then_some(Instruction::Values),
             Message::Candidate(message) => {
                 self.candidate.update(message);
-                return None;
+                None
             }
             Message::Add => {
                 if let Err(error) = self
@@ -62,13 +66,21 @@ impl State {
                     return None;
                 }
                 self.candidate.name.clear();
+                Some(Instruction::Layout)
             }
-            Message::Remove(name) => self.uniforms.remove(&name),
-            Message::AddTime => self.clock = Some(clock::State::new()),
-            Message::RemoveTime => self.clock = None,
+            Message::Remove(name) => {
+                self.uniforms.remove(&name);
+                Some(Instruction::Layout)
+            }
+            Message::AddTime => {
+                self.clock = Some(clock::State::new());
+                Some(Instruction::Layout)
+            }
+            Message::RemoveTime => {
+                self.clock = None;
+                Some(Instruction::Layout)
+            }
         }
-
-        Some(Instruction::Changed)
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -136,13 +148,13 @@ mod tests {
     }
 
     #[test]
-    fn adding_a_uniform_changes_the_program() {
+    fn adding_a_uniform_changes_the_layout() {
         let mut state = State::new(Uniforms::default(), None);
 
         assert!(name(&mut state, "radius").is_none());
         assert!(matches!(
             state.update(Message::Add),
-            Some(Instruction::Changed)
+            Some(Instruction::Layout)
         ));
         assert_eq!(state.uniforms().iter().count(), 1);
     }
@@ -159,30 +171,30 @@ mod tests {
     }
 
     #[test]
-    fn moving_a_slider_changes_the_program() {
+    fn moving_a_slider_changes_only_values() {
         let mut uniforms = Uniforms::default();
         uniforms.add("radius", Type::Float(0.5)).unwrap();
         let mut state = State::new(uniforms, None);
 
         let instruction = state.update(Message::Set("radius".to_owned(), Type::Float(0.7)));
 
-        assert!(matches!(instruction, Some(Instruction::Changed)));
+        assert!(matches!(instruction, Some(Instruction::Values)));
         let radius = state.uniforms().iter().next().unwrap();
         assert_eq!(radius.value, Type::Float(0.7));
     }
 
     #[test]
-    fn turning_time_on_and_off_changes_the_program() {
+    fn turning_time_on_and_off_changes_the_layout() {
         let mut state = State::new(Uniforms::default(), None);
 
         assert!(matches!(
             state.update(Message::AddTime),
-            Some(Instruction::Changed)
+            Some(Instruction::Layout)
         ));
         assert_eq!(state.time(), Some(0.0));
         assert!(matches!(
             state.update(Message::RemoveTime),
-            Some(Instruction::Changed)
+            Some(Instruction::Layout)
         ));
         assert_eq!(state.time(), None);
     }
