@@ -1,11 +1,12 @@
 //! wgsl-analyzer on a thread of this process.
 
-use std::path::PathBuf;
-use std::{env, fs, io, thread};
+use std::thread::{self, JoinHandle};
+use std::{env, fs, io};
 
 use matcha_iced::lsp::gen_lsp_types::{self, Uri};
 use matcha_iced::lsp::lsp_server::Connection;
 use paths::{AbsPathBuf, Utf8PathBuf};
+use tempfile::TempDir;
 use wgsl_analyzer::config::Config;
 
 use super::files;
@@ -17,20 +18,37 @@ const STACK_SIZE: usize = 16 << 20;
 /// nothing to forward.
 pub struct Link {
     failure: Option<String>,
+    server: Option<JoinHandle<()>>,
+    /// Removed once the server has stopped reading it.
+    workspace: Option<TempDir>,
 }
 
 impl Link {
-    /// Writes the workspace manifest into a scratch directory and starts the server there.
+    /// Writes the workspace into a scratch directory of its own and starts the server there.
     pub fn start(connection: Connection) -> (Self, Uri) {
-        let root = env::temp_dir().join("bulin");
+        let workspace = tempfile::Builder::new().prefix("bulin-").tempdir();
+        let root = workspace
+            .as_ref()
+            .map_or_else(|_| env::temp_dir(), |workspace| workspace.path().to_owned());
         let uri = Uri::from_directory_path(&root).expect("invariant: the temp dir is absolute");
 
-        let failure = spawn(root, connection).err().map(|error| {
-            tracing::error!("wgsl-analyzer could not start: {error}");
-            error.to_string()
-        });
+        let mut link = Self {
+            failure: None,
+            server: None,
+            workspace: None,
+        };
+        match workspace.and_then(|workspace| Ok((spawn(&workspace, connection)?, workspace))) {
+            Ok((server, workspace)) => {
+                link.server = Some(server);
+                link.workspace = Some(workspace);
+            }
+            Err(error) => {
+                tracing::error!("wgsl-analyzer could not start: {error}");
+                link.failure = Some(error.to_string());
+            }
+        }
 
-        (Self { failure }, uri)
+        (link, uri)
     }
 
     pub fn flush(&mut self) {}
@@ -40,9 +58,20 @@ impl Link {
     }
 }
 
+impl Drop for Link {
+    /// The client, dropped before the link, has told the server to exit; waiting for it keeps the
+    /// workspace in place until the server stops reading it.
+    fn drop(&mut self) {
+        if let Some(server) = self.server.take() {
+            let _ = server.join();
+        }
+    }
+}
+
 /// Dropping `connection` on failure ends the client's connection, so the client reports the
 /// server as stopped.
-fn spawn(root: PathBuf, connection: Connection) -> io::Result<()> {
+fn spawn(workspace: &TempDir, connection: Connection) -> io::Result<JoinHandle<()>> {
+    let root = workspace.path().to_owned();
     for (path, contents) in files() {
         let path = root.join(path);
         if let Some(directory) = path.parent() {
@@ -62,9 +91,7 @@ fn spawn(root: PathBuf, connection: Connection) -> io::Result<()> {
             if let Err(error) = run(root, connection) {
                 tracing::error!("wgsl-analyzer stopped: {error:#}");
             }
-        })?;
-
-    Ok(())
+        })
 }
 
 /// The initialize handshake of wgsl-analyzer's `session::run_session`, then its main loop until
