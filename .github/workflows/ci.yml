@@ -1,6 +1,11 @@
 name: Rust CI
 
 on:
+  # Runs on master build the cache pull requests restore: a pull request can read its base
+  # branch's caches, but not another pull request's.
+  push:
+    branches:
+      - master
   pull_request:
     branches:
       - master
@@ -38,6 +43,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}-${{ matrix.mode }}
+          # Pull request caches can't be shared and only crowd master's out of the size limit.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Build ${{ matrix.mode }} for ${{ matrix.target }}
         run: cargo build ${{ matrix.mode_flag }} ${{ matrix.target_flag }}
