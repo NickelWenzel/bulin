@@ -116,6 +116,7 @@ impl Application {
                 Task::none()
             }
             Message::Menu(message) => {
+                self.show_menu = false;
                 let message = match message {
                     menu::Message::OpenFile => Message::Shader(shader::Message::OpenFile),
                     menu::Message::NewFile => Message::Shader(shader::Message::NewFile),

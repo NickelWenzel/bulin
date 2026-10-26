@@ -49,7 +49,7 @@ impl State {
 
     pub fn view(&self) -> Element<'_, Message> {
         row![
-            text("uTime").width(Length::Fill),
+            text("time").width(Length::Fill),
             text!("{:.2} s", self.clock.seconds()),
             button("R").on_press(Message::Reset),
             button(if self.clock.is_running() { "P" } else { "S" }).on_press(Message::Toggle)

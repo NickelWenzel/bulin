@@ -38,3 +38,6 @@
 
 # Projects
 - ❌ Mark a project unsaved when its shader or uniforms change, and ask before discarding it
+
+# Time
+- ❌ `time` is an f32 of seconds, which loses sub-millisecond precision after hours of running; wrap it or pass it split

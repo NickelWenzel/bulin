@@ -6,7 +6,7 @@ mod uniform;
 use iced::widget::{button, column, row, space};
 use iced::{Element, Subscription};
 
-use crate::core::uniform::Type;
+use crate::core::uniform::{Error, Type};
 use crate::core::{Clock, Uniforms};
 
 #[derive(Debug, Clone)]
@@ -31,24 +31,27 @@ pub struct State {
     uniforms: Uniforms,
     clock: Option<clock::State>,
     candidate: uniform::Candidate,
+    /// Whether the candidate's name can be added to the uniforms as they are now.
+    candidate_check: Result<(), Error>,
 }
 
 impl State {
     pub fn new(uniforms: Uniforms, clock: Option<Clock>) -> Self {
+        let candidate = uniform::Candidate::new();
         Self {
+            candidate_check: uniforms.check(candidate.name()),
             uniforms,
             clock: clock.map(clock::State::from),
-            candidate: uniform::Candidate::new(),
+            candidate,
         }
     }
 
     pub fn update(&mut self, message: Message) -> Option<Instruction> {
-        match message {
-            Message::Clock(message) => {
-                let clock = self.clock.as_mut()?;
+        let instruction = match message {
+            Message::Clock(message) => self.clock.as_mut().map(|clock| {
                 clock.update(message);
-                Some(Instruction::Values)
-            }
+                Instruction::Values
+            }),
             Message::Set(name, value) => self
                 .uniforms
                 .set(&name, value)
@@ -57,17 +60,13 @@ impl State {
                 self.candidate.update(message);
                 None
             }
-            Message::Add => {
-                if let Err(error) = self
-                    .uniforms
-                    .add(&self.candidate.name, self.candidate.value)
-                {
+            Message::Add => match self.candidate.submit(&mut self.uniforms) {
+                Ok(()) => Some(Instruction::Layout),
+                Err(error) => {
                     tracing::debug!("uniform not added: {error}");
-                    return None;
+                    None
                 }
-                self.candidate.name.clear();
-                Some(Instruction::Layout)
-            }
+            },
             Message::Remove(name) => self.uniforms.remove(&name).then_some(Instruction::Layout),
             Message::AddTime => {
                 self.clock = Some(clock::State::new());
@@ -77,7 +76,11 @@ impl State {
                 self.clock = None;
                 Some(Instruction::Layout)
             }
-        }
+        };
+
+        // The check depends on the uniforms as well as the typed name.
+        self.candidate_check = self.uniforms.check(self.candidate.name());
+        instruction
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -93,10 +96,11 @@ impl State {
             ]
         };
 
-        let addable = self.uniforms.check(&self.candidate.name).is_ok();
         let candidate = row![
-            self.candidate.view(&self.uniforms).map(Message::Candidate),
-            button("+").on_press_maybe(addable.then_some(Message::Add)),
+            self.candidate
+                .view(&self.candidate_check)
+                .map(Message::Candidate),
+            button("+").on_press_maybe(self.candidate_check.is_ok().then_some(Message::Add)),
         ];
 
         let uniforms = column(self.uniforms.iter().map(|value| {
@@ -165,6 +169,19 @@ mod tests {
 
         assert!(state.update(Message::Add).is_none());
         assert_eq!(state.uniforms().iter().count(), 1);
+    }
+
+    #[test]
+    fn a_removed_name_can_be_added_again() {
+        let mut state = State::new(Uniforms::default(), None);
+        name(&mut state, "radius");
+        let _ = state.update(Message::Add);
+        name(&mut state, "radius");
+        assert!(state.candidate_check.is_err());
+
+        let _ = state.update(Message::Remove("radius".to_owned()));
+
+        assert!(state.candidate_check.is_ok());
     }
 
     #[test]
