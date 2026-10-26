@@ -59,6 +59,7 @@ wgsl-analyzer = { git = "https://github.com/wgsl-analyzer/wgsl-analyzer", rev = 
 paths = { git = "https://github.com/wgsl-analyzer/wgsl-analyzer", rev = "cc19e9698fc0826288fa6416b11df86dd8d60e3d" }
 anyhow = "1.0.104"
 rayon = "1.12"
+tempfile = "3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4.3", features = ["wasm_js"] }

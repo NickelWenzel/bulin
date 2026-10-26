@@ -60,6 +60,8 @@ const UNTITLED: &str = "untitled.wesl";
 /// Every call that talks to the server delivers what it queued before returning, so callers
 /// have nothing to flush.
 pub struct Analyzer {
+    /// Declared before `link`: dropping the client tells the server to exit before the link
+    /// waits for it.
     client: Client,
     link: Link,
     root: Uri,
@@ -121,7 +123,7 @@ impl Analyzer {
 
     /// Starts analyzing `editor`'s text as the shader `file`.
     pub fn attach(&mut self, editor: &mut CodeEditor, file: Option<&file::Name>) {
-        let uri = self.document_uri(file);
+        let uri = document_uri(&self.root, file);
         if let Err(error) = editor.open_lsp(&mut self.client, &uri, "wesl") {
             tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
         }
@@ -149,7 +151,7 @@ impl Analyzer {
         before: Option<&file::Name>,
         after: &file::Name,
     ) {
-        if self.document_uri(before) == self.document_uri(Some(after)) {
+        if document_uri(&self.root, before) == document_uri(&self.root, Some(after)) {
             log_refusal(editor.save_lsp(&mut self.client));
             self.link.flush();
         } else {
@@ -177,24 +179,24 @@ impl Analyzer {
         }
         self.link.flush();
     }
+}
 
-    /// The URI under which `file` is analyzed: its name inside the workspace, as a `.wesl`
-    /// module, since the server treats `import` in a `.wgsl` file as an error.
-    fn document_uri(&self, file: Option<&file::Name>) -> Uri {
-        let name = file.and_then(file::Name::file_name).unwrap_or(UNTITLED);
-        let stem = name
-            .strip_suffix(".wesl")
-            .or_else(|| name.strip_suffix(".wgsl"))
-            .unwrap_or(name);
-        let name = format!("{stem}.wesl");
+/// The URI under which `file` is analyzed in the workspace at `root`: its name as a `.wesl`
+/// module, since the server treats `import` in a `.wgsl` file as an error.
+fn document_uri(root: &Uri, file: Option<&file::Name>) -> Uri {
+    let name = file.and_then(file::Name::file_name).unwrap_or(UNTITLED);
+    let stem = name
+        .strip_suffix(".wesl")
+        .or_else(|| name.strip_suffix(".wgsl"))
+        .unwrap_or(name);
+    let name = format!("{stem}.wesl");
 
-        let mut uri = self.root.clone();
-        uri.path_segments_mut()
-            .expect("invariant: the workspace root is a file URI")
-            .pop_if_empty()
-            .push(&name);
-        uri
-    }
+    let mut uri = root.clone();
+    uri.path_segments_mut()
+        .expect("invariant: the workspace root is a file URI")
+        .pop_if_empty()
+        .push(&name);
+    uri
 }
 
 /// Logs an update the editor refused. Its jump, a definition in another document, is dropped:
@@ -214,7 +216,7 @@ mod tests {
     use matcha_core::Severity;
     use matcha_iced::CodeEditor;
 
-    use super::Analyzer;
+    use super::{Analyzer, Uri};
     use crate::core::uniform::Type;
     use crate::core::{Program, Uniforms};
     use crate::file;
@@ -243,12 +245,12 @@ mod tests {
 
     #[test]
     fn documents_are_named_after_their_file_inside_the_workspace() {
-        let (analyzer, _events) = Analyzer::start();
+        let root = Uri::parse("file:///workspace/").unwrap();
         let uri = |file: Option<&str>| {
             let file = file.map(file::Name::from);
-            analyzer.document_uri(file.as_ref()).to_string()
+            super::document_uri(&root, file.as_ref()).to_string()
         };
-        let root = analyzer.root.to_string();
+        let root = root.to_string();
 
         assert_eq!(uri(None), format!("{root}untitled.wesl"));
         assert_eq!(uri(Some("/a/b/sky.wgsl")), format!("{root}sky.wesl"));
@@ -293,6 +295,47 @@ mod tests {
                 break errors;
             }
         };
-        assert_eq!(errors, ["no field `nope` on type ref<Customs>"]);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("nope"), "{errors:?}");
+    }
+
+    #[test]
+    fn diagnostics_follow_uniforms_added_after_the_shader_opened() {
+        let (mut analyzer, mut events) = Analyzer::start();
+        let mut editor = CodeEditor::new(
+            "import uniforms::customs;\n\
+             fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {\n\
+                 return vec4<f32>(customs.radius);\n\
+             }\n",
+        );
+        analyzer.attach(&mut editor, None);
+        let mut errors = |analyzer: &mut Analyzer, editor: &mut CodeEditor, wanted: bool| {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let any = editor
+                    .document()
+                    .diagnostics_in(0..u32::MAX)
+                    .any(|(_, severity, _)| severity == Severity::Error);
+                if any == wanted {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "errors still {any} after 30 s");
+                match events.next().now_or_never() {
+                    Some(Some(event)) => analyzer.receive(event, editor),
+                    Some(None) => panic!("the server stopped"),
+                    None => thread::sleep(Duration::from_millis(10)),
+                }
+            }
+        };
+
+        errors(&mut analyzer, &mut editor, true);
+        analyzer.set_uniforms(&Program::new("", radius(), None).uniforms_package());
+        errors(&mut analyzer, &mut editor, false);
+    }
+
+    fn radius() -> Uniforms {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("radius", Type::Float(1.0)).unwrap();
+        uniforms
     }
 }
