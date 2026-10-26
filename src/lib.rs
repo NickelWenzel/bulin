@@ -13,7 +13,7 @@ use iced::keyboard::key;
 use iced::time::Instant;
 use iced::widget::{button, center, column, container, mouse_area, opaque, row, stack, text};
 use iced::{
-    Center, Color, Element, Event, Fill, Font, Length, Subscription, Task, Theme, event, keyboard,
+    Center, Element, Event, Fill, Font, Length, Subscription, Task, Theme, color, event, keyboard,
 };
 use matcha_iced::lsp;
 
@@ -276,14 +276,16 @@ impl Application {
         let content = column![
             header,
             container(panes).width(Length::Fill).height(Length::Fill),
-        ]
-        .into();
+        ];
 
-        if self.show_menu {
-            modal(content, menu::view().map(Message::Menu), Message::CloseMenu)
-        } else {
-            content
-        }
+        // The content keeps its place in the widget tree whether the menu is open or not, so
+        // opening it doesn't reset the editor's focus, the combo box or the panes.
+        stack![content]
+            .push(
+                self.show_menu
+                    .then(|| modal(menu::view().map(Message::Menu), Message::CloseMenu)),
+            )
+            .into()
     }
 
     pub fn theme(&self) -> Theme {
@@ -325,28 +327,45 @@ fn menu_icon<'a>() -> Element<'a, Message> {
         .into()
 }
 
-fn modal<'a>(
-    base: impl Into<Element<'a, Message>>,
-    content: impl Into<Element<'a, Message>>,
-    on_blur: Message,
-) -> Element<'a, Message> {
-    stack![
-        base.into(),
-        opaque(
-            mouse_area(center(opaque(content)).style(|_theme| {
-                container::Style {
-                    background: Some(
-                        Color {
-                            a: 0.8,
-                            ..Color::BLACK
-                        }
-                        .into(),
-                    ),
-                    ..container::Style::default()
-                }
-            }))
-            .on_press(on_blur)
-        )
-    ]
-    .into()
+/// `content` over a dimmed backdrop that swallows input and sends `on_blur` when clicked.
+fn modal<'a>(content: impl Into<Element<'a, Message>>, on_blur: Message) -> Element<'a, Message> {
+    opaque(
+        mouse_area(center(opaque(content)).style(|_theme| container::Style {
+            background: Some(color!(0x000000, 0.8).into()),
+            ..container::Style::default()
+        }))
+        .on_press(on_blur),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::advanced::widget::{Tree, tree};
+
+    use super::Application;
+
+    /// The address of a node's widget state, which stays the same only while iced keeps it.
+    fn state_address(tree: &Tree) -> Option<*const ()> {
+        match &tree.state {
+            tree::State::Some(state) => Some(&**state as *const _ as *const ()),
+            tree::State::None => None,
+        }
+    }
+
+    #[test]
+    fn opening_the_menu_keeps_the_content_state() {
+        let (mut app, _) = Application::new();
+        let mut tree = Tree::empty();
+        tree.diff(&mut app.view());
+        let root = tree.tag;
+        let content = state_address(&tree.children[0]);
+
+        app.show_menu = true;
+        tree.diff(&mut app.view());
+
+        // A root of another kind would make iced rebuild the whole tree and drop its state.
+        assert_eq!(tree.tag, root);
+        assert!(content.is_some());
+        assert_eq!(state_address(&tree.children[0]), content);
+    }
 }
