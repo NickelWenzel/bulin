@@ -27,9 +27,14 @@ pub async fn open_file() -> Result<(Name, Arc<String>), Error> {
         .map_err(Error::ReadFile)
 }
 
-pub async fn save_file(filename: Option<Name>, contents: String) -> Result<Name, Error> {
-    let fallback = "bulin.wgsl".to_string();
-    let filename = filename.map_or(fallback.clone(), |f| f.as_str().unwrap_or(&fallback).into());
+/// Downloads `contents` under `filename`, or under a name the user picks, suggesting
+/// `suggested_name`.
+pub async fn save_file(
+    filename: Option<Name>,
+    suggested_name: &str,
+    contents: String,
+) -> Result<Name, Error> {
+    let filename = filename.map_or(suggested_name.to_owned(), |f| f.0);
     let file_handle = rfd::AsyncFileDialog::new()
         .set_title("Save file...")
         .set_file_name(filename)
