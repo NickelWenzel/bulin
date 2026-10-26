@@ -17,10 +17,14 @@ use std::sync::Arc;
 
 pub struct State {
     file: Option<file::Name>,
+    /// The file's path, shortened to fit a title.
+    label: Option<String>,
     editor: CodeEditor,
     is_loading: bool,
     is_dirty: bool,
     problems: Problems,
+    /// Why the last file action failed, until the next one starts.
+    failure: Option<String>,
 }
 
 /// What the language server found wrong with the shader.
@@ -66,10 +70,12 @@ impl State {
     pub fn new(shader: &str) -> Self {
         Self {
             file: None,
+            label: None,
             editor: wgsl_editor(shader),
             is_loading: false,
             is_dirty: false,
             problems: Problems::default(),
+            failure: None,
         }
     }
 
@@ -140,12 +146,16 @@ impl State {
                 analyzer,
             ),
             Message::NewFile => {
-                if !self.is_loading {
-                    self.detach(analyzer);
-                    self.file = None;
-                    self.editor = wgsl_editor("");
-                    self.attach(analyzer);
+                if self.is_loading {
+                    return Action::none();
                 }
+                self.failure = None;
+                self.detach(analyzer);
+                self.file = None;
+                self.label = None;
+                self.editor = wgsl_editor(crate::core::program::DEFAULT_SOURCE);
+                self.attach(analyzer);
+                self.is_dirty = false;
 
                 Action::instruction(Instruction::Changed)
             }
@@ -154,28 +164,37 @@ impl State {
                     Action::none()
                 } else {
                     self.is_loading = true;
+                    self.failure = None;
 
                     Action::task(Task::perform(file::open_file(), Message::FileOpened))
                 }
             }
             Message::FileOpened(result) => {
                 self.is_loading = false;
-                self.is_dirty = false;
 
-                if let Ok((path, contents)) = result {
-                    self.detach(analyzer);
-                    self.file = Some(path);
-                    self.editor = wgsl_editor(&contents);
-                    self.attach(analyzer);
+                match result {
+                    Ok((path, contents)) => {
+                        self.detach(analyzer);
+                        self.label = path.as_str().map(shorten);
+                        self.file = Some(path);
+                        self.editor = wgsl_editor(&contents);
+                        self.attach(analyzer);
+                        self.is_dirty = false;
+                        Action::instruction(Instruction::Changed)
+                    }
+                    Err(file::Error::DialogClosed) => Action::none(),
+                    Err(error) => {
+                        self.failure = Some(format!("Could not open the shader: {error}"));
+                        Action::none()
+                    }
                 }
-
-                Action::instruction(Instruction::Changed)
             }
             Message::SaveFile => {
                 if self.is_loading {
                     Action::none()
                 } else {
                     self.is_loading = true;
+                    self.failure = None;
 
                     Action::task(Task::perform(
                         file::save_file(self.file.clone(), "shader.wesl", self.content()),
@@ -188,6 +207,7 @@ impl State {
                     Action::none()
                 } else {
                     self.is_loading = true;
+                    self.failure = None;
 
                     Action::task(Task::perform(
                         file::save_file(None, "shader.wesl", self.content()),
@@ -198,10 +218,17 @@ impl State {
             Message::FileSaved(result) => {
                 self.is_loading = false;
 
-                if let Ok(path) = result {
-                    analyzer.saved(&mut self.editor, self.file.as_ref(), &path);
-                    self.file = Some(path);
-                    self.is_dirty = false;
+                match result {
+                    Ok(path) => {
+                        analyzer.saved(&mut self.editor, self.file.as_ref(), &path);
+                        self.label = path.as_str().map(shorten);
+                        self.file = Some(path);
+                        self.is_dirty = false;
+                    }
+                    Err(file::Error::DialogClosed) => {}
+                    Err(error) => {
+                        self.failure = Some(format!("Could not save the shader: {error}"));
+                    }
                 }
 
                 Action::none()
@@ -274,20 +301,39 @@ impl State {
         Theme::Dark
     }
 
-    pub fn filename_display_text(&self) -> Option<String> {
-        let mut path = String::from(self.file.as_ref()?.as_str()?);
-
-        if path.len() > 60 {
-            path = format!("...{}", &path[path.len() - 40..])
-        }
+    /// The shader's file for a title, marked when it has unsaved changes.
+    pub fn title(&self) -> String {
+        let label = self.label.as_deref().unwrap_or("New file");
         if self.is_dirty {
-            path = format!("{path} •")
+            format!("{label} •")
+        } else {
+            label.to_owned()
         }
-        Some(path)
+    }
+
+    /// Why the last file action failed.
+    pub fn failure(&self) -> Option<&str> {
+        self.failure.as_deref()
+    }
+
+    /// Whether a file dialog is open.
+    pub fn is_loading(&self) -> bool {
+        self.is_loading
     }
 
     pub fn content(&self) -> String {
         self.editor.document().text().into_owned()
+    }
+}
+
+/// `path` cut to its last 40 characters when it is longer than 60.
+fn shorten(path: &str) -> String {
+    let length = path.chars().count();
+    if length > 60 {
+        let tail: String = path.chars().skip(length - 40).collect();
+        format!("...{tail}")
+    } else {
+        path.to_owned()
     }
 }
 
@@ -341,9 +387,70 @@ mod tests {
     use iced::futures::{FutureExt, StreamExt};
     use iced::time::Instant;
 
-    use super::{Instruction, Message, State};
+    use super::{Instruction, Message, State, shorten};
     use crate::analyzer::Analyzer;
+    use crate::core::{Program, Uniforms};
     use crate::file;
+
+    #[test]
+    fn a_cancelled_open_keeps_unsaved_changes() {
+        let (mut analyzer, _events) = Analyzer::start();
+        let mut shader = State::new("");
+        shader.is_dirty = true;
+
+        let action = shader.update(
+            Message::FileOpened(Err(file::Error::DialogClosed)),
+            Instant::now(),
+            &mut analyzer,
+        );
+
+        assert!(action.instruction.is_none());
+        assert!(shader.is_dirty);
+        assert_eq!(shader.failure(), None);
+    }
+
+    #[test]
+    fn a_failed_open_is_reported() {
+        let (mut analyzer, _events) = Analyzer::start();
+        let mut shader = State::new("");
+        let error = file::Error::Io(Arc::new(std::io::Error::other("disk on fire")));
+
+        let _ = shader.update(
+            Message::FileOpened(Err(error)),
+            Instant::now(),
+            &mut analyzer,
+        );
+
+        assert!(shader.failure().is_some());
+    }
+
+    #[test]
+    fn a_new_file_starts_from_a_shader_that_compiles() {
+        let (mut analyzer, _events) = Analyzer::start();
+        let mut shader = State::new("");
+        shader.is_dirty = true;
+
+        let action = shader.update(Message::NewFile, Instant::now(), &mut analyzer);
+
+        assert!(matches!(action.instruction, Some(Instruction::Changed)));
+        assert!(!shader.is_dirty);
+        assert!(
+            Program::new(shader.content(), Uniforms::default(), None)
+                .compile()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn long_paths_are_shortened_between_characters() {
+        let path = format!("/home/{}/shader.wesl", "Übungsaufgaben".repeat(5));
+
+        let short = shorten(&path);
+
+        assert!(short.starts_with("..."));
+        assert_eq!(short.chars().count(), 43);
+        assert!(short.ends_with("shader.wesl"));
+    }
 
     #[test]
     fn an_opened_file_is_analyzed_in_place_of_the_previous_shader() {

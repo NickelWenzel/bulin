@@ -76,6 +76,17 @@ impl Application {
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
         match message {
             Message::Shader(message) => {
+                // A shader dialog answering after a project switch would land in the new project.
+                let file_action = matches!(
+                    message,
+                    shader::Message::NewFile
+                        | shader::Message::OpenFile
+                        | shader::Message::SaveFile
+                        | shader::Message::SaveFileAs
+                );
+                if file_action && self.is_loading {
+                    return Task::none();
+                }
                 let action = self.shader.update(message, now, &mut self.analyzer);
                 if let Some(shader::Instruction::Changed) = action.instruction {
                     self.program_changed();
@@ -120,7 +131,7 @@ impl Application {
                 self.update(message, now)
             }
             Message::OpenProject => {
-                if self.is_loading {
+                if self.is_loading || self.shader.is_loading() {
                     Task::none()
                 } else {
                     self.is_loading = true;
@@ -130,7 +141,7 @@ impl Application {
                 }
             }
             Message::NewProject => {
-                if !self.is_loading {
+                if !self.is_loading && !self.shader.is_loading() {
                     self.file = None;
                     self.notice = None;
                     self.load(core::Project::untitled());
@@ -160,7 +171,7 @@ impl Application {
                 Task::none()
             }
             Message::SaveProject | Message::SaveProjectAs => {
-                if self.is_loading {
+                if self.is_loading || self.shader.is_loading() {
                     Task::none()
                 } else {
                     self.is_loading = true;
@@ -225,14 +236,12 @@ impl Application {
             .layout
             .view(|_, pane, _| match pane {
                 layout::PaneContent::Editor => {
-                    let file = self
-                        .shader
-                        .filename_display_text()
-                        .unwrap_or_else(|| String::from("New file"));
-                    let title = match &self.notice {
-                        Some(notice) => format!("{file} · {notice}"),
-                        None => file,
-                    };
+                    let title = [Some(self.shader.title().as_str()), self.notice.as_deref()]
+                        .into_iter()
+                        .chain([self.shader.failure()])
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" · ");
                     let editors = column![
                         self.uniforms.view().map(Message::Uniforms),
                         self.shader.view(&self.analyzer).map(Message::Shader),
