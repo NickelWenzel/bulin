@@ -38,11 +38,13 @@ type ErrorCheck = Pin<Box<dyn Future<Output = Option<wgpu::Error>> + Send>>;
 #[cfg(target_arch = "wasm32")]
 type ErrorCheck = Pin<Box<dyn Future<Output = Option<wgpu::Error>>>>;
 
-/// An offscreen pipeline for an edited shader, kept aside until its
-/// validation result arrives. Browser WebGPU only reports it after control
+/// An offscreen pipeline for an edited shader, with the uniform buffer its layout needs, kept
+/// aside until its validation result arrives. Browser WebGPU only reports it after control
 /// returns to the JS event loop, so it can't be awaited within a frame.
 struct PendingOffscreen {
     pipeline: wgpu::RenderPipeline,
+    uniforms: Option<UniformsBuffer>,
+    compiled: Arc<Compiled>,
     // `wgpu::Error` isn't `Sync`, which `Pipeline` must be on native
     error_check: Mutex<ErrorCheck>,
 }
@@ -72,6 +74,8 @@ pub struct Pipeline {
 
     // What the offscreen pipeline and uniform buffer currently hold
     compiled: Arc<Compiled>,
+    // A shader the GPU refused, so it isn't compiled again every frame
+    rejected: Option<Arc<str>>,
 }
 
 impl shader::Pipeline for Pipeline {
@@ -215,6 +219,7 @@ impl shader::Pipeline for Pipeline {
             in_flight: None,
             done: Arc::new(AtomicU64::new(0)),
             compiled: Arc::new(compiled),
+            rejected: None,
         }
     }
 }
@@ -226,8 +231,8 @@ impl Pipeline {
         queue: &wgpu::Queue,
         compiled: Arc<Compiled>,
     ) {
-        // 1. If the offscreen render we kicked off earlier has completed,
-        //    swap front and back. From now on `draw()` samples the new frame.
+        // If the offscreen render kicked off earlier has completed, swap front and back.
+        // From now on `draw()` samples the new frame.
         if let Some(generation) = self.in_flight
             && self.done.load(Ordering::Acquire) >= generation
         {
@@ -235,44 +240,36 @@ impl Pipeline {
             self.in_flight = None;
         }
 
-        // 2. Only start a new offscreen render if the previous one finished.
-        //    While one is in flight, the front texture keeps being displayed.
+        // Only start a new offscreen render if the previous one finished. While one is in
+        // flight, the front texture keeps being displayed.
         if self.in_flight.is_none() {
             let mut needs_draw = false;
 
-            //The order of the operations matters here
-            // 1. Check if buffer needs to be re-allocated
-            if self.compiled.uniforms.len() != compiled.uniforms.len() {
-                self.uniforms = create_uniforms_buffer(device, compiled.uniforms.len() as u64);
+            if compiled.wgsl == self.compiled.wgsl {
+                // The shader showing, with new values at most.
+                self.pending = None;
+                if compiled.uniforms != self.compiled.uniforms
+                    && let Some(uniforms) = &self.uniforms
+                    && uniforms.uniforms.size() == compiled.uniforms.len() as u64
+                {
+                    queue.write_buffer(&uniforms.uniforms, 0, &compiled.uniforms);
+                    self.compiled = compiled;
+                    needs_draw = true;
+                }
+            } else if self.rejected.as_ref() != Some(&compiled.wgsl) {
+                // An edited shader builds next to the one showing, with its own uniform
+                // buffer, and replaces both only once the GPU accepts it.
+                match &mut self.pending {
+                    Some(pending) if pending.compiled.wgsl == compiled.wgsl => {
+                        pending.set_values(queue, compiled);
+                    }
+                    _ => self.pending = Some(PendingOffscreen::new(device, queue, compiled)),
+                }
+            }
+
+            if let Validation::Accepted = self.validate_pending() {
                 needs_draw = true;
             }
-
-            // 2. Check if buffer content changed
-            if let Some(uniforms) = &self.uniforms
-                && self.compiled.uniforms != compiled.uniforms
-            {
-                queue.write_buffer(&uniforms.uniforms, 0, &compiled.uniforms);
-                needs_draw = true;
-            }
-
-            // 3. Check if shader changed
-            if self.compiled.wgsl != compiled.wgsl {
-                self.pending = Some(PendingOffscreen::new(
-                    device,
-                    self.uniforms.as_ref().map(|u| &u.uniforms_layout),
-                    &compiled.wgsl,
-                ));
-            }
-
-            // Keep displaying the last valid shader until the edited one
-            // passes validation
-            match self.validate_pending() {
-                Validation::Idle => {}
-                Validation::Accepted => needs_draw = true,
-                Validation::Pending | Validation::Rejected => needs_draw = false,
-            }
-
-            self.compiled = compiled;
 
             if needs_draw {
                 let back = &self.targets[self.front ^ 1];
@@ -308,7 +305,7 @@ impl Pipeline {
 
                 queue.submit(Some(encoder.finish()));
 
-                // 3. Flip the "done" generation counter once the GPU is through.
+                // Flip the "done" generation counter once the GPU is through.
                 self.generation += 1;
                 let generation = self.generation;
                 self.in_flight = Some(generation);
@@ -346,9 +343,13 @@ impl Pipeline {
 
         if let Some(error) = error {
             warn!("Error creating offscreen pipeline:\n{error}");
+            self.rejected = Some(Arc::clone(&pending.compiled.wgsl));
             Validation::Rejected
         } else {
             self.offscreen = pending.pipeline;
+            self.uniforms = pending.uniforms;
+            self.compiled = pending.compiled;
+            self.rejected = None;
             Validation::Accepted
         }
     }
@@ -365,21 +366,38 @@ impl Pipeline {
 }
 
 impl PendingOffscreen {
-    fn new(
-        device: &wgpu::Device,
-        uniforms_layout: Option<&wgpu::BindGroupLayout>,
-        shader: &str,
-    ) -> Self {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, compiled: Arc<Compiled>) -> Self {
+        let uniforms = create_uniforms_buffer(device, compiled.uniforms.len() as u64);
+        if let Some(uniforms) = &uniforms {
+            queue.write_buffer(&uniforms.uniforms, 0, &compiled.uniforms);
+        }
+
         // Guard shader compilation *and* pipeline creation: a shader that
         // references a bind group the layout doesn't provide only errors at
         // pipeline creation, so popping the scope earlier would let a broken
         // pipeline through.
         let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let pipeline = create_offscreen_pipeline(device, uniforms_layout, shader);
+        let pipeline = create_offscreen_pipeline(
+            device,
+            uniforms.as_ref().map(|u| &u.uniforms_layout),
+            &compiled.wgsl,
+        );
 
         Self {
             pipeline,
+            uniforms,
+            compiled,
             error_check: Mutex::new(Box::pin(error_scope.pop())),
+        }
+    }
+
+    /// Takes new values for the shader awaiting validation.
+    fn set_values(&mut self, queue: &wgpu::Queue, compiled: Arc<Compiled>) {
+        if let Some(uniforms) = &self.uniforms
+            && uniforms.uniforms.size() == compiled.uniforms.len() as u64
+        {
+            queue.write_buffer(&uniforms.uniforms, 0, &compiled.uniforms);
+            self.compiled = compiled;
         }
     }
 }
