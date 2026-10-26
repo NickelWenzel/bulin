@@ -39,11 +39,17 @@ pub async fn open_file() -> Result<(Name, Arc<String>), Error> {
         .map_err(Error::Io)
 }
 
-pub async fn save_file(path: Option<Name>, contents: String) -> Result<Name, Error> {
+/// Writes `contents` to `path`, or to a file the user picks, suggesting `suggested_name`.
+pub async fn save_file(
+    path: Option<Name>,
+    suggested_name: &str,
+    contents: String,
+) -> Result<Name, Error> {
     let path = if let Some(path) = path {
         path.0
     } else {
         rfd::AsyncFileDialog::new()
+            .set_file_name(suggested_name)
             .save_file()
             .await
             .as_ref()

@@ -11,7 +11,7 @@ use matcha_iced::lsp::gen_lsp_types::Uri;
 use matcha_iced::lsp::lsp_server::{Connection, Message};
 use wasm_bindgen::prelude::{Closure, wasm_bindgen};
 
-use super::MANIFEST;
+use super::FILES;
 
 #[wasm_bindgen(module = "/web/analyzer.js")]
 extern "C" {
@@ -66,7 +66,13 @@ impl Link {
             }
         });
 
-        let files = serde_json::json!({ "wesl.toml": MANIFEST }).to_string();
+        let files = serde_json::Value::Object(
+            FILES
+                .iter()
+                .map(|(path, contents)| ((*path).to_owned(), (*contents).into()))
+                .collect(),
+        )
+        .to_string();
         analyzer_start(ROOT, &files, &on_message, &on_failed);
 
         let root = Uri::parse(&format!("file://{ROOT}/")).expect("invariant: a valid URI");

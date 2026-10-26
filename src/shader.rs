@@ -178,7 +178,7 @@ impl State {
                     self.is_loading = true;
 
                     Action::task(Task::perform(
-                        file::save_file(self.file.clone(), self.content()),
+                        file::save_file(self.file.clone(), "shader.wesl", self.content()),
                         Message::FileSaved,
                     ))
                 }
@@ -190,7 +190,7 @@ impl State {
                     self.is_loading = true;
 
                     Action::task(Task::perform(
-                        file::save_file(None, self.content()),
+                        file::save_file(None, "shader.wesl", self.content()),
                         Message::FileSaved,
                     ))
                 }

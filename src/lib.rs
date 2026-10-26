@@ -54,7 +54,9 @@ impl Application {
         let mut shader = shader::State::new(&project.shader);
         shader.attach(&mut analyzer);
         let uniforms = uniforms::State::new(project.uniforms, project.clock);
-        let viewer = viewer::State::new(&program(&shader, &uniforms));
+        let program = program(&shader, &uniforms);
+        analyzer.set_uniforms(&program.uniforms_package());
+        let viewer = viewer::State::new(&program);
 
         let application = Self {
             analyzer,
@@ -76,13 +78,13 @@ impl Application {
             Message::Shader(message) => {
                 let action = self.shader.update(message, now, &mut self.analyzer);
                 if let Some(shader::Instruction::Changed) = action.instruction {
-                    self.viewer.load(&program(&self.shader, &self.uniforms));
+                    self.program_changed();
                 }
                 action.task.map(Message::Shader)
             }
             Message::Uniforms(message) => {
                 if let Some(uniforms::Instruction::Changed) = self.uniforms.update(message) {
-                    self.viewer.load(&program(&self.shader, &self.uniforms));
+                    self.program_changed();
                 }
                 Task::none()
             }
@@ -170,7 +172,7 @@ impl Application {
                     );
 
                     Task::perform(
-                        file::save_file(file, project.to_json()),
+                        file::save_file(file, "project.bulin", project.to_json()),
                         Message::ProjectSaved,
                     )
                 }
@@ -191,11 +193,18 @@ impl Application {
             Message::Analyzer(event) => {
                 let action = self.shader.lsp(&mut self.analyzer, event);
                 if let Some(shader::Instruction::Changed) = action.instruction {
-                    self.viewer.load(&program(&self.shader, &self.uniforms));
+                    self.program_changed();
                 }
                 action.task.map(Message::Shader)
             }
         }
+    }
+
+    /// Shows the current program and gives the analyzer its uniforms package.
+    fn program_changed(&mut self) {
+        let program = program(&self.shader, &self.uniforms);
+        self.viewer.load(&program);
+        self.analyzer.set_uniforms(&program.uniforms_package());
     }
 
     /// Replaces the shader and uniforms with `project`'s.
@@ -204,7 +213,7 @@ impl Application {
         self.shader = shader::State::new(&project.shader);
         self.shader.attach(&mut self.analyzer);
         self.uniforms = uniforms::State::new(project.uniforms, project.clock);
-        self.viewer.load(&program(&self.shader, &self.uniforms));
+        self.program_changed();
     }
 
     pub fn view(&self) -> Element<'_, Message> {

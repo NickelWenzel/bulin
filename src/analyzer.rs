@@ -1,7 +1,10 @@
 //! wgsl-analyzer, the language server behind the shader editor.
 //!
 //! Every document is analyzed as a file in one virtual workspace whose `wesl.toml` makes it a
-//! package: wgsl-analyzer publishes diagnostics only for files inside a discovered package.
+//! package: wgsl-analyzer publishes diagnostics only for files inside a discovered package. The
+//! workspace depends on the `bulin` and `uniforms` packages a shader imports, each a directory
+//! with its own `wesl.toml`. The uniforms package changes with the uniforms, so its text reaches
+//! the server as an open document rather than through the file on disk.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -20,12 +23,25 @@ use web::Link;
 
 use crate::file;
 
-/// The workspace manifest. `root = "."` keeps the documents at the workspace root instead of
-/// the default `./shaders`.
-const MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n";
+/// The manifest of a package whose modules sit next to it, instead of in the default `./shaders`.
+const PACKAGE_MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n";
+
+/// The workspace manifest, depending on the packages bulin provides.
+const WORKSPACE_MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n\n[dependencies]\n\
+                                  bulin = { path = \"bulin\" }\nuniforms = { path = \"uniforms\" }\n";
+
+/// The files the workspace starts with, relative to its root. The uniforms package's module is
+/// empty here: its text is the open document.
+const FILES: [(&str, &str); 5] = [
+    ("wesl.toml", WORKSPACE_MANIFEST),
+    ("bulin/wesl.toml", PACKAGE_MANIFEST),
+    ("bulin/package.wesl", crate::core::program::BULIN_PACKAGE),
+    ("uniforms/wesl.toml", PACKAGE_MANIFEST),
+    ("uniforms/package.wesl", ""),
+];
 
 /// The document name of a shader that has no file yet.
-const UNTITLED: &str = "untitled.wgsl";
+const UNTITLED: &str = "untitled.wesl";
 
 /// A running wgsl-analyzer serving one shader editor at a time.
 ///
@@ -35,6 +51,8 @@ pub struct Analyzer {
     client: Client,
     link: Link,
     root: Uri,
+    /// The uniforms package's module, open on the server but never shown.
+    uniforms: CodeEditor,
 }
 
 impl Analyzer {
@@ -46,10 +64,38 @@ impl Analyzer {
         let (link, root) = Link::start(far);
         let (client, events) = Client::builder().root(root.clone()).memory(near);
 
-        let mut analyzer = Self { client, link, root };
+        let mut analyzer = Self {
+            client,
+            link,
+            root,
+            uniforms: CodeEditor::new(""),
+        };
+        analyzer.open_uniforms();
         analyzer.link.flush();
 
         (analyzer, events)
+    }
+
+    /// Makes `package` the uniforms package shaders import, if it changed.
+    pub fn set_uniforms(&mut self, package: &str) {
+        if self.uniforms.document().text() == package {
+            return;
+        }
+        self.uniforms.close_lsp(&mut self.client);
+        self.uniforms = CodeEditor::new(package);
+        self.open_uniforms();
+        self.link.flush();
+    }
+
+    fn open_uniforms(&mut self) {
+        let mut uri = self.root.clone();
+        uri.path_segments_mut()
+            .expect("invariant: the workspace root is a file URI")
+            .pop_if_empty()
+            .extend(["uniforms", "package.wesl"]);
+        if let Err(error) = self.uniforms.open_lsp(&mut self.client, &uri, "wesl") {
+            tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
+        }
     }
 
     pub fn status(&self) -> &client::Status {
@@ -64,7 +110,7 @@ impl Analyzer {
     /// Starts analyzing `editor`'s text as the shader `file`.
     pub fn attach(&mut self, editor: &mut CodeEditor, file: Option<&file::Name>) {
         let uri = self.document_uri(file);
-        if let Err(error) = editor.open_lsp(&mut self.client, &uri, "wgsl") {
+        if let Err(error) = editor.open_lsp(&mut self.client, &uri, "wesl") {
             tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
         }
         self.link.flush();
@@ -120,15 +166,15 @@ impl Analyzer {
         self.link.flush();
     }
 
-    /// The URI under which `file` is analyzed: its name inside the workspace, with a `.wgsl`
-    /// extension added when it has neither `.wgsl` nor `.wesl`.
+    /// The URI under which `file` is analyzed: its name inside the workspace, as a `.wesl`
+    /// module, since the server treats `import` in a `.wgsl` file as an error.
     fn document_uri(&self, file: Option<&file::Name>) -> Uri {
         let name = file.and_then(file::Name::file_name).unwrap_or(UNTITLED);
-        let name = if name.ends_with(".wgsl") || name.ends_with(".wesl") {
-            name.to_owned()
-        } else {
-            format!("{name}.wgsl")
-        };
+        let stem = name
+            .strip_suffix(".wesl")
+            .or_else(|| name.strip_suffix(".wgsl"))
+            .unwrap_or(name);
+        let name = format!("{stem}.wesl");
 
         let mut uri = self.root.clone();
         uri.path_segments_mut()
@@ -157,6 +203,8 @@ mod tests {
     use matcha_iced::CodeEditor;
 
     use super::Analyzer;
+    use crate::core::uniform::Type;
+    use crate::core::{Program, Uniforms};
     use crate::file;
 
     #[test]
@@ -190,13 +238,49 @@ mod tests {
         };
         let root = analyzer.root.to_string();
 
-        assert_eq!(uri(None), format!("{root}untitled.wgsl"));
-        assert_eq!(uri(Some("/a/b/sky.wgsl")), format!("{root}sky.wgsl"));
+        assert_eq!(uri(None), format!("{root}untitled.wesl"));
+        assert_eq!(uri(Some("/a/b/sky.wgsl")), format!("{root}sky.wesl"));
         assert_eq!(uri(Some("/a/b/sky.wesl")), format!("{root}sky.wesl"));
-        assert_eq!(uri(Some("/a/b/sky.frag")), format!("{root}sky.frag.wgsl"));
+        assert_eq!(uri(Some("/a/b/sky.frag")), format!("{root}sky.frag.wesl"));
         assert_eq!(
             uri(Some("/a/b/my sky#1.wgsl")),
-            format!("{root}my%20sky%231.wgsl")
+            format!("{root}my%20sky%231.wesl")
         );
+    }
+
+    #[test]
+    fn shaders_import_the_uniforms_and_bulin_packages() {
+        let (mut analyzer, mut events) = Analyzer::start();
+        let mut uniforms = Uniforms::default();
+        uniforms.add("radius", Type::Float(1.0)).unwrap();
+        analyzer.set_uniforms(&Program::new("", uniforms, None).uniforms_package());
+        let mut editor = CodeEditor::new(
+            "import uniforms::customs;\n\
+             fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {\n\
+                 return vec4<f32>(customs.radius + customs.nope, pixel.uv, 1.0);\n\
+             }\n",
+        );
+        analyzer.attach(&mut editor, None);
+
+        // The imports resolve, so the only error is the uniform that doesn't exist.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let errors = loop {
+            assert!(Instant::now() < deadline, "no error diagnostic within 30 s");
+            match events.next().now_or_never() {
+                Some(Some(event)) => analyzer.receive(event, &mut editor),
+                Some(None) => panic!("the server stopped"),
+                None => thread::sleep(Duration::from_millis(10)),
+            }
+            let errors = editor
+                .document()
+                .diagnostics_in(0..u32::MAX)
+                .filter(|(_, severity, _)| *severity == Severity::Error)
+                .map(|(_, _, message)| message.to_string())
+                .collect::<Vec<_>>();
+            if !errors.is_empty() {
+                break errors;
+            }
+        };
+        assert_eq!(errors, ["no field `nope` on type ref<Customs>"]);
     }
 }
