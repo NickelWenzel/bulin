@@ -144,14 +144,15 @@ impl Application {
                 action.task.map(Message::Shader)
             }
             Message::Uniforms(message) => {
-                match self.uniforms.update(message) {
+                let action = self.uniforms.update(message);
+                match action.instruction {
                     Some(uniforms::Instruction::Values) => self.viewer.set_values(
                         core::program::bytes(self.uniforms.time(), self.uniforms.uniforms()),
                     ),
                     Some(uniforms::Instruction::Layout) => self.program_changed(),
                     None => {}
                 }
-                Task::none()
+                action.task.map(Message::Uniforms)
             }
             Message::Layout(message) => {
                 self.layout.update(message);
