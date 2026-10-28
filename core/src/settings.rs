@@ -170,6 +170,11 @@ impl Keybindings {
         self.0.insert(command, None);
     }
 
+    /// Whether the user bound `command` differently from its defaults.
+    pub fn is_overridden(&self, command: Command) -> bool {
+        self.0.contains_key(&command)
+    }
+
     /// Overrides that share a chord, and overrides onto a chord in [`command::SHADOWED`].
     pub fn conflicts(&self) -> Vec<Conflict> {
         let mut shared: Vec<(Chord, Vec<Command>)> = Vec::new();
@@ -271,11 +276,13 @@ mod tests {
         let mut keybindings = Keybindings::default();
         keybindings.unbind(Command::Undo);
 
+        assert!(keybindings.is_overridden(Command::Undo));
         assert_eq!(keybindings.chords(Command::Undo), []);
         assert_eq!(keybindings.command(&chord("ctrl+z")), None);
 
         keybindings.reset(Command::Undo);
 
+        assert!(!keybindings.is_overridden(Command::Undo));
         assert_eq!(keybindings, Keybindings::default());
         assert_eq!(keybindings.command(&chord("ctrl+z")), Some(Command::Undo));
     }

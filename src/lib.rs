@@ -447,6 +447,17 @@ impl Application {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
+        // The chord being recorded must reach no shortcut, no editor and not the Escape that
+        // closes the modal. The clock takes no keys, so the preview keeps running.
+        if let Some(Modal::Settings(state)) = &self.modal
+            && state.is_recording()
+        {
+            return Subscription::batch([
+                state.subscription().map(Message::Settings),
+                self.uniforms.subscription().map(Message::Uniforms),
+            ]);
+        }
+
         // Escape closes a modal even while the shader editor holds focus and captures keys.
         let escape = event::listen_with(|event, _status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
@@ -610,6 +621,58 @@ mod tests {
 
         press_ctrl_alt(&mut app, "e", key::Code::KeyE);
         assert_eq!(app.settings.editor.render_whitespace, !shown);
+    }
+
+    #[test]
+    fn a_chord_recorded_in_the_settings_is_bound_and_saved() {
+        let (mut app, _) = Application::with_settings(core::Settings::default());
+        let command = core::settings::Command::ToggleWhitespace;
+        let _ = app.update(Message::Menu(menu::Message::Settings), Instant::now());
+        let _ = app.update(
+            Message::Settings(settings::Message::Record(command)),
+            Instant::now(),
+        );
+        assert!(matches!(&app.modal, Some(Modal::Settings(state)) if state.is_recording()));
+
+        let _ = app.update(
+            Message::Settings(settings::Message::Recorded {
+                key: Key::Character("e".into()),
+                physical: key::Physical::Code(key::Code::KeyE),
+                modifiers: Modifiers::CTRL,
+            }),
+            Instant::now(),
+        );
+
+        assert!(matches!(&app.modal, Some(Modal::Settings(state)) if !state.is_recording()));
+        assert_eq!(
+            app.settings.keybindings.chords(command),
+            ["ctrl+e".parse().unwrap()]
+        );
+        assert!(app.saving_settings);
+    }
+
+    #[test]
+    fn cancelling_a_recording_keeps_the_binding_and_the_settings_open() {
+        let (mut app, _) = Application::with_settings(core::Settings::default());
+        let _ = app.update(Message::Menu(menu::Message::Settings), Instant::now());
+        let _ = app.update(
+            Message::Settings(settings::Message::Record(
+                core::settings::Command::ToggleWhitespace,
+            )),
+            Instant::now(),
+        );
+
+        let _ = app.update(
+            Message::Settings(settings::Message::CancelRecording),
+            Instant::now(),
+        );
+
+        assert!(matches!(&app.modal, Some(Modal::Settings(state)) if !state.is_recording()));
+        assert_eq!(
+            app.settings.keybindings,
+            core::Settings::default().keybindings
+        );
+        assert!(!app.saving_settings);
     }
 
     #[test]
