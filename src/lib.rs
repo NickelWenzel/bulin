@@ -5,6 +5,7 @@ mod analyzer;
 mod file;
 mod layout;
 mod menu;
+mod settings;
 mod shader;
 mod uniforms;
 mod viewer;
@@ -28,6 +29,7 @@ pub struct Application {
     file: Option<file::Name>,
     is_loading: bool,
     show_menu: bool,
+    settings: core::Settings,
     /// Why the last project action failed, until the next one.
     notice: Option<String>,
 }
@@ -51,9 +53,21 @@ pub enum Message {
 
 impl Application {
     pub fn new() -> (Self, Task<Message>) {
+        match settings::storage::load() {
+            Ok(settings) => Self::with_settings(settings.unwrap_or_default()),
+            Err(error) => {
+                let (mut application, task) = Self::with_settings(core::Settings::default());
+                application.notice = Some(format!("Could not load the settings: {error}"));
+                (application, task)
+            }
+        }
+    }
+
+    /// Starts on an untitled project with `settings` rather than the stored ones.
+    fn with_settings(settings: core::Settings) -> (Self, Task<Message>) {
         let (mut analyzer, events) = analyzer::Analyzer::start();
         let project = core::Project::untitled();
-        let mut shader = shader::State::new(&project.shader);
+        let mut shader = shader::State::new(&project.shader, &settings);
         shader.attach(&mut analyzer);
         let uniforms = uniforms::State::new(project.uniforms, project.clock);
         let program = program(&shader, &uniforms);
@@ -69,6 +83,7 @@ impl Application {
             file: None,
             is_loading: false,
             show_menu: false,
+            settings,
             notice: None,
         };
 
@@ -89,7 +104,9 @@ impl Application {
                 if file_action && self.is_loading {
                     return Task::none();
                 }
-                let action = self.shader.update(message, now, &mut self.analyzer);
+                let action = self
+                    .shader
+                    .update(message, now, &mut self.analyzer, &self.settings);
                 if let Some(shader::Instruction::Changed) = action.instruction {
                     self.program_changed();
                 }
@@ -228,7 +245,7 @@ impl Application {
     /// Replaces the shader and uniforms with `project`'s.
     fn load(&mut self, project: core::Project) {
         self.shader.detach(&mut self.analyzer);
-        self.shader = shader::State::new(&project.shader);
+        self.shader = shader::State::new(&project.shader, &self.settings);
         self.shader.attach(&mut self.analyzer);
         self.uniforms = uniforms::State::new(project.uniforms, project.clock);
         self.program_changed();
@@ -343,6 +360,7 @@ mod tests {
     use iced::advanced::widget::{Tree, tree};
 
     use super::Application;
+    use crate::core;
 
     /// The address of a node's widget state, which stays the same only while iced keeps it.
     fn state_address(tree: &Tree) -> Option<*const ()> {
@@ -354,7 +372,7 @@ mod tests {
 
     #[test]
     fn opening_the_menu_keeps_the_content_state() {
-        let (mut app, _) = Application::new();
+        let (mut app, _) = Application::with_settings(core::Settings::default());
         let mut tree = Tree::empty();
         tree.diff(&mut app.view());
         let root = tree.tag;

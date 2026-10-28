@@ -1,12 +1,15 @@
 use iced::time::Instant;
 use iced::{Subscription, Theme, event, keyboard};
 use matcha_core::{Severity, TreeSitterDef};
+use matcha_iced::keymap::Keymap;
 use matcha_iced::lsp::client;
 use matcha_iced::{CodeEditor, Event};
 
 use crate::action::Action;
 use crate::analyzer::Analyzer;
+use crate::core;
 use crate::file;
+use crate::settings::keymap;
 
 use iced::widget::container;
 use iced::{Element, Task};
@@ -32,18 +35,29 @@ struct Problems {
     warnings: usize,
 }
 
-fn wgsl_editor(source: &str) -> CodeEditor {
+fn wgsl_editor(source: &str, settings: &core::Settings) -> CodeEditor {
     let wesl = TreeSitterDef::new(
         tree_sitter_wesl::LANGUAGE,
         tree_sitter_wesl::HIGHLIGHTS_QUERY,
     )
     .expect("tree-sitter-wesl's highlights query compiles");
+    let keymap = keymap::overrides(&settings.keybindings).into_iter().fold(
+        Keymap::new(),
+        |keymap, (chord, action)| match action {
+            Some(action) => keymap.bind(chord, action),
+            None => keymap.unbind(chord),
+        },
+    );
 
     CodeEditor::new(source)
         .language(wesl)
         .line_comment(Some("//"))
-        .inlay_hints(true)
         .rename(true)
+        .inlay_hints(settings.editor.inlay_hints)
+        .show_whitespace(settings.editor.render_whitespace)
+        .text_size(settings.editor.font_size)
+        .find(settings.editor.find)
+        .keymap(keymap)
 }
 
 #[derive(Debug, Clone)]
@@ -65,11 +79,11 @@ pub enum Instruction {
 }
 
 impl State {
-    pub fn new(shader: &str) -> Self {
+    pub fn new(shader: &str, settings: &core::Settings) -> Self {
         Self {
             file: None,
             label: None,
-            editor: wgsl_editor(shader),
+            editor: wgsl_editor(shader, settings),
             is_loading: false,
             is_dirty: false,
             problems: Problems::default(),
@@ -120,6 +134,7 @@ impl State {
         message: Message,
         now: Instant,
         analyzer: &mut Analyzer,
+        settings: &core::Settings,
     ) -> Action<Instruction, Message> {
         match message {
             Message::Editor(event) => {
@@ -137,11 +152,13 @@ impl State {
                 Message::Editor(Event::Editor(matcha_iced::Action::Undo)),
                 now,
                 analyzer,
+                settings,
             ),
             Message::Redo => self.update(
                 Message::Editor(Event::Editor(matcha_iced::Action::Redo)),
                 now,
                 analyzer,
+                settings,
             ),
             Message::NewFile => {
                 if self.is_loading {
@@ -151,7 +168,7 @@ impl State {
                 self.detach(analyzer);
                 self.file = None;
                 self.label = None;
-                self.editor = wgsl_editor(crate::core::program::DEFAULT_SOURCE);
+                self.editor = wgsl_editor(core::program::DEFAULT_SOURCE, settings);
                 self.attach(analyzer);
                 self.is_dirty = false;
 
@@ -175,7 +192,7 @@ impl State {
                         self.detach(analyzer);
                         self.label = path.as_str().map(shorten);
                         self.file = Some(path);
-                        self.editor = wgsl_editor(&contents);
+                        self.editor = wgsl_editor(&contents, settings);
                         self.attach(analyzer);
                         self.is_dirty = false;
                         Action::instruction(Instruction::Changed)
@@ -330,19 +347,20 @@ mod tests {
 
     use super::{Instruction, Message, State, shorten};
     use crate::analyzer::Analyzer;
-    use crate::core::{Program, Uniforms};
+    use crate::core::{Program, Settings, Uniforms};
     use crate::file;
 
     #[test]
     fn a_cancelled_open_keeps_unsaved_changes() {
         let (mut analyzer, _events) = Analyzer::start();
-        let mut shader = State::new("");
+        let mut shader = State::new("", &Settings::default());
         shader.is_dirty = true;
 
         let action = shader.update(
             Message::FileOpened(Err(file::Error::DialogClosed)),
             Instant::now(),
             &mut analyzer,
+            &Settings::default(),
         );
 
         assert!(action.instruction.is_none());
@@ -353,13 +371,14 @@ mod tests {
     #[test]
     fn a_failed_open_is_reported() {
         let (mut analyzer, _events) = Analyzer::start();
-        let mut shader = State::new("");
+        let mut shader = State::new("", &Settings::default());
         let error = file::Error::Io(Arc::new(std::io::Error::other("disk on fire")));
 
         let _ = shader.update(
             Message::FileOpened(Err(error)),
             Instant::now(),
             &mut analyzer,
+            &Settings::default(),
         );
 
         assert!(shader.failure().is_some());
@@ -368,10 +387,15 @@ mod tests {
     #[test]
     fn a_new_file_starts_from_a_shader_that_compiles() {
         let (mut analyzer, _events) = Analyzer::start();
-        let mut shader = State::new("");
+        let mut shader = State::new("", &Settings::default());
         shader.is_dirty = true;
 
-        let action = shader.update(Message::NewFile, Instant::now(), &mut analyzer);
+        let action = shader.update(
+            Message::NewFile,
+            Instant::now(),
+            &mut analyzer,
+            &Settings::default(),
+        );
 
         assert!(matches!(action.instruction, Some(Instruction::Changed)));
         assert!(!shader.is_dirty);
@@ -396,14 +420,19 @@ mod tests {
     #[test]
     fn an_opened_file_is_analyzed_in_place_of_the_previous_shader() {
         let (mut analyzer, mut events) = Analyzer::start();
-        let mut editor = State::new("fn f() -> i32 { return 1; }");
+        let mut editor = State::new("fn f() -> i32 { return 1; }", &Settings::default());
         editor.attach(&mut analyzer);
 
         let opened = Ok((
             file::Name::from("/shaders/broken.wgsl"),
             Arc::new("fn f() -> i32 { return 1.0; }".to_owned()),
         ));
-        let action = editor.update(Message::FileOpened(opened), Instant::now(), &mut analyzer);
+        let action = editor.update(
+            Message::FileOpened(opened),
+            Instant::now(),
+            &mut analyzer,
+            &Settings::default(),
+        );
         assert!(matches!(action.instruction, Some(Instruction::Changed)));
 
         let deadline = Instant::now() + Duration::from_secs(30);
