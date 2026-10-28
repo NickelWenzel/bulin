@@ -12,13 +12,18 @@ mod viewer;
 
 use iced::keyboard::key;
 use iced::time::Instant;
-use iced::widget::{button, center, column, container, mouse_area, opaque, row, stack, text};
+use iced::widget::{
+    button, center, column, container, mouse_area, opaque, operation, row, stack, text,
+};
 use iced::{
     Center, Element, Event, Fill, Font, Length, Subscription, Task, Theme, color, event, keyboard,
 };
 use matcha_iced::lsp;
 
 use std::sync::Arc;
+
+/// matcha's default id for the editor, which takes focus back when a modal closes.
+const EDITOR: &str = "matcha-editor";
 
 pub struct Application {
     analyzer: analyzer::Analyzer,
@@ -28,7 +33,7 @@ pub struct Application {
     layout: layout::State,
     file: Option<file::Name>,
     is_loading: bool,
-    show_menu: bool,
+    modal: Option<Modal>,
     settings: core::Settings,
     /// Whether the settings are being written.
     saving_settings: bool,
@@ -41,14 +46,21 @@ pub struct Application {
     notice: Option<String>,
 }
 
+/// What the layer over the content shows.
+enum Modal {
+    Menu,
+    Settings(settings::State),
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Shader(shader::Message),
     Uniforms(uniforms::Message),
     Layout(layout::Message),
     ShowMenu,
-    CloseMenu,
+    CloseModal,
     Menu(menu::Message),
+    Settings(settings::Message),
     OpenProject,
     NewProject,
     ProjectOpened(Result<(file::Name, Arc<String>), file::Error>),
@@ -97,7 +109,7 @@ impl Application {
             layout: layout::State::new(),
             file: None,
             is_loading: false,
-            show_menu: false,
+            modal: None,
             settings,
             saving_settings: false,
             settings_stale: false,
@@ -145,16 +157,38 @@ impl Application {
                 Task::none()
             }
             Message::ShowMenu => {
-                self.show_menu = true;
-                Task::none()
+                self.modal = Some(Modal::Menu);
+                // The editor would otherwise keep taking keys behind the modal.
+                iced::advanced::widget::operate(
+                    iced::advanced::widget::operation::focusable::unfocus(),
+                )
             }
-            Message::CloseMenu => {
-                self.show_menu = false;
-                Task::none()
-            }
+            Message::CloseModal => match self.modal.take() {
+                Some(_) => operation::focus(EDITOR),
+                None => Task::none(),
+            },
             Message::Menu(message) => {
-                self.show_menu = false;
+                self.modal = None;
                 let message = match message {
+                    menu::Message::Settings => {
+                        self.modal = Some(Modal::Settings(settings::State::new()));
+                        return Task::none();
+                    }
+                    // The find bar takes focus as it opens.
+                    menu::Message::Find => {
+                        return self.update(
+                            Message::Shader(shader::Message::Editor(matcha_iced::Event::OpenFind)),
+                            now,
+                        );
+                    }
+                    menu::Message::Replace => {
+                        return self.update(
+                            Message::Shader(shader::Message::Editor(
+                                matcha_iced::Event::OpenReplace,
+                            )),
+                            now,
+                        );
+                    }
                     menu::Message::OpenFile => Message::Shader(shader::Message::OpenFile),
                     menu::Message::NewFile => Message::Shader(shader::Message::NewFile),
                     menu::Message::SaveFile => Message::Shader(shader::Message::SaveFile),
@@ -166,7 +200,31 @@ impl Application {
                     menu::Message::SaveProject => Message::SaveProject,
                     menu::Message::SaveProjectAs => Message::SaveProjectAs,
                 };
-                self.update(message, now)
+                Task::batch([operation::focus(EDITOR), self.update(message, now)])
+            }
+            Message::Settings(message) => {
+                let Some(Modal::Settings(state)) = &mut self.modal else {
+                    return Task::none();
+                };
+                let action = state.update(message, &mut self.settings);
+                let task = action.task.map(Message::Settings);
+
+                match action.instruction {
+                    Some(settings::Instruction::Changed) => Task::batch([
+                        task,
+                        self.shader.apply(&self.settings, now).map(Message::Shader),
+                        self.settings_changed(),
+                    ]),
+                    Some(settings::Instruction::Previewed) => Task::batch([
+                        task,
+                        self.shader.apply(&self.settings, now).map(Message::Shader),
+                    ]),
+                    Some(settings::Instruction::Close) => {
+                        self.modal = None;
+                        Task::batch([task, operation::focus(EDITOR)])
+                    }
+                    None => task,
+                }
             }
             Message::OpenProject => {
                 if self.is_loading || self.shader.is_loading() {
@@ -372,13 +430,15 @@ impl Application {
             container(panes).width(Length::Fill).height(Length::Fill),
         ];
 
-        // The content keeps its place in the widget tree whether the menu is open or not, so
-        // opening it doesn't reset the editor's focus, the combo box or the panes.
+        // The content keeps its place in the widget tree whether a modal is open or not, so
+        // opening one doesn't reset the editor's document, the combo box or the panes.
+        let layer = self.modal.as_ref().map(|layer| match layer {
+            Modal::Menu => menu::view(self.settings.editor.find).map(Message::Menu),
+            Modal::Settings(state) => state.view(&self.settings).map(Message::Settings),
+        });
+
         stack![content]
-            .push(
-                self.show_menu
-                    .then(|| modal(menu::view().map(Message::Menu), Message::CloseMenu)),
-            )
+            .push(layer.map(|layer| modal(layer, Message::CloseModal)))
             .into()
     }
 
@@ -387,12 +447,12 @@ impl Application {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        // Escape closes the menu even while the shader editor holds focus and captures keys.
+        // Escape closes a modal even while the shader editor holds focus and captures keys.
         let escape = event::listen_with(|event, _status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(key::Named::Escape),
                 ..
-            }) => Some(Message::CloseMenu),
+            }) => Some(Message::CloseModal),
             _ => None,
         });
 
@@ -454,8 +514,10 @@ mod tests {
     use iced::keyboard::{Key, Modifiers, key};
     use iced::time::Instant;
 
-    use super::{Application, Message};
+    use super::{Application, Message, Modal};
     use crate::core;
+    use crate::menu;
+    use crate::settings;
 
     /// Presses Ctrl+Alt with the letter `c`, as no widget took it.
     fn press_ctrl_alt(app: &mut Application, c: &str, code: key::Code) {
@@ -477,21 +539,49 @@ mod tests {
         }
     }
 
-    #[test]
-    fn opening_the_menu_keeps_the_content_state() {
+    /// Whether showing `modal` over the content keeps the content's widget state.
+    fn keeps_the_content_state(modal: Modal) -> bool {
         let (mut app, _) = Application::with_settings(core::Settings::default());
         let mut tree = Tree::empty();
         tree.diff(&mut app.view());
         let root = tree.tag;
         let content = state_address(&tree.children[0]);
 
-        app.show_menu = true;
+        app.modal = Some(modal);
         tree.diff(&mut app.view());
 
         // A root of another kind would make iced rebuild the whole tree and drop its state.
-        assert_eq!(tree.tag, root);
-        assert!(content.is_some());
-        assert_eq!(state_address(&tree.children[0]), content);
+        tree.tag == root && content.is_some() && state_address(&tree.children[0]) == content
+    }
+
+    #[test]
+    fn opening_the_menu_keeps_the_content_state() {
+        assert!(keeps_the_content_state(Modal::Menu));
+    }
+
+    #[test]
+    fn opening_the_settings_keeps_the_content_state() {
+        assert!(keeps_the_content_state(Modal::Settings(
+            settings::State::new()
+        )));
+    }
+
+    #[test]
+    fn a_shortcut_toggle_survives_a_change_in_the_open_settings() {
+        let (mut app, _) = Application::with_settings(core::Settings::default());
+        let _ = app.update(Message::Menu(menu::Message::Settings), Instant::now());
+        let hints = app.settings.editor.inlay_hints;
+        let whitespace = app.settings.editor.render_whitespace;
+
+        press_ctrl_alt(&mut app, "i", key::Code::KeyI);
+        let _ = app.update(
+            Message::Settings(settings::Message::ToggleWhitespace(!whitespace)),
+            Instant::now(),
+        );
+
+        assert!(matches!(app.modal, Some(Modal::Settings(_))));
+        assert_eq!(app.settings.editor.inlay_hints, !hints);
+        assert_eq!(app.settings.editor.render_whitespace, !whitespace);
     }
 
     #[test]
