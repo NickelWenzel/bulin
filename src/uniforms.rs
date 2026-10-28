@@ -9,7 +9,7 @@ use iced::{Element, Fill, Subscription, Task};
 
 use crate::action::Action;
 use crate::core::uniform::{Error, Type};
-use crate::core::{Clock, Uniforms};
+use crate::core::{Clock, Uniforms, color};
 
 /// The height of a uniform's row and its controls.
 const ROW_HEIGHT: f32 = 24.0;
@@ -89,11 +89,23 @@ impl State {
                 message: uniform::Message::Set(value),
             } => {
                 self.typing = None;
-                if self.uniforms.set(&name, value) {
-                    Action::instruction(Instruction::Values)
-                } else {
-                    Action::none()
+                if !self.uniforms.set(&name, value) {
+                    return Action::none();
                 }
+                if let Some((
+                    open,
+                    uniform::Editor::Color {
+                        hue,
+                        saturation,
+                        hex_text,
+                    },
+                )) = &mut self.editor
+                    && *open == name
+                {
+                    follow(value, hue, saturation);
+                    *hex_text = None;
+                }
+                Action::instruction(Instruction::Values)
             }
             Message::Uniform {
                 name,
@@ -130,13 +142,28 @@ impl State {
                 else {
                     return Action::none();
                 };
-                if let Type::VecFloat2((x, y)) = uniform.value {
-                    // The smallest of 1, 10, 100, ... that the value fits in.
-                    let mut extent = 1.0;
-                    while extent < x.abs().max(y.abs()) {
-                        extent *= 10.0;
+                match uniform.value {
+                    Type::VecFloat2((x, y)) => {
+                        // The smallest of 1, 10, 100, ... that the value fits in.
+                        let mut extent = 1.0;
+                        while extent < x.abs().max(y.abs()) {
+                            extent *= 10.0;
+                        }
+                        self.editor = Some((name, uniform::Editor::Pad { extent }));
                     }
-                    self.editor = Some((name, uniform::Editor::Pad { extent }));
+                    Type::Col3(_) | Type::Col4(_) => {
+                        let ([r, g, b, _], _) = uniform.value.components();
+                        let hsv = color::Hsv::from_rgb((r as f32, g as f32, b as f32));
+                        self.editor = Some((
+                            name,
+                            uniform::Editor::Color {
+                                hue: hsv.hue,
+                                saturation: hsv.saturation,
+                                hex_text: None,
+                            },
+                        ));
+                    }
+                    _ => {}
                 }
                 Action::none()
             }
@@ -158,6 +185,89 @@ impl State {
                     Action::instruction(Instruction::Values)
                 } else {
                     Action::none()
+                }
+            }
+            Message::Uniform {
+                name,
+                message:
+                    message @ (uniform::Message::Sv(_)
+                    | uniform::Message::Hue(_)
+                    | uniform::Message::Alpha(_)
+                    | uniform::Message::HexChanged(_)
+                    | uniform::Message::HexSubmitted),
+            } => {
+                self.typing = None;
+                let Some((
+                    _,
+                    uniform::Editor::Color {
+                        hue,
+                        saturation,
+                        hex_text,
+                    },
+                )) = self.editor.as_mut().filter(|(open, _)| *open == name)
+                else {
+                    return Action::none();
+                };
+                let Some(value) = self
+                    .uniforms
+                    .iter()
+                    .find(|uniform| uniform.name() == name)
+                    .map(|uniform| uniform.value)
+                else {
+                    return Action::none();
+                };
+                let ([r, g, b, _], _) = value.components();
+                let rgb = (r as f32, g as f32, b as f32);
+
+                // Each path keeps the value's variant, so a `Col3` never gains an alpha.
+                let changed = match message {
+                    uniform::Message::Sv(point) => {
+                        *saturation = point.x;
+                        *hex_text = None;
+                        let hsv = color::Hsv {
+                            hue: *hue,
+                            saturation: point.x,
+                            value: point.y,
+                        };
+                        with_color(value, hsv.to_rgb(), None)
+                    }
+                    uniform::Message::Hue(new) => {
+                        *hue = new;
+                        *hex_text = None;
+                        let hsv = color::Hsv {
+                            hue: new,
+                            saturation: *saturation,
+                            value: color::Hsv::from_rgb(rgb).value,
+                        };
+                        with_color(value, hsv.to_rgb(), None)
+                    }
+                    uniform::Message::Alpha(alpha) => {
+                        *hex_text = None;
+                        value.with_component(3, alpha.into())
+                    }
+                    uniform::Message::HexChanged(text) => {
+                        *hex_text = Some(text);
+                        None
+                    }
+                    uniform::Message::HexSubmitted => {
+                        let changed = hex_text
+                            .as_deref()
+                            .and_then(color::parse_hex)
+                            .and_then(|(rgb, alpha)| with_color(value, rgb, alpha));
+                        // A refused code stays for the user to correct.
+                        if let Some(changed) = changed {
+                            follow(changed, hue, saturation);
+                            *hex_text = None;
+                        }
+                        changed
+                    }
+                    _ => None,
+                };
+                match changed {
+                    Some(changed) if self.uniforms.set(&name, changed) => {
+                        Action::instruction(Instruction::Values)
+                    }
+                    _ => Action::none(),
                 }
             }
             Message::TypingChanged(text) => {
@@ -332,6 +442,32 @@ impl Typing {
     fn value(&self, value: Type) -> Option<Type> {
         let component = self.text.trim().parse().ok()?;
         value.with_component(self.component, component)
+    }
+}
+
+/// `value`, a color, with its channels set to `rgb`, and its alpha too when there is one, or
+/// `None` when it can't hold them, as a `Col3` can't hold an alpha.
+fn with_color(value: Type, (r, g, b): (f32, f32, f32), alpha: Option<f32>) -> Option<Type> {
+    let value = value
+        .with_component(0, r.into())?
+        .with_component(1, g.into())?
+        .with_component(2, b.into())?;
+    match alpha {
+        Some(alpha) => value.with_component(3, alpha.into()),
+        None => Some(value),
+    }
+}
+
+/// Takes `hue` and `saturation` from the color `value`, unless it has none to give: black keeps
+/// both, and a grey keeps the hue.
+fn follow(value: Type, hue: &mut f32, saturation: &mut f32) {
+    let ([r, g, b, _], _) = value.components();
+    let hsv = color::Hsv::from_rgb((r as f32, g as f32, b as f32));
+    if hsv.value > 0.0 {
+        if hsv.saturation > 0.0 {
+            *hue = hsv.hue;
+        }
+        *saturation = hsv.saturation;
     }
 }
 
@@ -606,5 +742,126 @@ mod tests {
 
         assert!(matches!(instruction, Some(Instruction::Values)));
         assert_eq!(value(&state), Type::VecFloat2((5.0, -10.0)));
+    }
+    /// A state with the color `value` named `tint` and its picker open.
+    fn picking(value: Type) -> State {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("tint", value).unwrap();
+        let mut state = State::new(uniforms, None);
+        let _ = state.update(uniform("tint", uniform::Message::Open));
+        state
+    }
+
+    fn hue(state: &State) -> f32 {
+        match state.editor {
+            Some((_, uniform::Editor::Color { hue, .. })) => hue,
+            _ => panic!("no color picker is open"),
+        }
+    }
+
+    #[test]
+    fn opening_a_color_stores_its_hue() {
+        let state = picking(Type::Col3((0.0, 0.0, 1.0)));
+
+        assert!((hue(&state) - 2.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dragging_to_black_keeps_the_hue() {
+        let mut state = picking(Type::Col3((0.0, 0.0, 1.0)));
+        let blue = hue(&state);
+
+        let _ = state.update(uniform(
+            "tint",
+            uniform::Message::Sv(iced::Point::new(1.0, 0.0)),
+        ));
+        assert_eq!(value(&state), Type::Col3((0.0, 0.0, 0.0)));
+        assert_eq!(hue(&state), blue);
+
+        let _ = state.update(uniform(
+            "tint",
+            uniform::Message::Sv(iced::Point::new(1.0, 1.0)),
+        ));
+        assert_eq!(value(&state), Type::Col3((0.0, 0.0, 1.0)));
+    }
+
+    #[test]
+    fn setting_a_grey_keeps_the_hue() {
+        let mut state = picking(Type::Col3((0.0, 0.0, 1.0)));
+        let blue = hue(&state);
+
+        let _ = state.update(set("tint", Type::Col3((0.5, 0.5, 0.5))));
+
+        assert_eq!(hue(&state), blue);
+    }
+
+    #[test]
+    fn submitting_a_hex_code_sets_the_color() {
+        let mut state = picking(Type::Col4((0.0, 0.0, 0.0, 0.25)));
+
+        let _ = state.update(uniform(
+            "tint",
+            uniform::Message::HexChanged("#ff0000".to_owned()),
+        ));
+        let instruction = state
+            .update(uniform("tint", uniform::Message::HexSubmitted))
+            .instruction;
+
+        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert_eq!(value(&state), Type::Col4((1.0, 0.0, 0.0, 0.25)));
+        assert!(matches!(
+            state.editor,
+            Some((_, uniform::Editor::Color { hex_text: None, .. }))
+        ));
+    }
+
+    #[test]
+    fn a_refused_hex_code_changes_nothing() {
+        for (start, code) in [
+            (Type::Col3((0.5, 0.5, 0.5)), "#12345"),
+            (Type::Col3((0.5, 0.5, 0.5)), "#ff000080"),
+            (Type::Col4((0.5, 0.5, 0.5, 0.5)), "red"),
+        ] {
+            let mut state = picking(start);
+            let _ = state.update(uniform(
+                "tint",
+                uniform::Message::HexChanged(code.to_owned()),
+            ));
+
+            let instruction = state
+                .update(uniform("tint", uniform::Message::HexSubmitted))
+                .instruction;
+
+            assert!(instruction.is_none(), "{code}");
+            assert_eq!(value(&state), start, "{code}");
+            assert!(
+                matches!(
+                    &state.editor,
+                    Some((_, uniform::Editor::Color { hex_text: Some(text), .. })) if text == code
+                ),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_col3_stays_a_col3_through_every_message() {
+        let mut state = picking(Type::Col3((0.2, 0.4, 0.6)));
+
+        for message in [
+            uniform::Message::Sv(iced::Point::new(0.5, 0.5)),
+            uniform::Message::Hue(0.25),
+            uniform::Message::Alpha(0.5),
+            uniform::Message::HexChanged("#ff000080".to_owned()),
+            uniform::Message::HexSubmitted,
+            uniform::Message::HexChanged("#00ff00".to_owned()),
+            uniform::Message::HexSubmitted,
+            uniform::Message::Set(Type::Col3((0.1, 0.2, 0.3))),
+        ] {
+            let _ = state.update(uniform("tint", message));
+
+            assert!(matches!(value(&state), Type::Col3(_)));
+        }
+        assert_eq!(value(&state), Type::Col3((0.1, 0.2, 0.3)));
     }
 }

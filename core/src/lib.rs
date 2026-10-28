@@ -3,6 +3,7 @@
 //! project file, and the settings the editor keeps across projects.
 
 pub mod clock;
+pub mod color;
 pub mod program;
 pub mod project;
 pub mod settings;
