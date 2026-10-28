@@ -7,6 +7,61 @@ use matcha_iced::keymap;
 use crate::core::settings;
 use crate::core::settings::chord;
 
+/// The chord a press of `key` makes, or `None` for a lone modifier or a key no shortcut uses.
+///
+/// Native reports a character without Shift and the web with it, so a letter is read through
+/// its Latin form and a shifted symbol through its physical key on a US layout.
+pub fn chord(key: &Key, physical: key::Physical, modifiers: Modifiers) -> Option<settings::Chord> {
+    let key = match key {
+        Key::Character(_) => {
+            let c = match key.to_latin(physical) {
+                Some(c) if c.is_ascii_alphabetic() => c,
+                latin => unshifted(physical).or(latin)?,
+            };
+            chord::Key::Character(c.to_ascii_lowercase().to_string())
+        }
+        Key::Named(named) => chord::Key::Named(match named {
+            key::Named::F1 => chord::Named::F1,
+            key::Named::F2 => chord::Named::F2,
+            key::Named::F3 => chord::Named::F3,
+            key::Named::F4 => chord::Named::F4,
+            key::Named::F5 => chord::Named::F5,
+            key::Named::F6 => chord::Named::F6,
+            key::Named::F7 => chord::Named::F7,
+            key::Named::F8 => chord::Named::F8,
+            key::Named::F9 => chord::Named::F9,
+            key::Named::F10 => chord::Named::F10,
+            key::Named::F11 => chord::Named::F11,
+            key::Named::F12 => chord::Named::F12,
+            key::Named::Enter => chord::Named::Enter,
+            key::Named::Escape => chord::Named::Escape,
+            key::Named::Space => chord::Named::Space,
+            key::Named::Tab => chord::Named::Tab,
+            key::Named::Backspace => chord::Named::Backspace,
+            key::Named::Delete => chord::Named::Delete,
+            key::Named::Insert => chord::Named::Insert,
+            key::Named::Home => chord::Named::Home,
+            key::Named::End => chord::Named::End,
+            key::Named::PageUp => chord::Named::PageUp,
+            key::Named::PageDown => chord::Named::PageDown,
+            key::Named::ArrowUp => chord::Named::ArrowUp,
+            key::Named::ArrowDown => chord::Named::ArrowDown,
+            key::Named::ArrowLeft => chord::Named::ArrowLeft,
+            key::Named::ArrowRight => chord::Named::ArrowRight,
+            _ => return None,
+        }),
+        Key::Unidentified => return None,
+    };
+
+    Some(settings::Chord {
+        key,
+        ctrl: modifiers.control(),
+        shift: modifiers.shift(),
+        alt: modifiers.alt(),
+        logo: modifiers.logo(),
+    })
+}
+
 /// The editor chords a press of `chord` can arrive as. With Shift held the browser reports the
 /// shifted character, so `\` also binds `|`, as the editor's own Ctrl+Shift+\ does.
 pub fn matcha(chord: &settings::Chord) -> Vec<keymap::Chord> {
@@ -115,13 +170,46 @@ pub fn overrides(keybindings: &settings::Keybindings) -> Vec<(keymap::Chord, Opt
         .collect()
 }
 
+/// The character `physical` types without Shift on a US layout, for the keys whose shifted
+/// character differs.
+fn unshifted(physical: key::Physical) -> Option<char> {
+    let key::Physical::Code(code) = physical else {
+        return None;
+    };
+
+    Some(match code {
+        key::Code::Backquote => '`',
+        key::Code::Digit0 => '0',
+        key::Code::Digit1 => '1',
+        key::Code::Digit2 => '2',
+        key::Code::Digit3 => '3',
+        key::Code::Digit4 => '4',
+        key::Code::Digit5 => '5',
+        key::Code::Digit6 => '6',
+        key::Code::Digit7 => '7',
+        key::Code::Digit8 => '8',
+        key::Code::Digit9 => '9',
+        key::Code::Minus => '-',
+        key::Code::Equal => '=',
+        key::Code::BracketLeft => '[',
+        key::Code::BracketRight => ']',
+        key::Code::Backslash => '\\',
+        key::Code::Semicolon => ';',
+        key::Code::Quote => '\'',
+        key::Code::Comma => ',',
+        key::Code::Period => '.',
+        key::Code::Slash => '/',
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use iced::keyboard::{Key, Modifiers};
+    use iced::keyboard::{Key, Modifiers, key};
     use matcha_iced::Action;
     use matcha_iced::keymap::Chord;
 
-    use super::overrides;
+    use super::{chord, overrides};
     use crate::core::settings::{Command, Keybindings};
 
     fn ctrl(c: &str) -> Chord {
@@ -197,5 +285,38 @@ mod tests {
                 "{c}"
             );
         }
+    }
+
+    #[test]
+    fn a_shifted_web_letter_reads_as_its_lowercase_chord() {
+        let pressed = chord(
+            &Key::Character("W".into()),
+            key::Physical::Code(key::Code::KeyW),
+            Modifiers::CTRL | Modifiers::ALT,
+        );
+
+        assert_eq!(pressed, Some("ctrl+alt+w".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_shifted_web_symbol_reads_as_its_unshifted_key() {
+        let pressed = chord(
+            &Key::Character("|".into()),
+            key::Physical::Code(key::Code::Backslash),
+            Modifiers::CTRL | Modifiers::SHIFT,
+        );
+
+        assert_eq!(pressed, Some("ctrl+shift+\\".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_lone_modifier_is_no_chord() {
+        let pressed = chord(
+            &Key::Named(key::Named::Shift),
+            key::Physical::Code(key::Code::ShiftLeft),
+            Modifiers::SHIFT,
+        );
+
+        assert_eq!(pressed, None);
     }
 }

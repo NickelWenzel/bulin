@@ -30,6 +30,13 @@ pub struct Application {
     is_loading: bool,
     show_menu: bool,
     settings: core::Settings,
+    /// Whether the settings are being written.
+    saving_settings: bool,
+    /// Whether the settings changed during the write, so they need writing again.
+    settings_stale: bool,
+    /// Whether the stored settings couldn't be read, so they are backed up before the first
+    /// write replaces them.
+    settings_unreadable: bool,
     /// Why the last project action failed, until the next one.
     notice: Option<String>,
 }
@@ -49,6 +56,13 @@ pub enum Message {
     SaveProjectAs,
     ProjectSaved(Result<file::Name, file::Error>),
     Analyzer(lsp::client::Event),
+    /// A key no widget took, which may be a shortcut bulin handles.
+    KeyPressed {
+        key: keyboard::Key,
+        physical: keyboard::key::Physical,
+        modifiers: keyboard::Modifiers,
+    },
+    SettingsSaved(Result<(), settings::storage::Error>),
 }
 
 impl Application {
@@ -58,6 +72,7 @@ impl Application {
             Err(error) => {
                 let (mut application, task) = Self::with_settings(core::Settings::default());
                 application.notice = Some(format!("Could not load the settings: {error}"));
+                application.settings_unreadable = true;
                 (application, task)
             }
         }
@@ -84,6 +99,9 @@ impl Application {
             is_loading: false,
             show_menu: false,
             settings,
+            saving_settings: false,
+            settings_stale: false,
+            settings_unreadable: false,
             notice: None,
         };
 
@@ -232,7 +250,66 @@ impl Application {
                 }
                 action.task.map(Message::Shader)
             }
+            Message::KeyPressed {
+                key,
+                physical,
+                modifiers,
+            } => {
+                let command = settings::keymap::chord(&key, physical, modifiers)
+                    .and_then(|chord| self.settings.keybindings.command(&chord));
+                // The editor already ran its own commands' chords.
+                match command {
+                    Some(core::settings::Command::ToggleInlayHints) => {
+                        self.settings.editor.inlay_hints = !self.settings.editor.inlay_hints;
+                    }
+                    Some(core::settings::Command::ToggleWhitespace) => {
+                        self.settings.editor.render_whitespace =
+                            !self.settings.editor.render_whitespace;
+                    }
+                    _ => return Task::none(),
+                }
+
+                Task::batch([
+                    self.shader.apply(&self.settings, now).map(Message::Shader),
+                    self.settings_changed(),
+                ])
+            }
+            Message::SettingsSaved(result) => {
+                self.saving_settings = false;
+                if let Err(error) = result {
+                    self.notice = Some(format!("Could not save the settings: {error}"));
+                }
+
+                if self.settings_stale {
+                    self.settings_stale = false;
+                    self.settings_changed()
+                } else {
+                    Task::none()
+                }
+            }
         }
+    }
+
+    /// Writes the settings, or has them written again once the write in progress ends.
+    fn settings_changed(&mut self) -> Task<Message> {
+        if self.saving_settings {
+            self.settings_stale = true;
+            return Task::none();
+        }
+
+        if self.settings_unreadable {
+            if let Err(error) = settings::storage::back_up() {
+                self.notice = Some(format!("Could not back up the settings: {error}"));
+                return Task::none();
+            }
+            self.settings_unreadable = false;
+        }
+
+        self.saving_settings = true;
+        Task::perform(
+            settings::storage::save(self.settings.clone()),
+            Message::SettingsSaved,
+        )
     }
 
     /// Shows the current program and gives the analyzer its uniforms package.
@@ -319,10 +396,26 @@ impl Application {
             _ => None,
         });
 
+        let shortcuts = keyboard::listen().filter_map(|event| match event {
+            keyboard::Event::KeyPressed {
+                key,
+                physical_key,
+                modifiers,
+                repeat: false,
+                ..
+            } => Some(Message::KeyPressed {
+                key,
+                physical: physical_key,
+                modifiers,
+            }),
+            _ => None,
+        });
+
         Subscription::batch([
             self.shader.subscription().map(Message::Shader),
             self.uniforms.subscription().map(Message::Uniforms),
             escape,
+            shortcuts,
         ])
     }
 }
@@ -358,9 +451,23 @@ fn modal<'a>(content: impl Into<Element<'a, Message>>, on_blur: Message) -> Elem
 #[cfg(test)]
 mod tests {
     use iced::advanced::widget::{Tree, tree};
+    use iced::keyboard::{Key, Modifiers, key};
+    use iced::time::Instant;
 
-    use super::Application;
+    use super::{Application, Message};
     use crate::core;
+
+    /// Presses Ctrl+Alt with the letter `c`, as no widget took it.
+    fn press_ctrl_alt(app: &mut Application, c: &str, code: key::Code) {
+        let _ = app.update(
+            Message::KeyPressed {
+                key: Key::Character(c.into()),
+                physical: key::Physical::Code(code),
+                modifiers: Modifiers::CTRL | Modifiers::ALT,
+            },
+            Instant::now(),
+        );
+    }
 
     /// The address of a node's widget state, which stays the same only while iced keeps it.
     fn state_address(tree: &Tree) -> Option<*const ()> {
@@ -385,5 +492,47 @@ mod tests {
         assert_eq!(tree.tag, root);
         assert!(content.is_some());
         assert_eq!(state_address(&tree.children[0]), content);
+    }
+
+    #[test]
+    fn the_inlay_hints_shortcut_toggles_and_saves_them() {
+        let (mut app, _) = Application::with_settings(core::Settings::default());
+        let shown = app.settings.editor.inlay_hints;
+
+        press_ctrl_alt(&mut app, "i", key::Code::KeyI);
+
+        assert_eq!(app.settings.editor.inlay_hints, !shown);
+        assert!(app.saving_settings);
+    }
+
+    #[test]
+    fn a_rebound_toggle_answers_its_new_chord_only() {
+        let mut settings = core::Settings::default();
+        settings.keybindings.set(
+            core::settings::Command::ToggleWhitespace,
+            "ctrl+alt+e".parse().unwrap(),
+        );
+        let (mut app, _) = Application::with_settings(settings);
+        let shown = app.settings.editor.render_whitespace;
+
+        press_ctrl_alt(&mut app, "w", key::Code::KeyW);
+        assert_eq!(app.settings.editor.render_whitespace, shown);
+
+        press_ctrl_alt(&mut app, "e", key::Code::KeyE);
+        assert_eq!(app.settings.editor.render_whitespace, !shown);
+    }
+
+    #[test]
+    fn a_change_during_a_save_is_saved_after_it() {
+        let (mut app, _) = Application::with_settings(core::Settings::default());
+
+        press_ctrl_alt(&mut app, "i", key::Code::KeyI);
+        press_ctrl_alt(&mut app, "w", key::Code::KeyW);
+        assert!(app.saving_settings);
+        assert!(app.settings_stale);
+
+        let _ = app.update(Message::SettingsSaved(Ok(())), Instant::now());
+        assert!(app.saving_settings);
+        assert!(!app.settings_stale);
     }
 }
