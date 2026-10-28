@@ -28,6 +28,8 @@ pub enum Message {
     /// Applies the typed text when the component can hold it.
     Submit,
     CancelTyping,
+    /// Closes the open popover.
+    Close,
     Candidate(uniform::CandidateMessage),
     Add,
     Remove(String),
@@ -49,6 +51,8 @@ pub struct State {
     /// Whether the candidate's name can be added to the uniforms as they are now.
     candidate_check: Result<(), Error>,
     typing: Option<Typing>,
+    /// The uniform whose popover is open, and its editor's state. Only one is open at a time.
+    editor: Option<(String, uniform::Editor)>,
 }
 
 /// A component whose value is being typed as text.
@@ -67,6 +71,7 @@ impl State {
             clock: clock.map(clock::State::from),
             candidate,
             typing: None,
+            editor: None,
         }
     }
 
@@ -116,6 +121,45 @@ impl State {
                     operation::select_all(TYPING_ID),
                 ]))
             }
+            Message::Uniform {
+                name,
+                message: uniform::Message::Open,
+            } => {
+                self.typing = None;
+                let Some(uniform) = self.uniforms.iter().find(|uniform| uniform.name() == name)
+                else {
+                    return Action::none();
+                };
+                if let Type::VecFloat2((x, y)) = uniform.value {
+                    // The smallest of 1, 10, 100, ... that the value fits in.
+                    let mut extent = 1.0;
+                    while extent < x.abs().max(y.abs()) {
+                        extent *= 10.0;
+                    }
+                    self.editor = Some((name, uniform::Editor::Pad { extent }));
+                }
+                Action::none()
+            }
+            Message::Uniform {
+                name,
+                message: uniform::Message::Pad(point),
+            } => {
+                self.typing = None;
+                let Some((_, uniform::Editor::Pad { extent })) =
+                    self.editor.as_ref().filter(|(open, _)| *open == name)
+                else {
+                    return Action::none();
+                };
+                let value = Type::VecFloat2((
+                    (point.x * 2.0 - 1.0) * extent,
+                    (point.y * 2.0 - 1.0) * extent,
+                ));
+                if self.uniforms.set(&name, value) {
+                    Action::instruction(Instruction::Values)
+                } else {
+                    Action::none()
+                }
+            }
             Message::TypingChanged(text) => {
                 if let Some(typing) = &mut self.typing {
                     typing.text = text;
@@ -152,6 +196,11 @@ impl State {
                 self.typing = None;
                 Action::none()
             }
+            Message::Close => {
+                self.typing = None;
+                self.editor = None;
+                Action::none()
+            }
             Message::Candidate(message) => {
                 self.typing = None;
                 self.candidate.update(message);
@@ -169,6 +218,9 @@ impl State {
             }
             Message::Remove(name) => {
                 self.typing = None;
+                if self.editor.as_ref().is_some_and(|(open, _)| *open == name) {
+                    self.editor = None;
+                }
                 if self.uniforms.remove(&name) {
                     Action::instruction(Instruction::Layout)
                 } else {
@@ -217,8 +269,13 @@ impl State {
                 .typing
                 .as_ref()
                 .filter(|typing| typing.name == value.name());
+            let editor = self
+                .editor
+                .as_ref()
+                .filter(|(name, _)| name == value.name())
+                .map(|(_, editor)| editor);
             row![
-                uniform::view(value, typing),
+                uniform::view(value, typing, editor),
                 button(text("×").center().width(Fill).height(Fill))
                     .on_press(Message::Remove(value.name().to_owned()))
                     .style(button::text)
@@ -466,5 +523,88 @@ mod tests {
         let _ = state.update(Message::Remove("radius".to_owned()));
 
         assert!(state.typing.is_none());
+    }
+
+    fn uniform(name: &str, message: uniform::Message) -> Message {
+        Message::Uniform {
+            name: name.to_owned(),
+            message,
+        }
+    }
+
+    /// A state with the uniforms `names`, each the vec2 `value`.
+    fn vec2s(names: &[&str], value: (f32, f32)) -> State {
+        let mut uniforms = Uniforms::default();
+        for name in names {
+            uniforms.add(name, Type::VecFloat2(value)).unwrap();
+        }
+        State::new(uniforms, None)
+    }
+
+    #[test]
+    fn opening_and_closing_a_vec2_shows_and_hides_its_pad() {
+        let mut state = vec2s(&["offset"], (0.5, 0.5));
+
+        let _ = state.update(uniform("offset", uniform::Message::Open));
+        assert_eq!(
+            state.editor,
+            Some(("offset".to_owned(), uniform::Editor::Pad { extent: 1.0 }))
+        );
+
+        let _ = state.update(Message::Close);
+        assert!(state.editor.is_none());
+    }
+
+    #[test]
+    fn opening_another_uniform_replaces_the_open_one() {
+        let mut state = vec2s(&["offset", "center"], (0.5, 0.5));
+
+        let _ = state.update(uniform("offset", uniform::Message::Open));
+        let _ = state.update(uniform("center", uniform::Message::Open));
+
+        assert_eq!(state.editor.unwrap().0, "center");
+    }
+
+    #[test]
+    fn removing_the_open_uniform_closes_it() {
+        let mut state = vec2s(&["offset", "center"], (0.5, 0.5));
+        let _ = state.update(uniform("offset", uniform::Message::Open));
+
+        let _ = state.update(Message::Remove("center".to_owned()));
+        assert!(state.editor.is_some());
+
+        let _ = state.update(Message::Remove("offset".to_owned()));
+        assert!(state.editor.is_none());
+    }
+
+    #[test]
+    fn the_pad_s_extent_is_the_power_of_ten_covering_the_value() {
+        for (component, extent) in [(0.5, 1.0), (7.0, 10.0), (-42.0, 100.0)] {
+            let mut state = vec2s(&["offset"], (0.0, component));
+
+            let _ = state.update(uniform("offset", uniform::Message::Open));
+
+            assert_eq!(
+                state.editor.unwrap().1,
+                uniform::Editor::Pad { extent },
+                "{component}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_pad_message_sets_the_value_inside_the_extent() {
+        let mut state = vec2s(&["offset"], (7.0, 0.0));
+        let _ = state.update(uniform("offset", uniform::Message::Open));
+
+        let instruction = state
+            .update(uniform(
+                "offset",
+                uniform::Message::Pad(iced::Point::new(0.75, 0.0)),
+            ))
+            .instruction;
+
+        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert_eq!(value(&state), Type::VecFloat2((5.0, -10.0)));
     }
 }
