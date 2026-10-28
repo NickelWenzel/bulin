@@ -3,11 +3,14 @@
 mod clock;
 mod uniform;
 
-use iced::widget::{button, column, row, space};
-use iced::{Element, Subscription};
+use iced::widget::{button, column, row, space, text};
+use iced::{Element, Fill, Subscription};
 
 use crate::core::uniform::{Error, Type};
 use crate::core::{Clock, Uniforms};
+
+/// The height of a uniform's row and its controls.
+const ROW_HEIGHT: f32 = 24.0;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -107,7 +110,12 @@ impl State {
             let name = value.name().to_owned();
             row![
                 uniform::view(value).map(move |value| Message::Set(name.clone(), value)),
-                button("X").on_press(Message::Remove(value.name().to_owned())),
+                button(text("×").center().width(Fill).height(Fill))
+                    .on_press(Message::Remove(value.name().to_owned()))
+                    .style(button::text)
+                    .padding(0)
+                    .width(ROW_HEIGHT)
+                    .height(ROW_HEIGHT),
             ]
             .into()
         }));
@@ -192,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn moving_a_slider_changes_only_values() {
+    fn setting_a_value_changes_only_values() {
         let mut uniforms = Uniforms::default();
         uniforms.add("radius", Type::Float(0.5)).unwrap();
         let mut state = State::new(uniforms, None);

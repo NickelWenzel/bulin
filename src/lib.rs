@@ -2,6 +2,7 @@ pub use bulin_core as core;
 
 mod action;
 mod analyzer;
+mod control;
 mod file;
 mod layout;
 mod menu;

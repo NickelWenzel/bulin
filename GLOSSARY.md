@@ -1,7 +1,7 @@
 # bulin
 
 bulin is a live editor for fragment shaders: the user writes a shader, adjusts the values it
-reads with sliders, and watches the result.
+reads by dragging across them, and watches the result.
 
 ## Language
 
@@ -11,8 +11,8 @@ imports the uniforms it reads from the uniforms package.
 _Avoid_: fragment shader, entry point
 
 **Uniform**:
-A named value the user adds and adjusts with sliders, such as a radius or a color. A shader reads
-it as a member of the imported `customs` struct, as in `customs.radius`.
+A named value the user adds and adjusts by dragging across its fields, such as a radius or a
+color. A shader reads it as a member of the imported `customs` struct, as in `customs.radius`.
 _Avoid_: custom, parameter
 
 **Time**:
@@ -20,7 +20,7 @@ The built-in uniform: the seconds on the clock, read as `customs.time` while the
 
 **Layout**:
 The shape of the uniforms a shader can read: whether time is on, and each uniform's name and type,
-in order. Moving a slider or the clock ticking changes values, not the layout.
+in order. Editing a value or the clock ticking changes values, not the layout.
 
 **Uniforms package**:
 The package bulin generates from the uniforms and time, named `uniforms`. It holds one struct

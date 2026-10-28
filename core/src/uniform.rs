@@ -123,6 +123,60 @@ impl Type {
         }
     }
 
+    /// The components, padded with zeros to four, and how many there are.
+    pub fn components(self) -> ([f64; 4], usize) {
+        match self {
+            Self::Int(x) => ([x.into(), 0.0, 0.0, 0.0], 1),
+            Self::Float(x) => ([x.into(), 0.0, 0.0, 0.0], 1),
+            Self::VecFloat2((x, y)) => ([x.into(), y.into(), 0.0, 0.0], 2),
+            Self::VecFloat3((x, y, z)) | Self::Col3((x, y, z)) => {
+                ([x.into(), y.into(), z.into(), 0.0], 3)
+            }
+            Self::VecFloat4((x, y, z, w)) | Self::Col4((x, y, z, w)) => {
+                ([x.into(), y.into(), z.into(), w.into()], 4)
+            }
+            Self::VecInt2((x, y)) => ([x.into(), y.into(), 0.0, 0.0], 2),
+            Self::VecInt3((x, y, z)) => ([x.into(), y.into(), z.into(), 0.0], 3),
+            Self::VecInt4((x, y, z, w)) => ([x.into(), y.into(), z.into(), w.into()], 4),
+        }
+    }
+
+    /// This value with component `index` set to `component`, or `None` when there is no such
+    /// component or it can't hold the value: an int must be a whole number within `i32`, a
+    /// float must stay finite as an `f32`, and a color component must lie in `0..=1`.
+    pub fn with_component(self, index: usize, component: f64) -> Option<Self> {
+        let (mut components, count) = self.components();
+        let valid = match self {
+            Self::Int(_) | Self::VecInt2(_) | Self::VecInt3(_) | Self::VecInt4(_) => {
+                component.fract() == 0.0
+                    && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&component)
+            }
+            Self::Col3(_) | Self::Col4(_) => (0.0..=1.0).contains(&component),
+            Self::Float(_) | Self::VecFloat2(_) | Self::VecFloat3(_) | Self::VecFloat4(_) => {
+                (component as f32).is_finite()
+            }
+        };
+        if index >= count || !valid {
+            return None;
+        }
+        components[index] = component;
+
+        // The other components came from this value, so casting them back loses nothing.
+        let [x, y, z, w] = components;
+        Some(match self {
+            Self::Int(_) => Self::Int(x as i32),
+            Self::Float(_) => Self::Float(x as f32),
+            Self::VecFloat2(_) => Self::VecFloat2((x as f32, y as f32)),
+            Self::VecFloat3(_) => Self::VecFloat3((x as f32, y as f32, z as f32)),
+            Self::Col3(_) => Self::Col3((x as f32, y as f32, z as f32)),
+            Self::VecFloat4(_) => Self::VecFloat4((x as f32, y as f32, z as f32, w as f32)),
+            Self::Col4(_) => Self::Col4((x as f32, y as f32, z as f32, w as f32)),
+            Self::VecInt2(_) => Self::VecInt2((x as i32, y as i32)),
+            Self::VecInt3(_) => Self::VecInt3((x as i32, y as i32, z as i32)),
+            Self::VecInt4(_) => Self::VecInt4((x as i32, y as i32, z as i32, w as i32)),
+        })
+    }
+
     /// The payload size, excluding padding around it.
     fn size(self) -> usize {
         match self {
@@ -243,12 +297,15 @@ impl Uniforms {
     }
 
     /// Sets the value of the uniform named `name`, returning whether it changed. A value of
-    /// another WGSL type is refused, since it would change the layout.
+    /// another type is refused, even one with the same WGSL type such as a `VecFloat3` for a
+    /// `Col3`, since the type decides the layout and how the value is edited.
     pub fn set(&mut self, name: &str, value: Type) -> bool {
         let Some(uniform) = self.0.iter_mut().find(|uniform| uniform.name == name) else {
             return false;
         };
-        if uniform.value.wgsl() != value.wgsl() || uniform.value == value {
+        if std::mem::discriminant(&uniform.value) != std::mem::discriminant(&value)
+            || uniform.value == value
+        {
             return false;
         }
         uniform.value = value;
@@ -434,6 +491,73 @@ mod tests {
         assert!(!uniforms.set("radius", Type::Int(3)));
         assert!(!uniforms.set("missing", Type::Float(1.0)));
         assert_eq!(uniforms.iter().next().unwrap().value, Type::Float(2.0));
+    }
+
+    #[test]
+    fn a_color_does_not_become_a_vector() {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("tint", Type::Col3((0.1, 0.2, 0.3))).unwrap();
+
+        assert!(!uniforms.set("tint", Type::VecFloat3((0.4, 0.5, 0.6))));
+        assert_eq!(
+            uniforms.iter().next().unwrap().value,
+            Type::Col3((0.1, 0.2, 0.3))
+        );
+    }
+
+    #[test]
+    fn every_component_of_every_type_round_trips() {
+        let values = [
+            Type::Int(-7),
+            Type::Float(0.25),
+            Type::VecFloat2((1.5, -2.5)),
+            Type::VecFloat3((1.0, 2.0, 3.0)),
+            Type::Col3((0.1, 0.2, 0.3)),
+            Type::VecFloat4((1.0, 2.0, 3.0, 4.0)),
+            Type::Col4((0.1, 0.2, 0.3, 0.4)),
+            Type::VecInt2((1, -2)),
+            Type::VecInt3((1, 2, 3)),
+            Type::VecInt4((i32::MIN, 2, 3, i32::MAX)),
+        ];
+
+        for value in values {
+            let (components, count) = value.components();
+            for (index, component) in components.into_iter().enumerate().take(count) {
+                assert_eq!(value.with_component(index, component), Some(value));
+            }
+        }
+    }
+
+    #[test]
+    fn setting_a_component_changes_only_that_component() {
+        assert_eq!(
+            Type::VecInt3((1, 2, 3)).with_component(1, 5.0),
+            Some(Type::VecInt3((1, 5, 3)))
+        );
+        assert_eq!(
+            Type::Col4((0.1, 0.2, 0.3, 0.4)).with_component(3, 1.0),
+            Some(Type::Col4((0.1, 0.2, 0.3, 1.0)))
+        );
+    }
+
+    #[test]
+    fn components_the_type_cannot_hold_are_refused() {
+        assert_eq!(Type::Float(1.0).with_component(1, 2.0), None);
+        assert_eq!(Type::VecFloat2((0.0, 0.0)).with_component(2, 1.0), None);
+        assert_eq!(Type::Float(1.0).with_component(0, f64::NAN), None);
+        assert_eq!(Type::Float(1.0).with_component(0, f64::INFINITY), None);
+        assert_eq!(Type::Float(1.0).with_component(0, f64::MAX), None);
+        assert_eq!(Type::Int(1).with_component(0, 2.5), None);
+        assert_eq!(
+            Type::Int(1).with_component(0, f64::from(i32::MAX) + 1.0),
+            None
+        );
+        assert_eq!(Type::VecInt2((0, 0)).with_component(0, f64::NAN), None);
+        assert_eq!(Type::Col3((0.5, 0.5, 0.5)).with_component(0, 1.5), None);
+        assert_eq!(
+            Type::Col4((0.5, 0.5, 0.5, 0.5)).with_component(3, -0.1),
+            None
+        );
     }
 
     #[test]

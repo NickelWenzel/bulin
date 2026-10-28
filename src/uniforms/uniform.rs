@@ -1,157 +1,74 @@
 //! The controls for one uniform and the row that adds new ones.
 
-use std::convert::identity;
+use std::ops::RangeInclusive;
 
-use iced::{
-    Alignment, Color, Element, Length, Theme, border,
-    widget::{column, combo_box, container, row, slider, space, stack, text, text_input},
-};
+use iced::widget::{column, combo_box, row, text, text_input};
+use iced::{Center, Element, FillPortion, Length};
+use num_traits::AsPrimitive;
 
+use super::ROW_HEIGHT;
+use crate::control::scrub;
 use crate::core::uniform::{Error, Type, Uniform, Uniforms};
 
-/// A uniform's name and sliders for its value.
+/// A uniform's name and a scrub field for each component of its value.
 pub fn view(uniform: &Uniform) -> Element<'_, Type> {
-    let fr = -100.0..=100.0;
-    let fs = 0.1;
+    const AXES: [&str; 4] = ["x", "y", "z", "w"];
+    const CHANNELS: [&str; 4] = ["r", "g", "b", "a"];
 
-    let ir = -100..=100;
-    let is = 1;
-
-    let value = match uniform.value {
-        Type::Int(value) => input_slider(value, (ir, is)).map(Type::Int),
-        Type::Float(value) => input_slider(value, (fr, fs)).map(Type::Float),
-        Type::VecFloat2(value) => input_slider2(value, (fr, fs)).map(Type::VecFloat2),
-        Type::VecFloat3(value) => input_slider3(value, (fr, fs)).map(Type::VecFloat3),
-        Type::Col3(value) => input_slider3(value, (0.0..=1.0, 0.05)).map(Type::Col3),
-        Type::VecFloat4(value) => input_slider4(value, (fr, fs)).map(Type::VecFloat4),
-        Type::Col4(value) => input_slider4(value, (0.0..=1.0, 0.05)).map(Type::Col4),
-        Type::VecInt2(value) => input_slider2(value, (ir, is)).map(Type::VecInt2),
-        Type::VecInt3(value) => input_slider3(value, (ir, is)).map(Type::VecInt3),
-        Type::VecInt4(value) => input_slider4(value, (ir, is)).map(Type::VecInt4),
+    let fields = match uniform.value {
+        Type::Int(_) | Type::VecInt2(_) | Type::VecInt3(_) | Type::VecInt4(_) => {
+            fields::<i32>(uniform.value, AXES, 0.25, None)
+        }
+        Type::Float(_) | Type::VecFloat2(_) | Type::VecFloat3(_) | Type::VecFloat4(_) => {
+            fields::<f32>(uniform.value, AXES, 0.01, None)
+        }
+        Type::Col3(_) | Type::Col4(_) => {
+            fields::<f32>(uniform.value, CHANNELS, 0.005, Some(0.0..=1.0))
+        }
     };
 
-    row![text(uniform.name()), space::horizontal(), value].into()
+    row![text(uniform.name()).width(FillPortion(1)), fields]
+        .spacing(4)
+        .height(ROW_HEIGHT)
+        .align_y(Center)
+        .into()
 }
 
-fn input_slider<'a, T: Input>(
-    value: T,
-    (range, step): (std::ops::RangeInclusive<T>, T),
-) -> Element<'a, T> {
-    value_slider((range, step), value, identity)
-}
-
-fn input_slider2<'a, T: Input>(
-    v: (T, T),
-    (range, step): (std::ops::RangeInclusive<T>, T),
-) -> Element<'a, (T, T)> {
-    row![
-        value_slider((range.clone(), step), v.0, move |v0| (v0, v.1)),
-        value_slider((range, step), v.1, move |v1| (v.0, v1)),
-    ]
-    .into()
-}
-
-fn input_slider3<'a, T: Input>(
-    v: (T, T, T),
-    (range, step): (std::ops::RangeInclusive<T>, T),
-) -> Element<'a, (T, T, T)> {
-    row![
-        value_slider((range.clone(), step), v.0, move |v0| (v0, v.1, v.2)),
-        value_slider((range.clone(), step), v.1, move |v1| (v.0, v1, v.2)),
-        value_slider((range, step), v.2, move |v2| (v.0, v.1, v2)),
-    ]
-    .into()
-}
-
-fn input_slider4<'a, T: Input>(
-    v: (T, T, T, T),
-    (range, step): (std::ops::RangeInclusive<T>, T),
-) -> Element<'a, (T, T, T, T)> {
-    row![
-        value_slider((range.clone(), step), v.0, move |v0| (v0, v.1, v.2, v.3)),
-        value_slider((range.clone(), step), v.1, move |v1| (v.0, v1, v.2, v.3)),
-        value_slider((range.clone(), step), v.2, move |v2| (v.0, v.1, v2, v.3)),
-        value_slider((range, step), v.3, move |v3| (v.0, v.1, v.2, v3)),
-    ]
-    .into()
-}
-
-trait Input:
-    Copy
-    + PartialOrd
-    + From<u8>
-    + num_traits::FromPrimitive
-    + num_traits::AsPrimitive<f64>
-    + std::fmt::Display
-    + 'static
-{
-}
-
-impl<T> Input for T where
-    T: Copy
-        + PartialOrd
-        + From<u8>
-        + num_traits::FromPrimitive
-        + num_traits::AsPrimitive<f64>
-        + std::fmt::Display
-        + 'static
-{
-}
-
-fn value_slider<'a, T, Message, Renderer>(
-    (range, step): (std::ops::RangeInclusive<T>, T),
-    current: T,
-    set: impl Fn(T) -> Message + 'a,
-) -> Element<'a, Message, Theme, Renderer>
+/// A scrub field per component of `value`, editing it as a `T`. Vectors label each field.
+fn fields<'a, T>(
+    value: Type,
+    labels: [&'static str; 4],
+    speed: f64,
+    range: Option<RangeInclusive<T>>,
+) -> Element<'a, Type>
 where
-    T: Input,
-    Message: Clone + 'a,
-    Renderer: iced::advanced::text::Renderer + 'a,
+    T: scrub::Input + 'a,
+    f64: AsPrimitive<T>,
 {
-    stack![
-        container(
-            slider(range, current, set)
-                .step(step)
-                .width(Length::Fill)
-                .height(24)
-                .style(slider_style)
-        )
-        .style(|theme| container::Style::default()
-            .background(theme.palette().background.weak.color)
-            .border(border::rounded(2))),
-        row![space::horizontal(), text(format!("{current}")).size(14)]
-            .padding([0, 10])
-            .height(Length::Fill)
-            .align_y(Alignment::Center),
-    ]
+    let (components, count) = value.components();
+
+    row((0..count).map(|index| {
+        // The fields keep components the type can hold, so a refusal only keeps the old value.
+        let field = scrub::scrub::<T, _>(components[index].as_(), move |component| {
+            value
+                .with_component(index, component.as_())
+                .unwrap_or(value)
+        })
+        .speed(speed)
+        .height(ROW_HEIGHT);
+        let field = if count > 1 {
+            field.label(labels[index])
+        } else {
+            field
+        };
+        match range.clone() {
+            Some(range) => field.range(range).into(),
+            None => field.into(),
+        }
+    }))
+    .spacing(2)
+    .width(FillPortion(3))
     .into()
-}
-
-fn slider_style(theme: &Theme, status: slider::Status) -> slider::Style {
-    let palette = theme.palette();
-
-    slider::Style {
-        rail: slider::Rail {
-            backgrounds: (
-                match status {
-                    slider::Status::Active | slider::Status::Dragged => {
-                        palette.background.strongest.color
-                    }
-                    slider::Status::Hovered => palette.background.stronger.color,
-                }
-                .into(),
-                Color::TRANSPARENT.into(),
-            ),
-            width: 24.0,
-            border: border::rounded(2),
-        },
-        handle: slider::Handle {
-            shape: slider::HandleShape::Circle { radius: 0.0 },
-            background: Color::TRANSPARENT.into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
-        },
-    }
 }
 
 /// The row for naming and typing a new uniform.
