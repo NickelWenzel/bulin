@@ -11,7 +11,7 @@ use num_traits::AsPrimitive;
 use super::{ROW_HEIGHT, TYPING_ID, Typing};
 use crate::control::{outside, pad, popover, scrub};
 use crate::core::color;
-use crate::core::uniform::{Error, Type, Uniform, Uniforms};
+use crate::core::uniform::{Error, Type, Uniform, Uniforms, split};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -30,6 +30,12 @@ pub enum Message {
     HexChanged(String),
     /// Applies the typed hex code when the color can hold it.
     HexSubmitted,
+    /// Points a vector to this point of its disc, in `[0, 1]²`, keeping its length and side.
+    Disc(Point),
+    /// Turns a vector to the other side of its disc, toward or away from the viewer.
+    Flip,
+    /// Sets a vector's length, keeping its direction.
+    Length(f32),
 }
 
 /// The open popover of a uniform, holding what its value can't give back.
@@ -44,6 +50,9 @@ pub enum Editor {
         saturation: f32,
         hex_text: Option<String>,
     },
+    /// A direction disc and a length. The unit direction is kept so it survives a length of 0,
+    /// and its `z`'s sign, even a zero's, tells which side of the disc it points to.
+    Direction { direction: (f32, f32, f32) },
 }
 
 const AXES: [&str; 4] = ["x", "y", "z", "w"];
@@ -57,8 +66,8 @@ const PAD_SIZE: f32 = 160.0;
 const STRIP: f32 = 12.0;
 
 /// A uniform's name and a scrub field for each component of its value, or a text input for
-/// the component being typed. A vec2 has a button opening its `editor` next to it, and a color
-/// shows a swatch and its hex code that open it.
+/// the component being typed. A vec2 and a vec3 have a button opening their `editor` next to
+/// them, and a color shows a swatch and its hex code that open it.
 pub fn view<'a>(
     uniform: &'a Uniform,
     typing: Option<&'a Typing>,
@@ -68,9 +77,7 @@ pub fn view<'a>(
         Type::Int(_) | Type::VecInt2(_) | Type::VecInt3(_) | Type::VecInt4(_) => {
             fields::<i32>(uniform, typing, 0.25)
         }
-        Type::Float(_) | Type::VecFloat3(_) | Type::VecFloat4(_) => {
-            fields::<f32>(uniform, typing, 0.01)
-        }
+        Type::Float(_) | Type::VecFloat4(_) => fields::<f32>(uniform, typing, 0.01),
         Type::VecFloat2(value) => {
             let anchor = button(text("xy").size(14).center().height(Fill))
                 .on_press(super::Message::Uniform {
@@ -82,6 +89,28 @@ pub fn view<'a>(
                 .height(ROW_HEIGHT);
             let content = match editor {
                 Some(&Editor::Pad { extent }) => Some(xy_pad(uniform, value, extent)),
+                _ => None,
+            };
+
+            row![
+                fields::<f32>(uniform, typing, 0.01),
+                popover::popover(anchor, content, super::Message::Close),
+            ]
+            .spacing(2)
+            .width(FillPortion(3))
+            .into()
+        }
+        Type::VecFloat3(value) => {
+            let anchor = button(text("→").size(14).center().height(Fill))
+                .on_press(super::Message::Uniform {
+                    name: uniform.name().to_owned(),
+                    message: Message::Open,
+                })
+                .style(button::text)
+                .padding([0, 4])
+                .height(ROW_HEIGHT);
+            let content = match editor {
+                Some(&Editor::Direction { direction }) => Some(disc(uniform, value, direction)),
                 _ => None,
             };
 
@@ -201,6 +230,77 @@ fn xy_pad<'a>(
     .padding(8)
     .width(PAD_SIZE + 16.0)
     .into();
+    content.map(move |message| super::Message::Uniform {
+        name: uniform.name().to_owned(),
+        message,
+    })
+}
+
+/// The popover of a vec3: a disc picking the unit `direction` seen from the front, the side it
+/// points to, the length, and the components' fields.
+fn disc<'a>(
+    uniform: &'a Uniform,
+    (x, y, z): (f32, f32, f32),
+    direction: (f32, f32, f32),
+) -> Element<'a, super::Message> {
+    let value = uniform.value;
+    let length = split((x, y, z)).map_or(0.0, |(length, _)| length);
+    let disc = stack![
+        container(space())
+            .width(Fill)
+            .height(Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(theme.palette().background.weak.color.into()),
+                border: border::rounded(PAD_SIZE / 2.0),
+                ..container::Style::default()
+            }),
+        container(rule::horizontal(1).style(rule::weak)).center_y(Fill),
+        container(rule::vertical(1).style(rule::weak)).center_x(Fill),
+        pad::pad(
+            Point::new((direction.0 + 1.0) / 2.0, (direction.1 + 1.0) / 2.0),
+            Message::Disc,
+        ),
+    ]
+    .width(PAD_SIZE)
+    .height(PAD_SIZE);
+    let side = button(
+        text(if direction.2.is_sign_negative() {
+            "Back"
+        } else {
+            "Front"
+        })
+        .size(14)
+        .center()
+        .height(Fill),
+    )
+    .on_press(Message::Flip)
+    .padding([0, 6])
+    .height(ROW_HEIGHT);
+    let length = scrub::scrub(length, Message::Length)
+        .label("length")
+        .speed(0.01)
+        .range(0.0..=f32::MAX)
+        .height(ROW_HEIGHT);
+    let fields = row((0..3).map(|index| {
+        scrub::scrub([x, y, z][index], move |component: f32| {
+            Message::Set(
+                value
+                    .with_component(index, component.into())
+                    .unwrap_or(value),
+            )
+        })
+        .label(AXES[index])
+        .speed(0.01)
+        .height(ROW_HEIGHT)
+        .into()
+    }))
+    .spacing(2);
+
+    let content: Element<'a, Message> = column![disc, row![side, length].spacing(2), fields]
+        .spacing(4)
+        .padding(8)
+        .width(PAD_SIZE + 16.0)
+        .into();
     content.map(move |message| super::Message::Uniform {
         name: uniform.name().to_owned(),
         message,

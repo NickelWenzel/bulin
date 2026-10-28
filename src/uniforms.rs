@@ -8,7 +8,7 @@ use iced::widget::{self, button, column, operation, row, space, text};
 use iced::{Element, Fill, Subscription, Task};
 
 use crate::action::Action;
-use crate::core::uniform::{Error, Type};
+use crate::core::uniform::{Error, Type, join, split};
 use crate::core::{Clock, Uniforms, color};
 
 /// The height of a uniform's row and its controls.
@@ -92,18 +92,27 @@ impl State {
                 if !self.uniforms.set(&name, value) {
                     return Action::none();
                 }
-                if let Some((
-                    open,
-                    uniform::Editor::Color {
-                        hue,
-                        saturation,
-                        hex_text,
-                    },
-                )) = &mut self.editor
-                    && *open == name
-                {
-                    follow(value, hue, saturation);
-                    *hex_text = None;
+                match &mut self.editor {
+                    Some((
+                        open,
+                        uniform::Editor::Color {
+                            hue,
+                            saturation,
+                            hex_text,
+                        },
+                    )) if *open == name => {
+                        follow(value, hue, saturation);
+                        *hex_text = None;
+                    }
+                    // A zero vector has no direction to give, so the chosen one stays.
+                    Some((open, uniform::Editor::Direction { direction })) if *open == name => {
+                        if let Type::VecFloat3(vector) = value
+                            && let Some((_, new)) = split(vector)
+                        {
+                            *direction = new;
+                        }
+                    }
+                    _ => {}
                 }
                 Action::instruction(Instruction::Values)
             }
@@ -162,6 +171,10 @@ impl State {
                                 hex_text: None,
                             },
                         ));
+                    }
+                    Type::VecFloat3(vector) => {
+                        let direction = split(vector).map_or((0.0, 0.0, 1.0), |(_, unit)| unit);
+                        self.editor = Some((name, uniform::Editor::Direction { direction }));
                     }
                     _ => {}
                 }
@@ -268,6 +281,61 @@ impl State {
                         Action::instruction(Instruction::Values)
                     }
                     _ => Action::none(),
+                }
+            }
+            Message::Uniform {
+                name,
+                message:
+                    message @ (uniform::Message::Disc(_)
+                    | uniform::Message::Flip
+                    | uniform::Message::Length(_)),
+            } => {
+                self.typing = None;
+                let Some((_, uniform::Editor::Direction { direction })) =
+                    self.editor.as_mut().filter(|(open, _)| *open == name)
+                else {
+                    return Action::none();
+                };
+                let Some(Type::VecFloat3(vector)) = self
+                    .uniforms
+                    .iter()
+                    .find(|uniform| uniform.name() == name)
+                    .map(|uniform| uniform.value)
+                else {
+                    return Action::none();
+                };
+                let length = split(vector).map_or(0.0, |(length, _)| length);
+
+                // The value always joins the length to the kept direction, so neither one is
+                // lost when the other changes.
+                let length = match message {
+                    uniform::Message::Disc(point) => {
+                        let (x, y) = (point.x * 2.0 - 1.0, point.y * 2.0 - 1.0);
+                        // A point outside the disc moves onto its rim.
+                        let radius = x.hypot(y);
+                        let (x, y) = (x / radius.max(1.0), y / radius.max(1.0));
+                        let radius = radius.min(1.0);
+                        // `copysign` keeps the side of a zero `z` too, so the rim doesn't flip it.
+                        let z = ((1.0 - radius) * (1.0 + radius))
+                            .sqrt()
+                            .copysign(direction.2);
+                        *direction = (x, y, z);
+                        length
+                    }
+                    uniform::Message::Flip => {
+                        direction.2 = -direction.2;
+                        length
+                    }
+                    uniform::Message::Length(new) => new.clamp(0.0, f32::MAX),
+                    _ => length,
+                };
+                if self
+                    .uniforms
+                    .set(&name, Type::VecFloat3(join(length, *direction)))
+                {
+                    Action::instruction(Instruction::Values)
+                } else {
+                    Action::none()
                 }
             }
             Message::TypingChanged(text) => {
@@ -863,5 +931,109 @@ mod tests {
             assert!(matches!(value(&state), Type::Col3(_)));
         }
         assert_eq!(value(&state), Type::Col3((0.1, 0.2, 0.3)));
+    }
+
+    /// A state with the vec3 `value` named `normal` and its direction editor open.
+    fn pointing(value: (f32, f32, f32)) -> State {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("normal", Type::VecFloat3(value)).unwrap();
+        let mut state = State::new(uniforms, None);
+        let _ = state.update(uniform("normal", uniform::Message::Open));
+        state
+    }
+
+    fn assert_near(state: &State, expected: (f32, f32, f32)) {
+        let Type::VecFloat3((x, y, z)) = value(state) else {
+            panic!("not a vec3");
+        };
+        let (ex, ey, ez) = expected;
+        assert!(
+            (x - ex).abs() < 1e-5 && (y - ey).abs() < 1e-5 && (z - ez).abs() < 1e-5,
+            "{:?} is not {expected:?}",
+            (x, y, z)
+        );
+    }
+
+    #[test]
+    fn opening_a_zero_vec3_points_it_to_the_front() {
+        let state = pointing((0.0, 0.0, 0.0));
+
+        assert_eq!(
+            state.editor.unwrap().1,
+            uniform::Editor::Direction {
+                direction: (0.0, 0.0, 1.0)
+            }
+        );
+    }
+
+    #[test]
+    fn a_zero_length_keeps_the_chosen_direction() {
+        let mut state = pointing((0.0, 0.0, 2.0));
+
+        let _ = state.update(uniform("normal", uniform::Message::Length(0.0)));
+        assert_eq!(value(&state), Type::VecFloat3((0.0, 0.0, 0.0)));
+        let _ = state.update(uniform(
+            "normal",
+            uniform::Message::Disc(iced::Point::new(0.75, 0.5)),
+        ));
+        let _ = state.update(uniform("normal", uniform::Message::Length(2.0)));
+
+        assert_near(&state, (1.0, 0.0, 3.0_f32.sqrt()));
+    }
+
+    #[test]
+    fn the_rim_keeps_the_back() {
+        let mut state = pointing((0.0, 0.0, -1.0));
+
+        let _ = state.update(uniform(
+            "normal",
+            uniform::Message::Disc(iced::Point::new(1.0, 0.5)),
+        ));
+        assert_near(&state, (1.0, 0.0, 0.0));
+        let _ = state.update(uniform(
+            "normal",
+            uniform::Message::Disc(iced::Point::new(0.5, 0.5)),
+        ));
+
+        assert_near(&state, (0.0, 0.0, -1.0));
+    }
+
+    #[test]
+    fn flipping_changes_only_z() {
+        let mut state = pointing((3.0, 0.0, 4.0));
+
+        let instruction = state
+            .update(uniform("normal", uniform::Message::Flip))
+            .instruction;
+
+        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert_near(&state, (3.0, 0.0, -4.0));
+    }
+
+    #[test]
+    fn a_point_outside_the_disc_is_clamped_onto_it() {
+        let mut state = pointing((0.0, 0.0, 2.0));
+
+        let _ = state.update(uniform(
+            "normal",
+            uniform::Message::Disc(iced::Point::new(1.0, 1.0)),
+        ));
+
+        assert_near(&state, (2.0_f32.sqrt(), 2.0_f32.sqrt(), 0.0));
+    }
+
+    #[test]
+    fn setting_a_vec3_follows_its_direction_unless_it_is_zero() {
+        let mut state = pointing((0.0, 0.0, 1.0));
+
+        let _ = state.update(set("normal", Type::VecFloat3((0.0, -2.0, 0.0))));
+        let _ = state.update(set("normal", Type::VecFloat3((0.0, 0.0, 0.0))));
+
+        assert_eq!(
+            state.editor.unwrap().1,
+            uniform::Editor::Direction {
+                direction: (0.0, -1.0, 0.0)
+            }
+        );
     }
 }
