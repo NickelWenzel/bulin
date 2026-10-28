@@ -39,3 +39,8 @@ it.
 
 **Project**:
 The saved file holding a shader, its uniforms and the clock.
+
+**Settings**:
+The editor options and shortcuts bulin keeps for the user across projects, such as the font size
+or the chord that toggles inlay hints.
+_Avoid_: preferences, config
