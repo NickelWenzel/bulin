@@ -8,11 +8,11 @@ use std::sync::Arc;
 
 use crate::core;
 
-/// Why the stored settings couldn't be read.
+/// Why the stored settings couldn't be read or written.
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum Error {
     #[cfg(not(target_arch = "wasm32"))]
-    #[error("could not read the settings file: {0}")]
+    #[error("could not reach the settings file: {0}")]
     Io(#[source] Arc<io::Error>),
     #[cfg(target_arch = "wasm32")]
     #[error("could not reach the browser's storage: {0}")]

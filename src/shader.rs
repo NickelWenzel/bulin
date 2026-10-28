@@ -41,13 +41,6 @@ fn wgsl_editor(source: &str, settings: &core::Settings) -> CodeEditor {
         tree_sitter_wesl::HIGHLIGHTS_QUERY,
     )
     .expect("tree-sitter-wesl's highlights query compiles");
-    let keymap = keymap::overrides(&settings.keybindings).into_iter().fold(
-        Keymap::new(),
-        |keymap, (chord, action)| match action {
-            Some(action) => keymap.bind(chord, action),
-            None => keymap.unbind(chord),
-        },
-    );
 
     CodeEditor::new(source)
         .language(wesl)
@@ -57,7 +50,17 @@ fn wgsl_editor(source: &str, settings: &core::Settings) -> CodeEditor {
         .show_whitespace(settings.editor.render_whitespace)
         .text_size(settings.editor.font_size)
         .find(settings.editor.find)
-        .keymap(keymap)
+        .keymap(bindings(&settings.keybindings))
+}
+
+/// The editor's keymap for `keybindings`.
+fn bindings(keybindings: &core::settings::Keybindings) -> Keymap {
+    keymap::overrides(keybindings)
+        .into_iter()
+        .fold(Keymap::new(), |keymap, (chord, action)| match action {
+            Some(action) => keymap.bind(chord, action),
+            None => keymap.unbind(chord),
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +92,29 @@ impl State {
             problems: Problems::default(),
             failure: None,
         }
+    }
+
+    /// Makes the editor follow `settings`, keeping its document.
+    pub fn apply(&mut self, settings: &core::Settings, now: Instant) -> Task<Message> {
+        // Turning find off leaves an open bar drawn, but closing it works either way.
+        let close = if settings.editor.find {
+            Task::none()
+        } else {
+            self.editor
+                .update(Event::CloseFind, now)
+                .map(Message::Editor)
+        };
+
+        self.editor.set_inlay_hints(settings.editor.inlay_hints);
+        self.editor
+            .set_show_whitespace(settings.editor.render_whitespace);
+        self.editor.set_keymap(bindings(&settings.keybindings));
+        // The text size and find have no setters; their builders only assign a field.
+        self.editor = std::mem::replace(&mut self.editor, CodeEditor::new(""))
+            .text_size(settings.editor.font_size)
+            .find(settings.editor.find);
+
+        close
     }
 
     /// Starts analyzing the shader under its file's name.
