@@ -1,13 +1,16 @@
 //! The controls for one uniform and the row that adds new ones.
 
-use std::ops::RangeInclusive;
+use std::f32::consts::{FRAC_PI_2, PI};
 
-use iced::widget::{button, column, combo_box, container, row, rule, stack, text, text_input};
-use iced::{Center, Element, Fill, FillPortion, Length, Point, Theme};
+use iced::widget::{
+    button, column, combo_box, container, row, rule, space, stack, text, text_input,
+};
+use iced::{Center, Color, Element, Fill, FillPortion, Length, Point, Theme, border, gradient};
 use num_traits::AsPrimitive;
 
 use super::{ROW_HEIGHT, TYPING_ID, Typing};
 use crate::control::{outside, pad, popover, scrub};
+use crate::core::color;
 use crate::core::uniform::{Error, Type, Uniform, Uniforms};
 
 #[derive(Debug, Clone)]
@@ -19,13 +22,28 @@ pub enum Message {
     Open,
     /// Moves a vector to this point of its pad, in `[0, 1]²`.
     Pad(Point),
+    /// Sets a color's saturation and value to this point's `x` and `y`, keeping its hue.
+    Sv(Point),
+    /// Sets a color's hue, keeping its saturation and value.
+    Hue(f32),
+    Alpha(f32),
+    HexChanged(String),
+    /// Applies the typed hex code when the color can hold it.
+    HexSubmitted,
 }
 
 /// The open popover of a uniform, holding what its value can't give back.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Editor {
     /// An XY pad spanning `[-extent, extent]²`, chosen when it opens so it doesn't move along.
     Pad { extent: f32 },
+    /// An HSV picker. The hue and saturation are kept for when the value can't tell them, as
+    /// for black and greys, and the hex code being typed, if any, replaces the derived one.
+    Color {
+        hue: f32,
+        saturation: f32,
+        hex_text: Option<String>,
+    },
 }
 
 const AXES: [&str; 4] = ["x", "y", "z", "w"];
@@ -35,8 +53,12 @@ const CHANNELS: [&str; 4] = ["r", "g", "b", "a"];
 /// The side of the pad's square, in logical pixels.
 const PAD_SIZE: f32 = 160.0;
 
+/// The thickness of a color picker's hue and alpha strips, in logical pixels.
+const STRIP: f32 = 12.0;
+
 /// A uniform's name and a scrub field for each component of its value, or a text input for
-/// the component being typed. A vec2 has a button opening its `editor` next to it.
+/// the component being typed. A vec2 has a button opening its `editor` next to it, and a color
+/// shows a swatch and its hex code that open it.
 pub fn view<'a>(
     uniform: &'a Uniform,
     typing: Option<&'a Typing>,
@@ -44,10 +66,10 @@ pub fn view<'a>(
 ) -> Element<'a, super::Message> {
     let fields = match uniform.value {
         Type::Int(_) | Type::VecInt2(_) | Type::VecInt3(_) | Type::VecInt4(_) => {
-            fields::<i32>(uniform, typing, AXES, 0.25, None)
+            fields::<i32>(uniform, typing, 0.25)
         }
         Type::Float(_) | Type::VecFloat3(_) | Type::VecFloat4(_) => {
-            fields::<f32>(uniform, typing, AXES, 0.01, None)
+            fields::<f32>(uniform, typing, 0.01)
         }
         Type::VecFloat2(value) => {
             let anchor = button(text("xy").size(14).center().height(Fill))
@@ -58,10 +80,13 @@ pub fn view<'a>(
                 .style(button::text)
                 .padding([0, 4])
                 .height(ROW_HEIGHT);
-            let content = editor.map(|&Editor::Pad { extent }| xy_pad(uniform, value, extent));
+            let content = match editor {
+                Some(&Editor::Pad { extent }) => Some(xy_pad(uniform, value, extent)),
+                _ => None,
+            };
 
             row![
-                fields::<f32>(uniform, typing, AXES, 0.01, None),
+                fields::<f32>(uniform, typing, 0.01),
                 popover::popover(anchor, content, super::Message::Close),
             ]
             .spacing(2)
@@ -69,7 +94,57 @@ pub fn view<'a>(
             .into()
         }
         Type::Col3(_) | Type::Col4(_) => {
-            fields::<f32>(uniform, typing, CHANNELS, 0.005, Some(0.0..=1.0))
+            let ([r, g, b, a], count) = uniform.value.components();
+            let rgb = (r as f32, g as f32, b as f32);
+            let alpha = (count == 4).then_some(a as f32);
+            let fill = Color::from_rgba(rgb.0, rgb.1, rgb.2, alpha.unwrap_or(1.0));
+            let size = ROW_HEIGHT - 6.0;
+            let swatch = container(space())
+                .width(size)
+                .height(size)
+                .style(move |theme: &Theme| container::Style {
+                    background: Some(fill.into()),
+                    border: border::rounded(2)
+                        .color(theme.palette().background.strong.color)
+                        .width(1),
+                    ..container::Style::default()
+                });
+            let swatch: Element<'a, super::Message> = if alpha.is_some() {
+                stack![backdrop(), swatch].width(size).height(size).into()
+            } else {
+                swatch.into()
+            };
+            let anchor = button(
+                row![swatch, text(color::hex(rgb, alpha)).size(14)]
+                    .spacing(6)
+                    .height(Fill)
+                    .align_y(Center),
+            )
+            .on_press(super::Message::Uniform {
+                name: uniform.name().to_owned(),
+                message: Message::Open,
+            })
+            .style(button::text)
+            .padding([0, 4])
+            .width(FillPortion(3))
+            .height(ROW_HEIGHT);
+            let content = match editor {
+                Some(Editor::Color {
+                    hue,
+                    saturation,
+                    hex_text,
+                }) => Some(picker(
+                    uniform,
+                    rgb,
+                    alpha,
+                    *hue,
+                    *saturation,
+                    hex_text.as_deref(),
+                )),
+                _ => None,
+            };
+
+            popover::popover(anchor, content, super::Message::Close).into()
         }
     };
 
@@ -132,14 +207,157 @@ fn xy_pad<'a>(
     })
 }
 
+/// The popover of a color: a saturation-value square and a hue strip for the color `rgb` of
+/// `hue` and `saturation`, an alpha strip when it has an `alpha`, its hex code, or the
+/// `hex_text` being typed, and its channels' fields.
+fn picker<'a>(
+    uniform: &'a Uniform,
+    rgb: (f32, f32, f32),
+    alpha: Option<f32>,
+    hue: f32,
+    saturation: f32,
+    hex_text: Option<&'a str>,
+) -> Element<'a, super::Message> {
+    let value = uniform.value;
+    let gradient = |gradient: gradient::Linear| {
+        move |_theme: &Theme| container::Style {
+            background: Some(gradient.into()),
+            ..container::Style::default()
+        }
+    };
+    let pure = |hue: f32| {
+        let (r, g, b) = color::Hsv {
+            hue,
+            saturation: 1.0,
+            value: 1.0,
+        }
+        .to_rgb();
+        Color::from_rgb(r, g, b)
+    };
+    let (r, g, b) = rgb;
+
+    // An angle of π/2 runs left to right, and π top to bottom.
+    let sv = stack![
+        container(space()).width(Fill).height(Fill).style(gradient(
+            gradient::Linear::new(FRAC_PI_2)
+                .add_stop(0.0, Color::WHITE)
+                .add_stop(1.0, pure(hue))
+        )),
+        container(space()).width(Fill).height(Fill).style(gradient(
+            gradient::Linear::new(PI)
+                .add_stop(0.0, Color::TRANSPARENT)
+                .add_stop(1.0, Color::BLACK)
+        )),
+        pad::pad(
+            Point::new(saturation, color::Hsv::from_rgb(rgb).value),
+            Message::Sv,
+        ),
+    ]
+    .width(PAD_SIZE)
+    .height(PAD_SIZE);
+    let hues = (0..=6).fold(gradient::Linear::new(FRAC_PI_2), |hues, sixth| {
+        let offset = sixth as f32 / 6.0;
+        hues.add_stop(offset, pure(offset))
+    });
+    let hue_strip = stack![
+        container(space())
+            .width(Fill)
+            .height(Fill)
+            .style(gradient(hues)),
+        pad::pad(Point::new(hue, 0.5), |point| Message::Hue(point.x)),
+    ]
+    .width(PAD_SIZE)
+    .height(STRIP);
+    let alpha_strip = alpha.map(|alpha| {
+        stack![
+            backdrop(),
+            container(space()).width(Fill).height(Fill).style(gradient(
+                gradient::Linear::new(FRAC_PI_2)
+                    .add_stop(0.0, Color::from_rgba(r, g, b, 0.0))
+                    .add_stop(1.0, Color::from_rgb(r, g, b))
+            )),
+            pad::pad(Point::new(alpha, 0.5), |point| Message::Alpha(point.x)),
+        ]
+        .width(PAD_SIZE)
+        .height(STRIP)
+    });
+
+    let valid = hex_text.is_none_or(|text| {
+        color::parse_hex(text).is_some_and(|(_, typed)| typed.is_none() || alpha.is_some())
+    });
+    let hex = text_input(
+        "",
+        hex_text.map_or_else(|| color::hex(rgb, alpha), str::to_owned),
+    )
+    .on_input(Message::HexChanged)
+    .on_submit(Message::HexSubmitted)
+    .size(14)
+    .line_height(text::LineHeight::Absolute(ROW_HEIGHT.into()))
+    .padding([0, 6])
+    .style(move |theme: &Theme, status| {
+        let style = text_input::default(theme, status);
+        if valid {
+            style
+        } else {
+            text_input::Style {
+                border: style.border.color(theme.palette().danger.base.color),
+                ..style
+            }
+        }
+    });
+
+    let (components, count) = value.components();
+    let fields = row((0..count).map(|index| {
+        scrub::scrub(components[index] as f32, move |component: f32| {
+            Message::Set(
+                value
+                    .with_component(index, component.into())
+                    .unwrap_or(value),
+            )
+        })
+        .label(CHANNELS[index])
+        .speed(0.005)
+        .range(0.0..=1.0)
+        .height(ROW_HEIGHT)
+        .into()
+    }))
+    .spacing(2);
+
+    let content: Element<'a, Message> = column![sv, hue_strip]
+        .push(alpha_strip)
+        .push(hex)
+        .push(fields)
+        .spacing(6)
+        .padding(8)
+        .width(PAD_SIZE + 16.0)
+        .into();
+    content.map(move |message| super::Message::Uniform {
+        name: uniform.name().to_owned(),
+        message,
+    })
+}
+
+/// Two tones, light above dark, for a translucent color to show its alpha against.
+fn backdrop<'a, Message: 'a>() -> Element<'a, Message> {
+    let tone = |tone: Color| {
+        container(space())
+            .width(Fill)
+            .height(Fill)
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(tone.into()),
+                ..container::Style::default()
+            })
+    };
+
+    column![tone(Color::WHITE), tone(Color::from_rgb(0.4, 0.4, 0.4))].into()
+}
+
 /// A scrub field per component of `uniform`'s value, editing it as a `T`, with `typing`'s
 /// component as a text input instead. Vectors label each field.
 fn fields<'a, T>(
     uniform: &'a Uniform,
     typing: Option<&'a Typing>,
-    labels: [&'static str; 4],
     speed: f64,
-    range: Option<RangeInclusive<T>>,
 ) -> Element<'a, super::Message>
 where
     T: scrub::Input + 'a,
@@ -183,14 +401,10 @@ where
         .on_click(Message::StartTyping(index))
         .speed(speed)
         .height(ROW_HEIGHT);
-        let field = if count > 1 {
-            field.label(labels[index])
+        let field: Element<'a, Message> = if count > 1 {
+            field.label(AXES[index]).into()
         } else {
-            field
-        };
-        let field: Element<'a, Message> = match range.clone() {
-            Some(range) => field.range(range).into(),
-            None => field.into(),
+            field.into()
         };
         field.map(move |message| super::Message::Uniform {
             name: uniform.name().to_owned(),
