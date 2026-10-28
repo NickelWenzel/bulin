@@ -3,19 +3,31 @@
 mod clock;
 mod uniform;
 
-use iced::widget::{button, column, row, space, text};
-use iced::{Element, Fill, Subscription};
+use iced::keyboard::{self, key};
+use iced::widget::{self, button, column, operation, row, space, text};
+use iced::{Element, Fill, Subscription, Task};
 
+use crate::action::Action;
 use crate::core::uniform::{Error, Type};
 use crate::core::{Clock, Uniforms};
 
 /// The height of a uniform's row and its controls.
 const ROW_HEIGHT: f32 = 24.0;
 
+/// The text input of the component being typed. Only one exists at a time.
+const TYPING_ID: widget::Id = widget::Id::new("typing");
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Clock(clock::Message),
-    Set(String, Type),
+    Uniform {
+        name: String,
+        message: uniform::Message,
+    },
+    TypingChanged(String),
+    /// Applies the typed text when the component can hold it.
+    Submit,
+    CancelTyping,
     Candidate(uniform::CandidateMessage),
     Add,
     Remove(String),
@@ -36,6 +48,14 @@ pub struct State {
     candidate: uniform::Candidate,
     /// Whether the candidate's name can be added to the uniforms as they are now.
     candidate_check: Result<(), Error>,
+    typing: Option<Typing>,
+}
+
+/// A component whose value is being typed as text.
+pub struct Typing {
+    name: String,
+    component: usize,
+    text: String,
 }
 
 impl State {
@@ -46,44 +66,130 @@ impl State {
             uniforms,
             clock: clock.map(clock::State::from),
             candidate,
+            typing: None,
         }
     }
 
-    pub fn update(&mut self, message: Message) -> Option<Instruction> {
-        let instruction = match message {
-            Message::Clock(message) => self.clock.as_mut().map(|clock| {
-                clock.update(message);
-                Instruction::Values
-            }),
-            Message::Set(name, value) => self
-                .uniforms
-                .set(&name, value)
-                .then_some(Instruction::Values),
-            Message::Candidate(message) => {
-                self.candidate.update(message);
-                None
-            }
-            Message::Add => match self.candidate.submit(&mut self.uniforms) {
-                Ok(()) => Some(Instruction::Layout),
-                Err(error) => {
-                    tracing::debug!("uniform not added: {error}");
-                    None
+    pub fn update(&mut self, message: Message) -> Action<Instruction, Message> {
+        let action = match message {
+            Message::Clock(message) => match self.clock.as_mut() {
+                Some(clock) => {
+                    clock.update(message);
+                    Action::instruction(Instruction::Values)
                 }
+                None => Action::none(),
             },
-            Message::Remove(name) => self.uniforms.remove(&name).then_some(Instruction::Layout),
+            Message::Uniform {
+                name,
+                message: uniform::Message::Set(value),
+            } => {
+                self.typing = None;
+                if self.uniforms.set(&name, value) {
+                    Action::instruction(Instruction::Values)
+                } else {
+                    Action::none()
+                }
+            }
+            Message::Uniform {
+                name,
+                message: uniform::Message::StartTyping(component),
+            } => {
+                let Some(uniform) = self.uniforms.iter().find(|uniform| uniform.name() == name)
+                else {
+                    return Action::none();
+                };
+                // The fields show rounded values, so the text starts from the stored one.
+                let value = uniform.value.components().0[component];
+                let text = match uniform.value {
+                    Type::Int(_) | Type::VecInt2(_) | Type::VecInt3(_) | Type::VecInt4(_) => {
+                        value.to_string()
+                    }
+                    _ => (value as f32).to_string(),
+                };
+                self.typing = Some(Typing {
+                    name,
+                    component,
+                    text,
+                });
+                Action::task(Task::batch([
+                    operation::focus(TYPING_ID),
+                    operation::select_all(TYPING_ID),
+                ]))
+            }
+            Message::TypingChanged(text) => {
+                if let Some(typing) = &mut self.typing {
+                    typing.text = text;
+                }
+                Action::none()
+            }
+            Message::Submit => {
+                let Some(typing) = self.typing.take() else {
+                    return Action::none();
+                };
+                let Some(uniform) = self
+                    .uniforms
+                    .iter()
+                    .find(|uniform| uniform.name() == typing.name)
+                else {
+                    return Action::none();
+                };
+                match typing.value(uniform.value) {
+                    Some(value) => {
+                        if self.uniforms.set(&typing.name, value) {
+                            Action::instruction(Instruction::Values)
+                        } else {
+                            Action::none()
+                        }
+                    }
+                    // A refused text stays for the user to correct.
+                    None => {
+                        self.typing = Some(typing);
+                        Action::none()
+                    }
+                }
+            }
+            Message::CancelTyping => {
+                self.typing = None;
+                Action::none()
+            }
+            Message::Candidate(message) => {
+                self.typing = None;
+                self.candidate.update(message);
+                Action::none()
+            }
+            Message::Add => {
+                self.typing = None;
+                match self.candidate.submit(&mut self.uniforms) {
+                    Ok(()) => Action::instruction(Instruction::Layout),
+                    Err(error) => {
+                        tracing::debug!("uniform not added: {error}");
+                        Action::none()
+                    }
+                }
+            }
+            Message::Remove(name) => {
+                self.typing = None;
+                if self.uniforms.remove(&name) {
+                    Action::instruction(Instruction::Layout)
+                } else {
+                    Action::none()
+                }
+            }
             Message::AddTime => {
+                self.typing = None;
                 self.clock = Some(clock::State::new());
-                Some(Instruction::Layout)
+                Action::instruction(Instruction::Layout)
             }
             Message::RemoveTime => {
+                self.typing = None;
                 self.clock = None;
-                Some(Instruction::Layout)
+                Action::instruction(Instruction::Layout)
             }
         };
 
         // The check depends on the uniforms as well as the typed name.
         self.candidate_check = self.uniforms.check(self.candidate.name());
-        instruction
+        action
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -107,9 +213,12 @@ impl State {
         ];
 
         let uniforms = column(self.uniforms.iter().map(|value| {
-            let name = value.name().to_owned();
+            let typing = self
+                .typing
+                .as_ref()
+                .filter(|typing| typing.name == value.name());
             row![
-                uniform::view(value).map(move |value| Message::Set(name.clone(), value)),
+                uniform::view(value, typing),
                 button(text("×").center().width(Fill).height(Fill))
                     .on_press(Message::Remove(value.name().to_owned()))
                     .style(button::text)
@@ -138,11 +247,34 @@ impl State {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        if let Some(clock) = &self.clock {
+        let clock = if let Some(clock) = &self.clock {
             clock.subscription().map(Message::Clock)
         } else {
             Subscription::none()
-        }
+        };
+        // The text input doesn't capture Escape, so it reaches this listener.
+        let escape = if self.typing.is_some() {
+            keyboard::listen().filter_map(|event| match event {
+                keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(key::Named::Escape),
+                    ..
+                } => Some(Message::CancelTyping),
+                _ => None,
+            })
+        } else {
+            Subscription::none()
+        };
+
+        Subscription::batch([clock, escape])
+    }
+}
+
+impl Typing {
+    /// `value` with the typed component set to the text, or `None` when the text isn't a number
+    /// the component can hold.
+    fn value(&self, value: Type) -> Option<Type> {
+        let component = self.text.trim().parse().ok()?;
+        value.with_component(self.component, component)
     }
 }
 
@@ -151,9 +283,35 @@ mod tests {
     use super::*;
 
     fn name(state: &mut State, name: &str) -> Option<Instruction> {
-        state.update(Message::Candidate(uniform::CandidateMessage::NameChanged(
-            name.to_owned(),
-        )))
+        state
+            .update(Message::Candidate(uniform::CandidateMessage::NameChanged(
+                name.to_owned(),
+            )))
+            .instruction
+    }
+
+    fn set(name: &str, value: Type) -> Message {
+        Message::Uniform {
+            name: name.to_owned(),
+            message: uniform::Message::Set(value),
+        }
+    }
+
+    /// A state with one uniform, `name`, typing `text` into its component `component`.
+    fn typing(name: &str, value: Type, component: usize, text: &str) -> State {
+        let mut uniforms = Uniforms::default();
+        uniforms.add(name, value).unwrap();
+        let mut state = State::new(uniforms, None);
+        let _ = state.update(Message::Uniform {
+            name: name.to_owned(),
+            message: uniform::Message::StartTyping(component),
+        });
+        let _ = state.update(Message::TypingChanged(text.to_owned()));
+        state
+    }
+
+    fn value(state: &State) -> Type {
+        state.uniforms().iter().next().unwrap().value
     }
 
     #[test]
@@ -162,7 +320,7 @@ mod tests {
 
         assert!(name(&mut state, "radius").is_none());
         assert!(matches!(
-            state.update(Message::Add),
+            state.update(Message::Add).instruction,
             Some(Instruction::Layout)
         ));
         assert_eq!(state.uniforms().iter().count(), 1);
@@ -175,7 +333,7 @@ mod tests {
         let _ = state.update(Message::Add);
         name(&mut state, "radius");
 
-        assert!(state.update(Message::Add).is_none());
+        assert!(state.update(Message::Add).instruction.is_none());
         assert_eq!(state.uniforms().iter().count(), 1);
     }
 
@@ -196,7 +354,12 @@ mod tests {
     fn removing_an_unknown_uniform_changes_nothing() {
         let mut state = State::new(Uniforms::default(), None);
 
-        assert!(state.update(Message::Remove("radius".to_owned())).is_none());
+        assert!(
+            state
+                .update(Message::Remove("radius".to_owned()))
+                .instruction
+                .is_none()
+        );
     }
 
     #[test]
@@ -205,7 +368,7 @@ mod tests {
         uniforms.add("radius", Type::Float(0.5)).unwrap();
         let mut state = State::new(uniforms, None);
 
-        let instruction = state.update(Message::Set("radius".to_owned(), Type::Float(0.7)));
+        let instruction = state.update(set("radius", Type::Float(0.7))).instruction;
 
         assert!(matches!(instruction, Some(Instruction::Values)));
         let radius = state.uniforms().iter().next().unwrap();
@@ -217,14 +380,91 @@ mod tests {
         let mut state = State::new(Uniforms::default(), None);
 
         assert!(matches!(
-            state.update(Message::AddTime),
+            state.update(Message::AddTime).instruction,
             Some(Instruction::Layout)
         ));
         assert_eq!(state.time(), Some(0.0));
         assert!(matches!(
-            state.update(Message::RemoveTime),
+            state.update(Message::RemoveTime).instruction,
             Some(Instruction::Layout)
         ));
         assert_eq!(state.time(), None);
+    }
+
+    #[test]
+    fn a_click_starts_typing_with_the_full_value() {
+        let mut uniforms = Uniforms::default();
+        uniforms
+            .add("offset", Type::VecFloat2((0.5, 0.123_456)))
+            .unwrap();
+        let mut state = State::new(uniforms, None);
+
+        let _ = state.update(Message::Uniform {
+            name: "offset".to_owned(),
+            message: uniform::Message::StartTyping(1),
+        });
+
+        let typing = state.typing.as_ref().unwrap();
+        assert_eq!(typing.name, "offset");
+        assert_eq!(typing.component, 1);
+        assert_eq!(typing.text, "0.123456");
+    }
+
+    #[test]
+    fn submitting_a_different_value_sets_it_and_ends_typing() {
+        let mut state = typing("offset", Type::VecFloat2((0.5, 0.5)), 1, " -2.25 ");
+
+        let instruction = state.update(Message::Submit).instruction;
+
+        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert_eq!(value(&state), Type::VecFloat2((0.5, -2.25)));
+        assert!(state.typing.is_none());
+    }
+
+    #[test]
+    fn submitting_the_same_value_ends_typing_without_an_instruction() {
+        let mut state = typing("count", Type::Int(3), 0, "3");
+
+        assert!(state.update(Message::Submit).instruction.is_none());
+        assert!(state.typing.is_none());
+    }
+
+    #[test]
+    fn a_refused_submit_keeps_typing_and_changes_nothing() {
+        let cases = [
+            (Type::Float(0.5), "abc"),
+            (Type::Float(0.5), "inf"),
+            (Type::Float(0.5), "NaN"),
+            (Type::Float(0.5), "1e40"),
+            (Type::Int(3), "2.5"),
+            (Type::Int(3), "3000000000"),
+            (Type::Col3((0.5, 0.5, 0.5)), "1.5"),
+        ];
+
+        for (start, text) in cases {
+            let mut state = typing("u", start, 0, text);
+
+            assert!(state.update(Message::Submit).instruction.is_none());
+            assert_eq!(value(&state), start, "{text}");
+            assert_eq!(state.typing.as_ref().unwrap().text, text);
+        }
+    }
+
+    #[test]
+    fn escape_cancels_typing() {
+        let mut state = typing("radius", Type::Float(0.5), 0, "2");
+
+        assert!(state.update(Message::CancelTyping).instruction.is_none());
+        assert!(state.typing.is_none());
+        assert_eq!(value(&state), Type::Float(0.5));
+    }
+
+    #[test]
+    fn removing_the_typed_uniform_clears_typing() {
+        let mut state = typing("radius", Type::Float(0.5), 0, "2");
+
+        let _ = state.update(Message::Remove("radius".to_owned()));
+
+        assert!(state.typing.is_none());
     }
 }
