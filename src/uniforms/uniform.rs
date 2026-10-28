@@ -2,12 +2,12 @@
 
 use std::ops::RangeInclusive;
 
-use iced::widget::{column, combo_box, row, text, text_input};
-use iced::{Center, Element, FillPortion, Length, Theme};
+use iced::widget::{button, column, combo_box, container, row, rule, stack, text, text_input};
+use iced::{Center, Element, Fill, FillPortion, Length, Point, Theme};
 use num_traits::AsPrimitive;
 
 use super::{ROW_HEIGHT, TYPING_ID, Typing};
-use crate::control::{outside, scrub};
+use crate::control::{outside, pad, popover, scrub};
 use crate::core::uniform::{Error, Type, Uniform, Uniforms};
 
 #[derive(Debug, Clone)]
@@ -15,20 +15,58 @@ pub enum Message {
     Set(Type),
     /// Replaces the field of the component at this index with a text input.
     StartTyping(usize),
+    /// Opens the value's editor in a popover.
+    Open,
+    /// Moves a vector to this point of its pad, in `[0, 1]²`.
+    Pad(Point),
 }
 
-/// A uniform's name and a scrub field for each component of its value, or a text input for
-/// the component being typed.
-pub fn view<'a>(uniform: &'a Uniform, typing: Option<&'a Typing>) -> Element<'a, super::Message> {
-    const AXES: [&str; 4] = ["x", "y", "z", "w"];
-    const CHANNELS: [&str; 4] = ["r", "g", "b", "a"];
+/// The open popover of a uniform, holding what its value can't give back.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Editor {
+    /// An XY pad spanning `[-extent, extent]²`, chosen when it opens so it doesn't move along.
+    Pad { extent: f32 },
+}
 
+const AXES: [&str; 4] = ["x", "y", "z", "w"];
+
+const CHANNELS: [&str; 4] = ["r", "g", "b", "a"];
+
+/// The side of the pad's square, in logical pixels.
+const PAD_SIZE: f32 = 160.0;
+
+/// A uniform's name and a scrub field for each component of its value, or a text input for
+/// the component being typed. A vec2 has a button opening its `editor` next to it.
+pub fn view<'a>(
+    uniform: &'a Uniform,
+    typing: Option<&'a Typing>,
+    editor: Option<&'a Editor>,
+) -> Element<'a, super::Message> {
     let fields = match uniform.value {
         Type::Int(_) | Type::VecInt2(_) | Type::VecInt3(_) | Type::VecInt4(_) => {
             fields::<i32>(uniform, typing, AXES, 0.25, None)
         }
-        Type::Float(_) | Type::VecFloat2(_) | Type::VecFloat3(_) | Type::VecFloat4(_) => {
+        Type::Float(_) | Type::VecFloat3(_) | Type::VecFloat4(_) => {
             fields::<f32>(uniform, typing, AXES, 0.01, None)
+        }
+        Type::VecFloat2(value) => {
+            let anchor = button(text("xy").size(14).center().height(Fill))
+                .on_press(super::Message::Uniform {
+                    name: uniform.name().to_owned(),
+                    message: Message::Open,
+                })
+                .style(button::text)
+                .padding([0, 4])
+                .height(ROW_HEIGHT);
+            let content = editor.map(|&Editor::Pad { extent }| xy_pad(uniform, value, extent));
+
+            row![
+                fields::<f32>(uniform, typing, AXES, 0.01, None),
+                popover::popover(anchor, content, super::Message::Close),
+            ]
+            .spacing(2)
+            .width(FillPortion(3))
+            .into()
         }
         Type::Col3(_) | Type::Col4(_) => {
             fields::<f32>(uniform, typing, CHANNELS, 0.005, Some(0.0..=1.0))
@@ -40,6 +78,58 @@ pub fn view<'a>(uniform: &'a Uniform, typing: Option<&'a Typing>) -> Element<'a,
         .height(ROW_HEIGHT)
         .align_y(Center)
         .into()
+}
+
+/// The popover of a vec2: a pad over axes spanning `[-extent, extent]²`, the extent, and the
+/// components' fields.
+fn xy_pad<'a>(
+    uniform: &'a Uniform,
+    (x, y): (f32, f32),
+    extent: f32,
+) -> Element<'a, super::Message> {
+    let value = uniform.value;
+    let axes = stack![
+        container(rule::horizontal(1)).center_y(Fill),
+        container(rule::vertical(1)).center_x(Fill),
+        pad::pad(
+            Point::new((x / extent + 1.0) / 2.0, (y / extent + 1.0) / 2.0),
+            Message::Pad,
+        ),
+    ]
+    .width(PAD_SIZE)
+    .height(PAD_SIZE);
+    let fields = row((0..2).map(|index| {
+        scrub::scrub([x, y][index], move |component: f32| {
+            Message::Set(
+                value
+                    .with_component(index, component.into())
+                    .unwrap_or(value),
+            )
+        })
+        .label(AXES[index])
+        .speed(0.01)
+        .height(ROW_HEIGHT)
+        .into()
+    }))
+    .spacing(2);
+
+    let content: Element<'a, Message> = column![
+        axes,
+        text(format!("extent {extent}"))
+            .size(12)
+            .style(|theme: &Theme| text::Style {
+                color: Some(theme.palette().background.base.text.scale_alpha(0.5)),
+            }),
+        fields,
+    ]
+    .spacing(4)
+    .padding(8)
+    .width(PAD_SIZE + 16.0)
+    .into();
+    content.map(move |message| super::Message::Uniform {
+        name: uniform.name().to_owned(),
+        message,
+    })
 }
 
 /// A scrub field per component of `uniform`'s value, editing it as a `T`, with `typing`'s
