@@ -11,7 +11,7 @@
 
 # Uniforms enhancements
 - ✅ Add colorpicker
-- ❌ Add vector inputs maybe some via length and draggable vec
+- ✅ Add vector inputs maybe some via length and draggable vec
 - ❌ Add matrix inputs via translation, scale, sheer and draggable coordinate system for rotation
 
 # Include shader code functions

@@ -335,6 +335,18 @@ impl From<Uniforms> for Vec<Uniform> {
     }
 }
 
+/// A vector's length and its unit direction, or `None` when it has none: at length 0, or when
+/// the length overflows an `f32`.
+pub fn split((x, y, z): (f32, f32, f32)) -> Option<(f32, (f32, f32, f32))> {
+    let length = x.hypot(y).hypot(z);
+    (length > 0.0 && length.is_finite()).then(|| (length, (x / length, y / length, z / length)))
+}
+
+/// The vector of `length` along the unit `direction`, reversing [`split`].
+pub fn join(length: f32, (x, y, z): (f32, f32, f32)) -> (f32, f32, f32) {
+    (length * x, length * y, length * z)
+}
+
 /// The bytes of a struct with `members` in order, padded as WGSL lays it out.
 pub(crate) fn pack(members: impl IntoIterator<Item = Type>) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -558,6 +570,26 @@ mod tests {
             Type::Col4((0.5, 0.5, 0.5, 0.5)).with_component(3, -0.1),
             None
         );
+    }
+
+    #[test]
+    fn a_vector_splits_into_length_and_direction_and_joins_back() {
+        for vector in [(3.0, 0.0, -4.0), (1.0, 2.0, 2.0), (0.0, -0.5, 0.0)] {
+            let (length, direction) = split(vector).unwrap();
+            let (x, y, z) = join(length, direction);
+
+            assert!((direction.0.hypot(direction.1).hypot(direction.2) - 1.0).abs() < 1e-6);
+            assert!((x - vector.0).abs() < 1e-6, "{vector:?}");
+            assert!((y - vector.1).abs() < 1e-6, "{vector:?}");
+            assert!((z - vector.2).abs() < 1e-6, "{vector:?}");
+        }
+        assert_eq!(split((3.0, 0.0, -4.0)), Some((5.0, (0.6, 0.0, -0.8))));
+    }
+
+    #[test]
+    fn a_zero_or_overflowing_vector_has_no_direction() {
+        assert_eq!(split((0.0, 0.0, 0.0)), None);
+        assert_eq!(split((f32::MAX, f32::MAX, 0.0)), None);
     }
 
     #[test]
