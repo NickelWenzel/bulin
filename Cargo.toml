@@ -55,7 +55,8 @@ tracing = "0.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tracing-subscriber = "0.3"
-tokio = { version = "1.54.1", default-features = false, features = ["fs"] }
+tokio = { version = "1.54.1", default-features = false, features = ["fs", "rt"] }
+notify-debouncer-full = "0.7.0"
 wgsl-analyzer = { git = "https://github.com/wgsl-analyzer/wgsl-analyzer", rev = "cc19e9698fc0826288fa6416b11df86dd8d60e3d" }
 paths = { git = "https://github.com/wgsl-analyzer/wgsl-analyzer", rev = "cc19e9698fc0826288fa6416b11df86dd8d60e3d" }
 anyhow = "1.0.104"
@@ -63,12 +64,17 @@ rayon = "1.12"
 tempfile = "3"
 dirs = "6.0"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1.54.1", features = ["time"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 wasm-bindgen = "0.2.108"
-web-sys = { version = "0.3.85", features = ["Window", "Storage"] }
+idb = "0.6.5"
+js-sys = "0.3.85"
+web-sys = { version = "0.3.85", features = ["DomException", "Storage", "Window"] }
 # console_log is a `log` backend; this forwards tracing's events to it.
 tracing = { version = "0.1", features = ["log"] }
 
