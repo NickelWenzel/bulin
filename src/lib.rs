@@ -495,7 +495,7 @@ impl Application {
 
 /// The program the viewer runs for the current shader and uniforms.
 fn program(shader: &shader::State, uniforms: &uniforms::State) -> core::Program {
-    core::Program::new(
+    core::Program::project(
         shader.content(),
         uniforms.uniforms().clone(),
         uniforms.time(),
