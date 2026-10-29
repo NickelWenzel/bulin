@@ -77,7 +77,7 @@ pub enum Message {
 }
 
 pub enum Instruction {
-    /// The shader text changed.
+    /// The document's text changed.
     Changed,
 }
 
@@ -379,10 +379,10 @@ mod tests {
     #[test]
     fn a_cancelled_open_keeps_unsaved_changes() {
         let (mut analyzer, _events) = Analyzer::start();
-        let mut shader = State::new("", &Settings::default());
-        shader.is_dirty = true;
+        let mut document = State::new("", &Settings::default());
+        document.is_dirty = true;
 
-        let action = shader.update(
+        let action = document.update(
             Message::FileOpened(Err(file::Error::DialogClosed)),
             Instant::now(),
             &mut analyzer,
@@ -390,33 +390,33 @@ mod tests {
         );
 
         assert!(action.instruction.is_none());
-        assert!(shader.is_dirty);
-        assert_eq!(shader.failure(), None);
+        assert!(document.is_dirty);
+        assert_eq!(document.failure(), None);
     }
 
     #[test]
     fn a_failed_open_is_reported() {
         let (mut analyzer, _events) = Analyzer::start();
-        let mut shader = State::new("", &Settings::default());
+        let mut document = State::new("", &Settings::default());
         let error = file::Error::Io(Arc::new(std::io::Error::other("disk on fire")));
 
-        let _ = shader.update(
+        let _ = document.update(
             Message::FileOpened(Err(error)),
             Instant::now(),
             &mut analyzer,
             &Settings::default(),
         );
 
-        assert!(shader.failure().is_some());
+        assert!(document.failure().is_some());
     }
 
     #[test]
     fn a_new_file_starts_from_a_shader_that_compiles() {
         let (mut analyzer, _events) = Analyzer::start();
-        let mut shader = State::new("", &Settings::default());
-        shader.is_dirty = true;
+        let mut document = State::new("", &Settings::default());
+        document.is_dirty = true;
 
-        let action = shader.update(
+        let action = document.update(
             Message::NewFile,
             Instant::now(),
             &mut analyzer,
@@ -424,9 +424,9 @@ mod tests {
         );
 
         assert!(matches!(action.instruction, Some(Instruction::Changed)));
-        assert!(!shader.is_dirty);
+        assert!(!document.is_dirty);
         assert!(
-            Program::project(shader.content(), Uniforms::default(), None)
+            Program::project(document.content(), Uniforms::default(), None)
                 .compile()
                 .is_ok()
         );
@@ -434,26 +434,26 @@ mod tests {
 
     #[test]
     fn long_paths_are_shortened_between_characters() {
-        let path = format!("/home/{}/shader.wesl", "Übungsaufgaben".repeat(5));
+        let path = format!("/home/{}/document.wesl", "Übungsaufgaben".repeat(5));
 
         let short = shorten(&path);
 
         assert!(short.starts_with("..."));
         assert_eq!(short.chars().count(), 43);
-        assert!(short.ends_with("shader.wesl"));
+        assert!(short.ends_with("document.wesl"));
     }
 
     #[test]
     fn an_opened_file_is_analyzed_in_place_of_the_previous_shader() {
         let (mut analyzer, mut events) = Analyzer::start();
-        let mut editor = State::new("fn f() -> i32 { return 1; }", &Settings::default());
-        editor.attach(&mut analyzer);
+        let mut document = State::new("fn f() -> i32 { return 1; }", &Settings::default());
+        document.attach(&mut analyzer);
 
         let opened = Ok((
             file::Name::from("/shaders/broken.wgsl"),
             Arc::new("fn f() -> i32 { return 1.0; }".to_owned()),
         ));
-        let action = editor.update(
+        let action = document.update(
             Message::FileOpened(opened),
             Instant::now(),
             &mut analyzer,
@@ -462,12 +462,12 @@ mod tests {
         assert!(matches!(action.instruction, Some(Instruction::Changed)));
 
         let deadline = Instant::now() + Duration::from_secs(30);
-        while editor.problems.errors == 0 {
+        while document.problems.errors == 0 {
             assert!(Instant::now() < deadline, "no error within 30 s");
 
             match events.next().now_or_never() {
                 Some(Some(event)) => {
-                    let _ = editor.lsp(&mut analyzer, event);
+                    let _ = document.lsp(&mut analyzer, event);
                 }
                 Some(None) => panic!("the server stopped"),
                 None => thread::sleep(Duration::from_millis(10)),
