@@ -208,26 +208,7 @@ impl Program {
     /// The `uniforms` package: the `Customs` struct and its `customs` binding, or nothing when
     /// there are no members.
     pub fn uniforms_package(&self) -> String {
-        let members = self
-            .time
-            .map(|_| "time: f32".to_owned())
-            .into_iter()
-            .chain(
-                self.uniforms
-                    .iter()
-                    .map(|uniform| format!("{}: {}", uniform.name(), uniform.value.wgsl())),
-            )
-            .collect::<Vec<_>>();
-
-        if members.is_empty() {
-            return String::new();
-        }
-
-        format!(
-            "struct Customs {{\n    {},\n}}\n\n\
-             @group(0) @binding(0) var<uniform> customs: Customs;\n",
-            members.join(",\n    "),
-        )
+        uniforms_package(self.time, &self.uniforms)
     }
 
     /// Compiles the main file with what it imports, or says what is wrong and where.
@@ -442,6 +423,30 @@ impl Default for Program {
     fn default() -> Self {
         Self::project(DEFAULT_SOURCE, Uniforms::default(), None)
     }
+}
+
+/// The `uniforms` package for `time` and `uniforms`, without building a [`Program`]: the
+/// `Customs` struct and its `customs` binding, or nothing when there are no members.
+pub fn uniforms_package(time: Option<f32>, uniforms: &Uniforms) -> String {
+    let members = time
+        .map(|_| "time: f32".to_owned())
+        .into_iter()
+        .chain(
+            uniforms
+                .iter()
+                .map(|uniform| format!("{}: {}", uniform.name(), uniform.value.wgsl())),
+        )
+        .collect::<Vec<_>>();
+
+    if members.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "struct Customs {{\n    {},\n}}\n\n\
+         @group(0) @binding(0) var<uniform> customs: Customs;\n",
+        members.join(",\n    "),
+    )
 }
 
 /// The `Customs` struct's bytes for `time` and `uniforms`, without building a [`Program`].

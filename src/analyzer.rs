@@ -1,10 +1,10 @@
 //! wgsl-analyzer, the language server behind the shader editor.
 //!
-//! Every document is analyzed as a file in one virtual workspace whose `wesl.toml` makes it a
-//! package: wgsl-analyzer publishes diagnostics only for files inside a discovered package. The
-//! workspace depends on the `bulin` and `uniforms` packages a shader imports, each a directory
-//! with its own `wesl.toml`. The uniforms package changes with the uniforms, so its text reaches
-//! the server as an open document rather than through the file on disk.
+//! Every document is analyzed as a file in one virtual workspace laid out like a folder: its
+//! `wesl.toml` makes it a package, since wgsl-analyzer publishes diagnostics only for files inside
+//! a discovered package, and depends on the `bulin` and `uniforms` packages under `.bulin/`, each a
+//! directory with its own `wesl.toml`. The uniforms package changes with the uniforms, so its text
+//! reaches the server as an open document rather than through the file on disk.
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -21,35 +21,21 @@ use native::Link;
 #[cfg(target_arch = "wasm32")]
 use web::Link;
 
-use crate::core::program::{BULIN_PACKAGE_NAME, BULIN_PACKAGE_SOURCE, UNIFORMS_PACKAGE_NAME};
+use crate::core::folder;
+use crate::core::program::UNIFORMS_PACKAGE_NAME;
 use crate::file;
 
-/// The manifest of a package whose modules sit next to it, instead of in the default `./shaders`.
-const PACKAGE_MANIFEST: &str = "edition = \"2026_pre\"\nroot = \".\"\n";
-
-/// The files the workspace starts with, relative to its root: its manifest, depending on the
-/// packages bulin provides, and each package as a directory of its own. The uniforms package's
-/// module is empty here: its text is the open document.
-fn files() -> [(String, String); 5] {
-    let uniforms = UNIFORMS_PACKAGE_NAME;
-    let bulin = BULIN_PACKAGE_NAME;
-    [
-        (
-            "wesl.toml".to_owned(),
-            format!(
-                "{PACKAGE_MANIFEST}\n[dependencies]\n\
-                 {bulin} = {{ path = \"{bulin}\" }}\n\
-                 {uniforms} = {{ path = \"{uniforms}\" }}\n"
-            ),
-        ),
-        (format!("{bulin}/wesl.toml"), PACKAGE_MANIFEST.to_owned()),
-        (
-            format!("{bulin}/package.wesl"),
-            BULIN_PACKAGE_SOURCE.to_owned(),
-        ),
-        (format!("{uniforms}/wesl.toml"), PACKAGE_MANIFEST.to_owned()),
-        (format!("{uniforms}/package.wesl"), String::new()),
-    ]
+/// The files the workspace starts with, relative to its root: the manifest a folder gets and the
+/// packages bulin generates in it. The uniforms package's module is empty here: its text is the
+/// open document.
+fn files() -> Vec<(String, String)> {
+    std::iter::once((folder::MANIFEST.to_owned(), folder::root_manifest()))
+        .chain(
+            folder::generated("")
+                .into_iter()
+                .map(|(path, text)| (path.as_str().to_owned(), text)),
+        )
+        .collect()
 }
 
 /// The document name of a shader that has no file yet.
@@ -106,7 +92,7 @@ impl Analyzer {
         uri.path_segments_mut()
             .expect("invariant: the workspace root is a file URI")
             .pop_if_empty()
-            .extend([UNIFORMS_PACKAGE_NAME, "package.wesl"]);
+            .extend([".bulin", UNIFORMS_PACKAGE_NAME, "package.wesl"]);
         if let Err(error) = self.uniforms.open_lsp(&mut self.client, &uri, "wesl") {
             tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
         }
