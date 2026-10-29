@@ -3,11 +3,11 @@ pub use bulin_core as core;
 mod action;
 mod analyzer;
 mod control;
+mod document;
 mod file;
 mod layout;
 mod menu;
 mod settings;
-mod shader;
 mod uniforms;
 mod viewer;
 
@@ -28,7 +28,7 @@ const EDITOR: &str = "matcha-editor";
 
 pub struct Application {
     analyzer: analyzer::Analyzer,
-    shader: shader::State,
+    document: document::State,
     uniforms: uniforms::State,
     viewer: viewer::State,
     layout: layout::State,
@@ -55,7 +55,7 @@ enum Modal {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Shader(shader::Message),
+    Document(document::Message),
     Uniforms(uniforms::Message),
     Layout(layout::Message),
     ShowMenu,
@@ -95,16 +95,16 @@ impl Application {
     fn with_settings(settings: core::Settings) -> (Self, Task<Message>) {
         let (mut analyzer, events) = analyzer::Analyzer::start();
         let project = core::Project::untitled();
-        let mut shader = shader::State::new(&project.shader, &settings);
-        shader.attach(&mut analyzer);
+        let mut document = document::State::new(&project.shader, &settings);
+        document.attach(&mut analyzer);
         let uniforms = uniforms::State::new(project.uniforms, project.clock);
-        let program = program(&shader, &uniforms);
+        let program = program(&document, &uniforms);
         analyzer.set_uniforms(&program.uniforms_package());
         let viewer = viewer::State::new(&program);
 
         let application = Self {
             analyzer,
-            shader,
+            document,
             uniforms,
             viewer,
             layout: layout::State::new(),
@@ -123,25 +123,25 @@ impl Application {
 
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
         match message {
-            Message::Shader(message) => {
-                // A shader dialog answering after a project switch would land in the new project.
+            Message::Document(message) => {
+                // A document dialog answering after a project switch would land in the new project.
                 let file_action = matches!(
                     message,
-                    shader::Message::NewFile
-                        | shader::Message::OpenFile
-                        | shader::Message::SaveFile
-                        | shader::Message::SaveFileAs
+                    document::Message::NewFile
+                        | document::Message::OpenFile
+                        | document::Message::SaveFile
+                        | document::Message::SaveFileAs
                 );
                 if file_action && self.is_loading {
                     return Task::none();
                 }
                 let action = self
-                    .shader
+                    .document
                     .update(message, now, &mut self.analyzer, &self.settings);
-                if let Some(shader::Instruction::Changed) = action.instruction {
+                if let Some(document::Instruction::Changed) = action.instruction {
                     self.program_changed();
                 }
-                action.task.map(Message::Shader)
+                action.task.map(Message::Document)
             }
             Message::Uniforms(message) => {
                 let action = self.uniforms.update(message);
@@ -179,24 +179,24 @@ impl Application {
                     // The find bar takes focus as it opens.
                     menu::Message::Find => {
                         return self.update(
-                            Message::Shader(shader::Message::Editor(matcha_iced::Event::OpenFind)),
+                            Message::Document(document::Message::Editor(matcha_iced::Event::OpenFind)),
                             now,
                         );
                     }
                     menu::Message::Replace => {
                         return self.update(
-                            Message::Shader(shader::Message::Editor(
+                            Message::Document(document::Message::Editor(
                                 matcha_iced::Event::OpenReplace,
                             )),
                             now,
                         );
                     }
-                    menu::Message::OpenFile => Message::Shader(shader::Message::OpenFile),
-                    menu::Message::NewFile => Message::Shader(shader::Message::NewFile),
-                    menu::Message::SaveFile => Message::Shader(shader::Message::SaveFile),
-                    menu::Message::SaveFileAs => Message::Shader(shader::Message::SaveFileAs),
-                    menu::Message::Undo => Message::Shader(shader::Message::Undo),
-                    menu::Message::Redo => Message::Shader(shader::Message::Redo),
+                    menu::Message::OpenFile => Message::Document(document::Message::OpenFile),
+                    menu::Message::NewFile => Message::Document(document::Message::NewFile),
+                    menu::Message::SaveFile => Message::Document(document::Message::SaveFile),
+                    menu::Message::SaveFileAs => Message::Document(document::Message::SaveFileAs),
+                    menu::Message::Undo => Message::Document(document::Message::Undo),
+                    menu::Message::Redo => Message::Document(document::Message::Redo),
                     menu::Message::OpenProject => Message::OpenProject,
                     menu::Message::NewProject => Message::NewProject,
                     menu::Message::SaveProject => Message::SaveProject,
@@ -214,12 +214,12 @@ impl Application {
                 match action.instruction {
                     Some(settings::Instruction::Changed) => Task::batch([
                         task,
-                        self.shader.apply(&self.settings, now).map(Message::Shader),
+                        self.document.apply(&self.settings, now).map(Message::Document),
                         self.settings_changed(),
                     ]),
                     Some(settings::Instruction::Previewed) => Task::batch([
                         task,
-                        self.shader.apply(&self.settings, now).map(Message::Shader),
+                        self.document.apply(&self.settings, now).map(Message::Document),
                     ]),
                     Some(settings::Instruction::Close) => {
                         self.modal = None;
@@ -229,7 +229,7 @@ impl Application {
                 }
             }
             Message::OpenProject => {
-                if self.is_loading || self.shader.is_loading() {
+                if self.is_loading || self.document.is_loading() {
                     Task::none()
                 } else {
                     self.is_loading = true;
@@ -239,7 +239,7 @@ impl Application {
                 }
             }
             Message::NewProject => {
-                if !self.is_loading && !self.shader.is_loading() {
+                if !self.is_loading && !self.document.is_loading() {
                     self.file = None;
                     self.notice = None;
                     self.load(core::Project::untitled());
@@ -269,7 +269,7 @@ impl Application {
                 Task::none()
             }
             Message::SaveProject | Message::SaveProjectAs => {
-                if self.is_loading || self.shader.is_loading() {
+                if self.is_loading || self.document.is_loading() {
                     Task::none()
                 } else {
                     self.is_loading = true;
@@ -279,7 +279,7 @@ impl Application {
                         _ => None,
                     };
                     let project = core::Project::new(
-                        self.shader.content(),
+                        self.document.content(),
                         self.uniforms.uniforms().clone(),
                         self.uniforms.clock(),
                     );
@@ -304,11 +304,11 @@ impl Application {
                 Task::none()
             }
             Message::Analyzer(event) => {
-                let action = self.shader.lsp(&mut self.analyzer, event);
-                if let Some(shader::Instruction::Changed) = action.instruction {
+                let action = self.document.lsp(&mut self.analyzer, event);
+                if let Some(document::Instruction::Changed) = action.instruction {
                     self.program_changed();
                 }
-                action.task.map(Message::Shader)
+                action.task.map(Message::Document)
             }
             Message::KeyPressed {
                 key,
@@ -330,7 +330,7 @@ impl Application {
                 }
 
                 Task::batch([
-                    self.shader.apply(&self.settings, now).map(Message::Shader),
+                    self.document.apply(&self.settings, now).map(Message::Document),
                     self.settings_changed(),
                 ])
             }
@@ -374,16 +374,16 @@ impl Application {
 
     /// Shows the current program and gives the analyzer its uniforms package.
     fn program_changed(&mut self) {
-        let program = program(&self.shader, &self.uniforms);
+        let program = program(&self.document, &self.uniforms);
         self.viewer.load(&program);
         self.analyzer.set_uniforms(&program.uniforms_package());
     }
 
     /// Replaces the shader and uniforms with `project`'s.
     fn load(&mut self, project: core::Project) {
-        self.shader.detach(&mut self.analyzer);
-        self.shader = shader::State::new(&project.shader, &self.settings);
-        self.shader.attach(&mut self.analyzer);
+        self.document.detach(&mut self.analyzer);
+        self.document = document::State::new(&project.shader, &self.settings);
+        self.document.attach(&mut self.analyzer);
         self.uniforms = uniforms::State::new(project.uniforms, project.clock);
         self.program_changed();
     }
@@ -395,7 +395,7 @@ impl Application {
                 layout::PaneContent::Editor => {
                     let editors = column![
                         self.uniforms.view().map(Message::Uniforms),
-                        self.shader.view().map(Message::Shader),
+                        self.document.view().map(Message::Document),
                     ];
 
                     (container(editors).into(), None)
@@ -410,9 +410,9 @@ impl Application {
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
 
-        let title = [Some(self.shader.title().as_str()), self.notice.as_deref()]
+        let title = [Some(self.document.title().as_str()), self.notice.as_deref()]
             .into_iter()
-            .chain([self.shader.failure()])
+            .chain([self.document.failure()])
             .flatten()
             .collect::<Vec<_>>()
             .join(" · ");
@@ -420,7 +420,7 @@ impl Application {
         let header = row![
             container(menu_icon()).width(Fill),
             text(title),
-            container(text(self.shader.status(&self.analyzer)).size(14))
+            container(text(self.document.status(&self.analyzer)).size(14))
                 .width(Fill)
                 .align_right(Fill),
         ]
@@ -445,7 +445,7 @@ impl Application {
     }
 
     pub fn theme(&self) -> Theme {
-        self.shader.theme()
+        self.document.theme()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -485,7 +485,7 @@ impl Application {
         });
 
         Subscription::batch([
-            self.shader.subscription().map(Message::Shader),
+            self.document.subscription().map(Message::Document),
             self.uniforms.subscription().map(Message::Uniforms),
             escape,
             shortcuts,
@@ -494,9 +494,9 @@ impl Application {
 }
 
 /// The program the viewer runs for the current shader and uniforms.
-fn program(shader: &shader::State, uniforms: &uniforms::State) -> core::Program {
+fn program(document: &document::State, uniforms: &uniforms::State) -> core::Program {
     core::Program::project(
-        shader.content(),
+        document.content(),
         uniforms.uniforms().clone(),
         uniforms.time(),
     )
