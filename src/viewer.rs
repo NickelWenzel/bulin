@@ -132,9 +132,10 @@ struct Compiled {
 }
 
 /// Compiles `program` and checks the result as the GPU will, so a program the device would reject
-/// is reported instead of silently not showing. Errors are one line, in the shader's own names.
+/// is reported instead of silently not showing. Errors are one line, in the shader's own names,
+/// after the file they come from when the program knows it.
 fn compile(program: &Program) -> Result<Compiled, String> {
-    let wgsl = program.compile().map_err(|error| {
+    let compiled = program.compile().map_err(|error| {
         let error = error.to_string();
         let line = error
             .lines()
@@ -142,10 +143,14 @@ fn compile(program: &Program) -> Result<Compiled, String> {
             .unwrap_or_default();
         line.strip_prefix("error: ").unwrap_or(line).to_owned()
     })?;
+    let located = |(text, file): (String, Option<crate::core::folder::Path>)| match file {
+        Some(file) => format!("{file}: {text}"),
+        None => text,
+    };
 
     // iced's `webgl` feature is what makes wgpu re-export naga on wasm.
-    let module =
-        wgpu::naga::front::wgsl::parse_str(&wgsl).map_err(|error| unmangle(error.message()))?;
+    let module = wgpu::naga::front::wgsl::parse_str(&compiled.wgsl)
+        .map_err(|error| located(program.unmangle(error.message())))?;
     // A device created without optional features validates with the default capabilities.
     wgpu::naga::valid::Validator::new(
         wgpu::naga::valid::ValidationFlags::all(),
@@ -158,21 +163,13 @@ fn compile(program: &Program) -> Result<Compiled, String> {
         while let Some(source) = cause.source() {
             cause = source;
         }
-        unmangle(&cause.to_string())
+        located(program.unmangle(&cause.to_string()))
     })?;
 
     Ok(Compiled {
-        wgsl: wgsl.into(),
+        wgsl: compiled.wgsl.into(),
         uniforms: program.bytes(),
     })
-}
-
-/// Turns wesl's mangled names in `message` back into the names the shader uses.
-fn unmangle(message: &str) -> String {
-    message
-        .replace("package_shader_", "")
-        .replace("uniforms_", "uniforms::")
-        .replace("bulin_", "bulin::")
 }
 
 impl Default for Compiled {
@@ -183,6 +180,7 @@ impl Default for Compiled {
             wgsl: program
                 .compile()
                 .expect("invariant: the default program compiles")
+                .wgsl
                 .into(),
             uniforms: program.bytes(),
         }
@@ -215,6 +213,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::State;
+    use crate::core::folder::Path;
     use crate::core::uniform::Type;
     use crate::core::{Program, Project, Uniforms};
 
@@ -238,7 +237,7 @@ mod tests {
             include_str!("../assets/test_project_2.bulin"),
         ] {
             let project = Project::from_json(json).unwrap();
-            let program = Program::new(
+            let program = Program::project(
                 project.shader,
                 project.uniforms,
                 project.clock.map(|clock| clock.seconds()),
@@ -250,7 +249,7 @@ mod tests {
     #[test]
     fn a_broken_shader_is_reported_until_one_compiles() {
         let mut viewer = State::new(&Program::default());
-        let broken = Program::new("fn mainBulin(", Uniforms::default(), None);
+        let broken = Program::project("fn mainBulin(", Uniforms::default(), None);
 
         viewer.load(&broken);
         let error = viewer.error().expect("a broken shader is reported");
@@ -263,7 +262,7 @@ mod tests {
 
     #[test]
     fn new_values_keep_the_compiled_program() {
-        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+        let mut viewer = State::new(&Program::project(READS_RADIUS, radius(1.0), None));
         let wgsl = Arc::clone(&viewer.compiled.wgsl);
 
         viewer.set_values(crate::core::program::bytes(None, &radius(2.0)));
@@ -274,9 +273,9 @@ mod tests {
 
     #[test]
     fn values_still_show_while_the_shader_is_broken() {
-        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+        let mut viewer = State::new(&Program::project(READS_RADIUS, radius(1.0), None));
 
-        viewer.load(&Program::new("fn mainBulin(", radius(1.0), None));
+        viewer.load(&Program::project("fn mainBulin(", radius(1.0), None));
         viewer.set_values(crate::core::program::bytes(None, &radius(2.0)));
 
         assert!(viewer.error().is_some());
@@ -285,9 +284,9 @@ mod tests {
 
     #[test]
     fn values_of_another_layout_wait_for_a_compiling_shader() {
-        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+        let mut viewer = State::new(&Program::project(READS_RADIUS, radius(1.0), None));
 
-        viewer.load(&Program::new("fn mainBulin(", radius(1.0), Some(5.0)));
+        viewer.load(&Program::project("fn mainBulin(", radius(1.0), Some(5.0)));
         viewer.set_values(crate::core::program::bytes(Some(6.0), &radius(2.0)));
 
         assert_eq!(viewer.compiled.uniforms, 1.0f32.to_le_bytes());
@@ -295,30 +294,62 @@ mod tests {
 
     #[test]
     fn fixing_the_shader_clears_the_error() {
-        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+        let mut viewer = State::new(&Program::project(READS_RADIUS, radius(1.0), None));
 
-        viewer.load(&Program::new("fn mainBulin(", radius(1.0), None));
-        viewer.load(&Program::new(READS_RADIUS, radius(1.0), None));
+        viewer.load(&Program::project("fn mainBulin(", radius(1.0), None));
+        viewer.load(&Program::project(READS_RADIUS, radius(1.0), None));
 
         assert_eq!(viewer.error(), None);
     }
 
     #[test]
     fn errors_only_the_gpu_would_catch_are_reported() {
-        let mut viewer = State::new(&Program::new(READS_RADIUS, radius(1.0), None));
+        let mut viewer = State::new(&Program::project(READS_RADIUS, radius(1.0), None));
         let good = Arc::clone(&viewer.compiled.wgsl);
 
         for source in [
             READS_RADIUS.replace("customs.radius", "customs.nope"),
             READS_RADIUS.replace("vec4<f32>(customs.radius)", "1.0"),
         ] {
-            viewer.load(&Program::new(source, radius(1.0), None));
+            viewer.load(&Program::project(source, radius(1.0), None));
 
             let error = viewer.error().expect("the GPU would reject this shader");
             assert!(!error.contains("package_shader_"), "{error}");
             assert!(!error.contains('['), "{error}");
             assert!(Arc::ptr_eq(&good, &viewer.compiled.wgsl));
         }
+    }
+
+    #[test]
+    fn a_naga_error_names_a_file() {
+        let main = "import package::lib::value;\n\
+            fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {\n\
+                return vec4<f32>(value());\n\
+            }\n";
+        let lib = "struct Sample { a: f32 }\n\
+            fn value() -> f32 {\n\
+                let sample: Sample = 1.0;\n\
+                return sample.a;\n\
+            }\n";
+        let sources = [("main.wesl", main), ("lib.wesl", lib)]
+            .into_iter()
+            .map(|(file, source)| (Path::new(file).unwrap(), source.to_owned()))
+            .collect();
+        let program = Program::folder(
+            Arc::new(sources),
+            None,
+            &Path::new("main.wesl").unwrap(),
+            Uniforms::default(),
+            None,
+        )
+        .unwrap();
+        let mut viewer = State::new(&Program::default());
+
+        viewer.load(&program);
+
+        let error = viewer.error().expect("the GPU would reject this shader");
+        assert!(error.starts_with("lib.wesl: "), "{error}");
+        assert!(!error.contains("package_lib_"), "{error}");
     }
 
     #[test]
@@ -344,6 +375,6 @@ mod tests {
                  return vec4<f32>({reads});\n\
              }}\n"
         );
-        super::compile(&Program::new(source, uniforms, Some(0.0))).unwrap();
+        super::compile(&Program::project(source, uniforms, Some(0.0))).unwrap();
     }
 }

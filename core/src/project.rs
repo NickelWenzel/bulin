@@ -101,7 +101,7 @@ mod tests {
             include_str!("../../assets/test_project_2.bulin"),
         ] {
             let project = Project::from_json(json).unwrap();
-            let program = Program::new(
+            let program = Program::project(
                 project.shader,
                 project.uniforms,
                 project.clock.map(|clock| clock.seconds()),

@@ -4,6 +4,7 @@
 
 pub mod clock;
 pub mod color;
+pub mod folder;
 pub mod program;
 pub mod project;
 pub mod rotation;

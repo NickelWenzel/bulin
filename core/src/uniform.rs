@@ -66,7 +66,7 @@ pub enum Error {
 const BUILT_IN: [&str; 1] = ["time"];
 
 /// WGSL's keywords. Its reserved words, which include WESL's keywords, come from wgsl-types.
-const KEYWORDS: [&str; 26] = [
+pub(crate) const KEYWORDS: [&str; 26] = [
     "alias",
     "break",
     "case",
@@ -253,15 +253,10 @@ impl Uniform {
 impl Uniforms {
     /// Whether `name` can be added, and why not.
     pub fn check(&self, name: &str) -> Result<(), Error> {
-        let mut chars = name.chars();
-        let Some(first) = chars.next() else {
+        if name.is_empty() {
             return Err(Error::Empty);
-        };
-        let identifier = (first.is_ascii_alphabetic() || first == '_')
-            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-            && name != "_"
-            && !name.starts_with("__");
-        if !identifier {
+        }
+        if !is_identifier(name) {
             return Err(Error::Invalid(name.to_owned()));
         }
         if KEYWORDS.contains(&name) {
@@ -369,6 +364,19 @@ pub(crate) fn pack(members: impl IntoIterator<Item = Type>) -> Vec<u8> {
 fn align_up(offset: usize, alignment: usize) -> usize {
     debug_assert!(alignment.is_power_of_two());
     (offset + alignment - 1) & !(alignment - 1)
+}
+
+/// Whether `name` has the shape of a name bulin lets the user pick: ASCII letters, digits and
+/// underscores, not starting with a digit, and neither `_` nor starting with `__`, which WGSL
+/// reserves.
+pub(crate) fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && name != "_"
+        && !name.starts_with("__")
 }
 
 #[cfg(test)]

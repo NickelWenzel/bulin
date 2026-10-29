@@ -426,7 +426,7 @@ mod tests {
         assert!(matches!(action.instruction, Some(Instruction::Changed)));
         assert!(!shader.is_dirty);
         assert!(
-            Program::new(shader.content(), Uniforms::default(), None)
+            Program::project(shader.content(), Uniforms::default(), None)
                 .compile()
                 .is_ok()
         );

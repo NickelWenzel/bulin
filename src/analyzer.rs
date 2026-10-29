@@ -267,7 +267,7 @@ mod tests {
         let (mut analyzer, mut events) = Analyzer::start();
         let mut uniforms = Uniforms::default();
         uniforms.add("radius", Type::Float(1.0)).unwrap();
-        analyzer.set_uniforms(&Program::new("", uniforms, None).uniforms_package());
+        analyzer.set_uniforms(&Program::project("", uniforms, None).uniforms_package());
         let mut editor = CodeEditor::new(
             "import uniforms::customs;\n\
              fn mainBulin(pixel: bulin::Pixel) -> vec4<f32> {\n\
@@ -329,7 +329,7 @@ mod tests {
         };
 
         errors(&mut analyzer, &mut editor, true);
-        analyzer.set_uniforms(&Program::new("", radius(), None).uniforms_package());
+        analyzer.set_uniforms(&Program::project("", radius(), None).uniforms_package());
         errors(&mut analyzer, &mut editor, false);
     }
 
