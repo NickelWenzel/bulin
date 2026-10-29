@@ -7,5 +7,6 @@ edition.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+toml = "1.1"
 wesl = { workspace = true }
 wgsl-types = { workspace = true }

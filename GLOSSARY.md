@@ -6,8 +6,9 @@ reads by dragging across them, and watches the result.
 ## Language
 
 **Shader**:
-The WESL module the user edits. It defines `mainBulin`, which bulin calls for every pixel, and
-imports the uniforms it reads from the uniforms package.
+The WESL code the preview runs: a project's text, or a folder's main file and what it imports. It
+defines `mainBulin`, which bulin calls for every pixel, and imports the uniforms it reads from the
+uniforms package.
 _Avoid_: fragment shader, entry point
 
 **Uniform**:
@@ -34,13 +35,31 @@ framebuffer `position`.
 The fixed package bulin provides to every shader, named `bulin`. It holds `Pixel`.
 
 **Program**:
-The shader together with the uniforms package and the bulin package. The viewer compiles and runs
-it.
+The main file with the modules it imports, the uniforms package and the bulin package. The viewer
+compiles and runs it.
 
 **Project**:
-The saved file holding a shader, its uniforms and the clock.
+The single `.bulin` file holding a shader's text, its uniforms and the clock.
 
 **Settings**:
 The editor options and shortcuts bulin keeps for the user across projects, such as the font size
 or the chord that toggles inlay hints.
 _Avoid_: preferences, config
+
+**Folder**:
+A directory the user opens in bulin. Its shader files form one WESL package.
+
+**Main file**:
+The folder file the preview runs. It defines `mainBulin` and may import the folder's other files.
+A project's text is its main file.
+_Avoid_: entry (a WGSL entry point is something else)
+
+**Document**:
+The one file open in the editor. In a folder it need not be the main file.
+
+**Folder settings**:
+A folder's bulin state, kept in `.bulin/settings.json`: its main file, uniforms and clock. Unlike
+the user's settings, they belong to the folder and travel with it.
+
+**Library**:
+On the web, the folders and projects the browser stores for bulin.
