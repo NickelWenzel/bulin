@@ -2,8 +2,8 @@
 
 use std::ops::RangeInclusive;
 
-use iced::advanced::widget::{Tree, tree};
 use iced::advanced::text::Paragraph as _;
+use iced::advanced::widget::{Tree, tree};
 use iced::advanced::{Layout, Shell, Widget, layout, renderer, text};
 use iced::{
     Color, Element, Event, Length, Pixels, Point, Rectangle, Size, Theme, alignment, border,

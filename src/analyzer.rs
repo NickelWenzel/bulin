@@ -23,7 +23,7 @@ use web::Link;
 
 use crate::core::folder;
 use crate::core::program::UNIFORMS_PACKAGE_NAME;
-use crate::file;
+use crate::document::Location;
 
 /// The files the workspace starts with, relative to its root: the manifest a folder gets and the
 /// packages bulin generates in it. The uniforms package's module is empty here: its text is the
@@ -107,9 +107,12 @@ impl Analyzer {
         self.link.failure()
     }
 
-    /// Starts analyzing `editor`'s text as the shader `file`.
-    pub fn attach(&mut self, editor: &mut CodeEditor, file: Option<&file::Name>) {
-        let uri = document_uri(&self.root, file);
+    /// Starts analyzing `editor`'s text as the shader at `location`. A folder file isn't analyzed:
+    /// the workspace holds none of its folder's other files.
+    pub fn attach(&mut self, editor: &mut CodeEditor, location: &Location) {
+        let Some(uri) = document_uri(&self.root, location) else {
+            return;
+        };
         if let Err(error) = editor.open_lsp(&mut self.client, &uri, "wesl") {
             tracing::warn!("cannot open {uri} on wgsl-analyzer: {error}");
         }
@@ -129,20 +132,16 @@ impl Analyzer {
         self.link.flush();
     }
 
-    /// Tells the server `editor` was saved as `after`, having been `before`. A new name moves
+    /// Tells the server `editor` was saved at `after`, having been at `before`. A new name moves
     /// the document, since the name decides its URI.
-    pub fn saved(
-        &mut self,
-        editor: &mut CodeEditor,
-        before: Option<&file::Name>,
-        after: &file::Name,
-    ) {
-        if document_uri(&self.root, before) == document_uri(&self.root, Some(after)) {
+    pub fn saved(&mut self, editor: &mut CodeEditor, before: &Location, after: &Location) {
+        let uri = document_uri(&self.root, after);
+        if uri.is_some() && document_uri(&self.root, before) == uri {
             log_refusal(editor.save_lsp(&mut self.client));
             self.link.flush();
         } else {
             self.detach(editor);
-            self.attach(editor, Some(after));
+            self.attach(editor, after);
         }
     }
 
@@ -167,10 +166,15 @@ impl Analyzer {
     }
 }
 
-/// The URI under which `file` is analyzed in the workspace at `root`: its name as a `.wesl`
-/// module, since the server treats `import` in a `.wgsl` file as an error.
-fn document_uri(root: &Uri, file: Option<&file::Name>) -> Uri {
-    let name = file.and_then(file::Name::file_name).unwrap_or(UNTITLED);
+/// The URI under which a document at `location` is analyzed in the workspace at `root`: its name as
+/// a `.wesl` module, since the server treats `import` in a `.wgsl` file as an error. A folder file
+/// has none.
+fn document_uri(root: &Uri, location: &Location) -> Option<Uri> {
+    let name = match location {
+        Location::Untitled => UNTITLED,
+        Location::File(file) => file.file_name().unwrap_or(UNTITLED),
+        Location::Folder(_) => return None,
+    };
     let stem = name
         .strip_suffix(".wesl")
         .or_else(|| name.strip_suffix(".wgsl"))
@@ -182,7 +186,7 @@ fn document_uri(root: &Uri, file: Option<&file::Name>) -> Uri {
         .expect("invariant: the workspace root is a file URI")
         .pop_if_empty()
         .push(&name);
-    uri
+    Some(uri)
 }
 
 /// Logs an update the editor refused. Its jump, a definition in another document, is dropped:
@@ -203,15 +207,17 @@ mod tests {
     use matcha_iced::CodeEditor;
 
     use super::{Analyzer, Uri};
+    use crate::core::folder::Path;
     use crate::core::uniform::Type;
     use crate::core::{Program, Uniforms};
+    use crate::document::Location;
     use crate::file;
 
     #[test]
     fn analyzer_reports_a_type_error() {
         let (mut analyzer, mut events) = Analyzer::start();
         let mut editor = CodeEditor::new("fn f() -> i32 { return 1.0; }");
-        analyzer.attach(&mut editor, None);
+        analyzer.attach(&mut editor, &Location::Untitled);
 
         let deadline = Instant::now() + Duration::from_secs(30);
         while !editor
@@ -233,9 +239,17 @@ mod tests {
     fn documents_are_named_after_their_file_inside_the_workspace() {
         let root = Uri::parse("file:///workspace/").unwrap();
         let uri = |file: Option<&str>| {
-            let file = file.map(file::Name::from);
-            super::document_uri(&root, file.as_ref()).to_string()
+            let location = file.map_or(Location::Untitled, |file| {
+                Location::File(file::Name::from(file))
+            });
+            super::document_uri(&root, &location)
+                .expect("a project document is analyzed")
+                .to_string()
         };
+        assert_eq!(
+            super::document_uri(&root, &Location::Folder(Path::new("a/main.wesl").unwrap())),
+            None
+        );
         let root = root.to_string();
 
         assert_eq!(uri(None), format!("{root}untitled.wesl"));
@@ -260,7 +274,7 @@ mod tests {
                  return vec4<f32>(customs.radius + customs.nope, pixel.uv, 1.0);\n\
              }\n",
         );
-        analyzer.attach(&mut editor, None);
+        analyzer.attach(&mut editor, &Location::Untitled);
 
         // The imports resolve, so the only error is the uniform that doesn't exist.
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -294,7 +308,7 @@ mod tests {
                  return vec4<f32>(customs.radius);\n\
              }\n",
         );
-        analyzer.attach(&mut editor, None);
+        analyzer.attach(&mut editor, &Location::Untitled);
         let mut errors = |analyzer: &mut Analyzer, editor: &mut CodeEditor, wanted: bool| {
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {

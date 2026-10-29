@@ -8,8 +8,9 @@ use matcha_iced::{CodeEditor, Event};
 use crate::action::Action;
 use crate::analyzer::Analyzer;
 use crate::core;
-use crate::file;
+use crate::core::folder::{Path, same_text};
 use crate::settings::keymap;
+use crate::{file, folder};
 
 use iced::widget::container;
 use iced::{Element, Task};
@@ -17,12 +18,15 @@ use iced::{Element, Task};
 use std::sync::Arc;
 
 pub struct State {
-    file: Option<file::Name>,
+    location: Location,
     /// The file's path, shortened to fit a title.
     label: Option<String>,
     editor: CodeEditor,
     is_loading: bool,
-    is_dirty: bool,
+    /// The text last loaded or saved, which storage holds, or `None` when the file is gone.
+    base: Option<String>,
+    /// Whether the editor's text differs from `base`, kept current after every change to either.
+    dirty: bool,
     problems: Problems,
     /// Why the last file action failed, until the next one starts.
     failure: Option<String>,
@@ -63,6 +67,17 @@ fn bindings(keybindings: &core::settings::Keybindings) -> Keymap {
         })
 }
 
+/// Where the document's text comes from and goes when it is saved.
+#[derive(Debug, Clone)]
+pub enum Location {
+    /// Nowhere yet: saving asks where.
+    Untitled,
+    /// A file picked in a dialog: a native file or a web upload.
+    File(file::Name),
+    /// A file of the open folder.
+    Folder(Path),
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Editor(Event),
@@ -77,18 +92,27 @@ pub enum Message {
 }
 
 pub enum Instruction {
-    /// The document's text changed.
+    /// The document's text changed. A folder file never says so: the preview follows what is
+    /// saved.
     Changed,
+    /// Save the folder file `path` with `text`, which was `base` when last loaded or saved.
+    Save {
+        path: Path,
+        text: String,
+        base: Option<String>,
+    },
 }
 
 impl State {
+    /// An untitled document holding `shader`, edited with `settings`.
     pub fn new(shader: &str, settings: &core::Settings) -> Self {
         Self {
-            file: None,
+            location: Location::Untitled,
             label: None,
             editor: wgsl_editor(shader, settings),
             is_loading: false,
-            is_dirty: false,
+            base: Some(shader.to_owned()),
+            dirty: false,
             problems: Problems::default(),
             failure: None,
         }
@@ -117,9 +141,18 @@ impl State {
         close
     }
 
-    /// Starts analyzing the shader under its file's name.
+    /// The folder file `path`, holding `text` as storage does, edited with `settings`.
+    pub fn folder(path: Path, text: &str, settings: &core::Settings) -> Self {
+        Self {
+            label: Some(shorten(path.as_str())),
+            location: Location::Folder(path),
+            ..Self::new(text, settings)
+        }
+    }
+
+    /// Starts analyzing the shader under its location's name.
     pub fn attach(&mut self, analyzer: &mut Analyzer) {
-        analyzer.attach(&mut self.editor, self.file.as_ref());
+        analyzer.attach(&mut self.editor, &self.location);
     }
 
     /// Stops analyzing the shader, clearing what the analyzer reported.
@@ -148,8 +181,8 @@ impl State {
         });
 
         if self.editor.take_dirty() {
-            self.is_dirty = true;
-            Action::instruction(Instruction::Changed)
+            self.check_dirty();
+            self.changed(Action::none())
         } else {
             Action::none()
         }
@@ -168,8 +201,8 @@ impl State {
                 analyzer.sync(&mut self.editor);
 
                 if self.editor.take_dirty() {
-                    self.is_dirty = true;
-                    action.with_instruction(Instruction::Changed)
+                    self.check_dirty();
+                    self.changed(action)
                 } else {
                     action
                 }
@@ -192,11 +225,12 @@ impl State {
                 }
                 self.failure = None;
                 self.detach(analyzer);
-                self.file = None;
+                self.location = Location::Untitled;
                 self.label = None;
                 self.editor = wgsl_editor(core::program::DEFAULT_SOURCE, settings);
                 self.attach(analyzer);
-                self.is_dirty = false;
+                self.base = Some(crate::core::program::DEFAULT_SOURCE.to_owned());
+                self.dirty = false;
 
                 Action::instruction(Instruction::Changed)
             }
@@ -217,10 +251,11 @@ impl State {
                     Ok((path, contents)) => {
                         self.detach(analyzer);
                         self.label = path.as_str().map(shorten);
-                        self.file = Some(path);
+                        self.location = Location::File(path);
                         self.editor = wgsl_editor(&contents, settings);
                         self.attach(analyzer);
-                        self.is_dirty = false;
+                        self.base = Some(contents.as_ref().clone());
+                        self.dirty = false;
                         Action::instruction(Instruction::Changed)
                     }
                     Err(file::Error::DialogClosed) => Action::none(),
@@ -232,16 +267,26 @@ impl State {
             }
             Message::SaveFile => {
                 if self.is_loading {
-                    Action::none()
-                } else {
-                    self.is_loading = true;
-                    self.failure = None;
-
-                    Action::task(Task::perform(
-                        file::save_file(self.file.clone(), "shader.wesl", self.content()),
-                        Message::FileSaved,
-                    ))
+                    return Action::none();
                 }
+                self.failure = None;
+                let file = match &self.location {
+                    Location::Folder(path) => {
+                        return Action::instruction(Instruction::Save {
+                            path: path.clone(),
+                            text: self.content(),
+                            base: self.base.clone(),
+                        });
+                    }
+                    Location::File(file) => Some(file.clone()),
+                    Location::Untitled => None,
+                };
+                self.is_loading = true;
+
+                Action::task(Task::perform(
+                    file::save_file(file, "shader.wesl", self.content()),
+                    Message::FileSaved,
+                ))
             }
             Message::SaveFileAs => {
                 if self.is_loading {
@@ -261,10 +306,15 @@ impl State {
 
                 match result {
                     Ok(path) => {
-                        analyzer.saved(&mut self.editor, self.file.as_ref(), &path);
-                        self.label = path.as_str().map(shorten);
-                        self.file = Some(path);
-                        self.is_dirty = false;
+                        let location = Location::File(path);
+                        analyzer.saved(&mut self.editor, &self.location, &location);
+                        self.label = match &location {
+                            Location::File(path) => path.as_str().map(shorten),
+                            Location::Untitled | Location::Folder(_) => None,
+                        };
+                        self.location = location;
+                        self.base = Some(self.content());
+                        self.check_dirty();
                     }
                     Err(file::Error::DialogClosed) => {}
                     Err(error) => {
@@ -275,6 +325,58 @@ impl State {
                 Action::none()
             }
         }
+    }
+
+    /// Takes in how saving the folder file `path` went, when it is still this document: the saved
+    /// text on success, or on a conflict what storage holds instead, so the next save overwrites
+    /// it.
+    pub fn saved(&mut self, path: &Path, result: &Result<String, folder::Error>) {
+        if !self.is_at(path) {
+            return;
+        }
+        match result {
+            Ok(text) => self.base = Some(text.clone()),
+            Err(folder::Error::Conflict { disk }) => self.base = disk.clone(),
+            Err(_) => return,
+        }
+        self.check_dirty();
+    }
+
+    /// Replaces the text of the folder file `path`, which this document holds without unsaved
+    /// changes, with what storage now holds. The replacement can be undone like an edit.
+    pub fn reloaded(&mut self, path: &Path, text: &str, analyzer: &mut Analyzer) {
+        if !self.is_at(path) {
+            return;
+        }
+        self.editor.load(text, None);
+        analyzer.sync(&mut self.editor);
+        self.editor.take_dirty();
+        self.base = Some(text.to_owned());
+        self.check_dirty();
+    }
+
+    /// Notes that storage holds `text` for the folder file `path`, `None` when the file is gone,
+    /// while the editor keeps its own text.
+    pub fn disk_changed(&mut self, path: &Path, text: Option<&str>) {
+        if !self.is_at(path) {
+            return;
+        }
+        self.base = text.map(str::to_owned);
+        self.check_dirty();
+    }
+
+    pub fn location(&self) -> &Location {
+        &self.location
+    }
+
+    /// The text last loaded or saved, `None` when the file is gone.
+    pub fn base(&self) -> Option<&str> {
+        self.base.as_deref()
+    }
+
+    /// Whether the editor holds changes storage doesn't.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
     }
 
     /// What the analyzer says about the shader: its error and warning counts while it runs.
@@ -329,7 +431,7 @@ impl State {
     /// The shader's file for a title, marked when it has unsaved changes.
     pub fn title(&self) -> String {
         let label = self.label.as_deref().unwrap_or("New file");
-        if self.is_dirty {
+        if self.dirty {
             format!("{label} •")
         } else {
             label.to_owned()
@@ -348,6 +450,28 @@ impl State {
 
     pub fn content(&self) -> String {
         self.editor.document().text().into_owned()
+    }
+
+    /// Whether this document is the folder file `path`.
+    fn is_at(&self, path: &Path) -> bool {
+        matches!(&self.location, Location::Folder(at) if at == path)
+    }
+
+    /// Recomputes `dirty` from the editor's text and `base`.
+    fn check_dirty(&mut self) {
+        self.dirty = self
+            .base
+            .as_deref()
+            .is_none_or(|base| !same_text(base, &self.editor.document().text()));
+    }
+
+    /// `action`, telling the parent the text changed unless this is a folder file, whose changes
+    /// reach the preview when they are saved.
+    fn changed(&self, action: Action<Instruction, Message>) -> Action<Instruction, Message> {
+        match self.location {
+            Location::Folder(_) => action,
+            Location::Untitled | Location::File(_) => action.with_instruction(Instruction::Changed),
+        }
     }
 }
 
@@ -373,6 +497,7 @@ mod tests {
 
     use super::{Instruction, Message, State, shorten};
     use crate::analyzer::Analyzer;
+    use crate::core::folder::Path;
     use crate::core::{Program, Settings, Uniforms};
     use crate::file;
 
@@ -380,7 +505,7 @@ mod tests {
     fn a_cancelled_open_keeps_unsaved_changes() {
         let (mut analyzer, _events) = Analyzer::start();
         let mut document = State::new("", &Settings::default());
-        document.is_dirty = true;
+        document.dirty = true;
 
         let action = document.update(
             Message::FileOpened(Err(file::Error::DialogClosed)),
@@ -390,7 +515,7 @@ mod tests {
         );
 
         assert!(action.instruction.is_none());
-        assert!(document.is_dirty);
+        assert!(document.dirty);
         assert_eq!(document.failure(), None);
     }
 
@@ -414,7 +539,7 @@ mod tests {
     fn a_new_file_starts_from_a_shader_that_compiles() {
         let (mut analyzer, _events) = Analyzer::start();
         let mut document = State::new("", &Settings::default());
-        document.is_dirty = true;
+        document.dirty = true;
 
         let action = document.update(
             Message::NewFile,
@@ -424,12 +549,33 @@ mod tests {
         );
 
         assert!(matches!(action.instruction, Some(Instruction::Changed)));
-        assert!(!document.is_dirty);
+        assert!(!document.dirty);
         assert!(
             Program::project(document.content(), Uniforms::default(), None)
                 .compile()
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn typing_in_a_folder_file_marks_it_dirty_without_changing_the_preview() {
+        let (mut analyzer, _events) = Analyzer::start();
+        let mut document =
+            State::folder(Path::new("main.wesl").unwrap(), "a", &Settings::default());
+        let typed = Message::Editor(matcha_iced::Event::Editor(matcha_iced::Action::Type('x')));
+
+        let action = document.update(typed, Instant::now(), &mut analyzer, &Settings::default());
+        assert!(action.instruction.is_none());
+        assert!(document.is_dirty());
+        assert_eq!(document.title(), "main.wesl •");
+
+        let _ = document.update(
+            Message::Undo,
+            Instant::now(),
+            &mut analyzer,
+            &Settings::default(),
+        );
+        assert!(!document.is_dirty());
     }
 
     #[test]

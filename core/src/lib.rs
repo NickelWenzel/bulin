@@ -1,10 +1,12 @@
 //! What bulin edits, runs and saves, free of any GUI or GPU: the uniforms a shader reads, the
 //! program the viewer compiles from them, the clock behind the built-in `time` uniform, the
-//! project file, and the settings the editor keeps across projects.
+//! project file, folders and how the web stores them, and the settings the editor keeps across
+//! projects.
 
 pub mod clock;
 pub mod color;
 pub mod folder;
+pub mod library;
 pub mod program;
 pub mod project;
 pub mod rotation;

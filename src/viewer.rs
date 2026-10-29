@@ -2,6 +2,7 @@
 
 mod pipeline;
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -10,6 +11,7 @@ use iced::widget::shader::Viewport;
 use iced::{Element, Fill, Rectangle, mouse, wgpu};
 
 use crate::core::Program;
+use crate::core::program::Module;
 
 pub struct State {
     compiled: Arc<Compiled>,
@@ -27,7 +29,7 @@ pub struct State {
 
 impl State {
     pub fn new(program: &Program) -> Self {
-        let (compiled, package, error) = match compile(program) {
+        let (compiled, package, error) = match compile(program).1 {
             Ok(compiled) => (compiled, program.uniforms_package(), None),
             Err(error) => (
                 Compiled::default(),
@@ -47,9 +49,13 @@ impl State {
 
     /// Shows `program` from the next frame on. A program that doesn't compile leaves the last
     /// one showing, with `program`'s values when its layout is the same.
-    pub fn load(&mut self, program: &Program) {
+    ///
+    /// Returns the folder's modules the program reads, or `None` when wesl couldn't tell because
+    /// it failed: then any module could be one it would read.
+    pub fn load(&mut self, program: &Program) -> Option<BTreeSet<Module>> {
         let package = program.uniforms_package();
-        match compile(program) {
+        let (read, result) = compile(program);
+        match result {
             Ok(compiled) => {
                 self.compiled = Arc::new(compiled);
                 self.package = package;
@@ -64,6 +70,14 @@ impl State {
                 self.set_values(program.bytes());
             }
         }
+        read
+    }
+
+    /// Keeps the last program showing and reports `error` until a program runs. New values wait
+    /// for that program too, since their layout may differ from the one showing.
+    pub fn fail(&mut self, error: String) {
+        self.error = Some(error);
+        self.layout_matches = false;
     }
 
     /// Shows new uniform values with the current program, without compiling. Ignored while the
@@ -134,22 +148,34 @@ struct Compiled {
 /// Compiles `program` and checks the result as the GPU will, so a program the device would reject
 /// is reported instead of silently not showing. Errors are one line, in the shader's own names,
 /// after the file they come from when the program knows it.
-fn compile(program: &Program) -> Result<Compiled, String> {
-    let compiled = program.compile().map_err(|error| {
-        let error = error.to_string();
-        let line = error
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or_default();
-        line.strip_prefix("error: ").unwrap_or(line).to_owned()
-    })?;
+///
+/// Also returns the modules wesl read, whenever wesl compiled the program.
+fn compile(program: &Program) -> (Option<BTreeSet<Module>>, Result<Compiled, String>) {
+    match program.compile() {
+        Ok(compiled) => (Some(compiled.read), validate(program, compiled.wgsl)),
+        Err(error) => {
+            let error = error.to_string();
+            let line = error
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or_default();
+            (
+                None,
+                Err(line.strip_prefix("error: ").unwrap_or(line).to_owned()),
+            )
+        }
+    }
+}
+
+/// Checks `wgsl`, compiled from `program`, as the GPU will.
+fn validate(program: &Program, wgsl: String) -> Result<Compiled, String> {
     let located = |(text, file): (String, Option<crate::core::folder::Path>)| match file {
         Some(file) => format!("{file}: {text}"),
         None => text,
     };
 
     // iced's `webgl` feature is what makes wgpu re-export naga on wasm.
-    let module = wgpu::naga::front::wgsl::parse_str(&compiled.wgsl)
+    let module = wgpu::naga::front::wgsl::parse_str(&wgsl)
         .map_err(|error| located(program.unmangle(error.message())))?;
     // A device created without optional features validates with the default capabilities.
     wgpu::naga::valid::Validator::new(
@@ -167,7 +193,7 @@ fn compile(program: &Program) -> Result<Compiled, String> {
     })?;
 
     Ok(Compiled {
-        wgsl: compiled.wgsl.into(),
+        wgsl: wgsl.into(),
         uniforms: program.bytes(),
     })
 }
@@ -230,7 +256,7 @@ mod tests {
 
     #[test]
     fn the_default_and_sample_programs_run() {
-        super::compile(&Program::default()).unwrap();
+        super::compile(&Program::default()).1.unwrap();
 
         for json in [
             include_str!("../assets/test_project.bulin"),
@@ -242,7 +268,7 @@ mod tests {
                 project.uniforms,
                 project.clock.map(|clock| clock.seconds()),
             );
-            super::compile(&program).unwrap();
+            super::compile(&program).1.unwrap();
         }
     }
 
@@ -251,7 +277,11 @@ mod tests {
         let mut viewer = State::new(&Program::default());
         let broken = Program::project("fn mainBulin(", Uniforms::default(), None);
 
-        viewer.load(&broken);
+        assert_eq!(
+            viewer.load(&broken),
+            None,
+            "wesl read nothing it could tell"
+        );
         let error = viewer.error().expect("a broken shader is reported");
         assert!(error.contains("unexpected end of file"), "{error}");
         assert!(!error.starts_with("error:"), "{error}");
@@ -345,9 +375,10 @@ mod tests {
         .unwrap();
         let mut viewer = State::new(&Program::default());
 
-        viewer.load(&program);
+        let read = viewer.load(&program).expect("wesl compiled the program");
 
         let error = viewer.error().expect("the GPU would reject this shader");
+        assert_eq!(read.len(), 2, "{read:?}");
         assert!(error.starts_with("lib.wesl: "), "{error}");
         assert!(!error.contains("package_lib_"), "{error}");
     }
@@ -375,6 +406,8 @@ mod tests {
                  return vec4<f32>({reads});\n\
              }}\n"
         );
-        super::compile(&Program::project(source, uniforms, Some(0.0))).unwrap();
+        super::compile(&Program::project(source, uniforms, Some(0.0)))
+            .1
+            .unwrap();
     }
 }
