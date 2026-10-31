@@ -76,17 +76,28 @@ console_log = "1.0"
 wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.58"
 idb = "0.6.5"
+# Imports check a picked file's size before reading it, through the `web_sys::File`.
+rfd = { version = "0.17.2", features = ["file-handle-inner"] }
 js-sys = "0.3.85"
 web-sys = { version = "0.3.85", features = [
     "BeforeUnloadEvent",
+    "Blob",
+    "Document",
     "DomException",
+    "Element",
     "Event",
     "EventTarget",
+    "File",
+    "FileList",
+    "HtmlElement",
+    "HtmlInputElement",
     "Navigator",
     "Storage",
     "StorageManager",
     "Window",
 ] }
+# Plain `deflate` also pulls in zopfli, which import and export don't need.
+zip = { version = "=9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # console_log is a `log` backend; this forwards tracing's events to it.
 tracing = { version = "0.1", features = ["log"] }
 

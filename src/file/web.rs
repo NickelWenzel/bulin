@@ -77,6 +77,20 @@ pub async fn save_file(
         .map_err(Error::Io)
 }
 
+/// Downloads `bytes` under a name the user picks, suggesting `suggested_name`.
+pub async fn save_bytes(suggested_name: &str, bytes: Vec<u8>) -> Result<(), Error> {
+    rfd::AsyncFileDialog::new()
+        .set_title("Save file...")
+        .set_file_name(suggested_name)
+        .save_file()
+        .await
+        .ok_or(Error::DialogClosed)?
+        .write(&bytes)
+        .await
+        .map_err(Arc::new)
+        .map_err(Error::Io)
+}
+
 /// Stores the project `json` in the browser's library: under its entry when `name` is a library
 /// project, otherwise as a new entry named by the user.
 pub async fn save_project(name: Option<Name>, json: String) -> Result<Name, Error> {
