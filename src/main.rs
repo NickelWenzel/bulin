@@ -16,6 +16,8 @@ fn main() -> iced::Result {
         Application::subscription,
         Application::view,
     )
+    // A close request first asks about unsaved work and waits for the folder's writes.
+    .exit_on_close_request(false)
     .theme(Application::theme)
     .fonts([include_bytes!("../fonts/menu.ttf").as_slice()])
     .fonts(matcha_iced::required_fonts().iter().copied())

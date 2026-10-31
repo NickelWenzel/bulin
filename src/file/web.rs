@@ -1,4 +1,9 @@
+use std::cell::{Cell, OnceCell};
 use std::sync::Arc;
+
+use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
+use web_sys::BeforeUnloadEvent;
 
 use super::Error;
 
@@ -48,4 +53,38 @@ pub async fn save_file(
         .map(|()| Name(file_handle.file_name()))
         .map_err(Arc::new)
         .map_err(Error::Io)
+}
+
+thread_local! {
+    /// Whether leaving the page would lose unsaved changes.
+    static DIRTY: Cell<bool> = const { Cell::new(false) };
+    /// The page's `beforeunload` listener, kept for as long as the page.
+    static LISTENER: OnceCell<Closure<dyn FnMut(BeforeUnloadEvent)>> = const { OnceCell::new() };
+}
+
+/// Has the browser warn before the page closes or reloads while `dirty`.
+pub fn warn_on_unload(dirty: bool) {
+    DIRTY.set(dirty);
+    LISTENER.with(|listener| {
+        listener.get_or_init(|| {
+            let listener =
+                Closure::<dyn FnMut(BeforeUnloadEvent)>::new(|event: BeforeUnloadEvent| {
+                    if DIRTY.get() {
+                        event.prevent_default();
+                        // Some browsers warn only when the event has a return value.
+                        event.set_return_value("");
+                    }
+                });
+            let added = web_sys::window().map(|window| {
+                window.add_event_listener_with_callback(
+                    "beforeunload",
+                    listener.as_ref().unchecked_ref(),
+                )
+            });
+            if let Some(Err(error)) = added {
+                tracing::warn!("the page can't warn before it closes: {error:?}");
+            }
+            listener
+        });
+    });
 }

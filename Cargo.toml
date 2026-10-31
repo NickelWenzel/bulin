@@ -77,7 +77,14 @@ wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.58"
 idb = "0.6.5"
 js-sys = "0.3.85"
-web-sys = { version = "0.3.85", features = ["DomException", "Storage", "Window"] }
+web-sys = { version = "0.3.85", features = [
+    "BeforeUnloadEvent",
+    "DomException",
+    "Event",
+    "EventTarget",
+    "Storage",
+    "Window",
+] }
 # console_log is a `log` backend; this forwards tracing's events to it.
 tracing = { version = "0.1", features = ["log"] }
 
