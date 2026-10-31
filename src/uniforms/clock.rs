@@ -20,6 +20,14 @@ pub enum Message {
     Tick(Instant),
 }
 
+/// What a clock message did, so the uniforms can tell edits from ticks.
+pub enum Instruction {
+    /// The user paused, started or reset the clock.
+    Edited,
+    /// Time passed on a running clock.
+    Ticked,
+}
+
 pub struct State {
     clock: Clock,
     /// When the previous tick arrived; ticks advance the clock by the time between them.
@@ -31,18 +39,23 @@ impl State {
         Self::from(Clock::started())
     }
 
-    pub fn update(&mut self, message: Message) {
+    pub fn update(&mut self, message: Message) -> Instruction {
         match message {
             Message::Toggle => {
                 self.clock.toggle();
                 self.last_tick = None;
+                Instruction::Edited
             }
-            Message::Reset => self.clock.reset(),
+            Message::Reset => {
+                self.clock.reset();
+                Instruction::Edited
+            }
             Message::Tick(now) => {
                 if let Some(last_tick) = self.last_tick {
                     self.clock.advance(now - last_tick);
                 }
                 self.last_tick = Some(now);
+                Instruction::Ticked
             }
         }
     }

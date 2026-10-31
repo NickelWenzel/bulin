@@ -12,8 +12,10 @@ mod web;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 
 use iced::futures::StreamExt;
+use iced::time::{self, Instant};
 use iced::{Element, Subscription, Task};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -97,6 +99,8 @@ pub struct State {
     settings: Settings,
     /// Whether `settings.json` couldn't be read, so writing it would lose what it holds.
     settings_locked: bool,
+    /// When the user last edited a value the settings hold, until the settings are written.
+    settings_dirty_since: Option<Instant>,
     /// Whether storage refused a write, after which bulin writes only what the user saves: one
     /// read-only file mustn't keep the others from being saved.
     read_only: bool,
@@ -140,6 +144,8 @@ pub enum Message {
         path: Path,
         result: Result<String, Error>,
     },
+    /// Time to check whether the settings were last edited long enough ago to write them.
+    SettingsDue,
 }
 
 pub enum Instruction {
@@ -262,6 +268,7 @@ impl State {
             queue: Queue::default(),
             settings,
             settings_locked,
+            settings_dirty_since: None,
             read_only: false,
             gone: false,
             manifest: None,
@@ -279,11 +286,13 @@ impl State {
         (state, Task::batch([generate, settings, manifest, listing]))
     }
 
-    /// Applies `message`. Opening a file replaces `document`, and changes on disk reach it by the
-    /// rules for unsaved changes. `notice` receives what the user should know.
+    /// Applies `message`, which arrived at `now`. Opening a file replaces `document`, and changes
+    /// on disk reach it by the rules for unsaved changes. `notice` receives what the user should
+    /// know.
     pub fn update(
         &mut self,
         message: Message,
+        now: Instant,
         document: &mut document::State,
         analyzer: &mut Analyzer,
         settings: &core::Settings,
@@ -469,6 +478,13 @@ impl State {
                 self.explorer.listed(dir, entries);
                 Action::none()
             }
+            Message::SettingsDue => match self.settings_dirty_since {
+                Some(since) if now.saturating_duration_since(since) >= SETTLE => {
+                    self.settings_dirty_since = None;
+                    Action::task(self.persist())
+                }
+                Some(_) | None => Action::none(),
+            },
             Message::Opened { path, result, .. } => {
                 if self.opening.as_ref() != Some(&path) {
                     return Action::none();
@@ -496,10 +512,18 @@ impl State {
             .map(Message::Explorer)
     }
 
-    /// Watches the folder for changes, starting with a scan of its files.
+    /// Watches the folder for changes, starting with a scan of its files, and checks for
+    /// settings to write while edits are unwritten.
     pub fn subscription(&self) -> Subscription<Message> {
-        watch(self.session, &self.handle)
-            .map(|(session, watched)| Message::Watched(session, watched))
+        let watch = watch(self.session, &self.handle)
+            .map(|(session, watched)| Message::Watched(session, watched));
+        // The tick's own instant isn't `now`'s type on the web, so `update` reads `now` instead.
+        let due = if self.settings_dirty_since.is_some() {
+            time::every(Duration::from_millis(250)).map(|_| Message::SettingsDue)
+        } else {
+            Subscription::none()
+        };
+        Subscription::batch([watch, due])
     }
 
     /// Queues the user's save of `path` with `text`, which was `base` when last loaded or saved.
@@ -542,11 +566,41 @@ impl State {
         self.read = read;
     }
 
-    /// Keeps the settings' uniforms and clock and writes the uniforms package for their layout.
+    /// Keeps the settings' uniforms and clock, and writes them and the uniforms package for their
+    /// layout right away.
     pub fn layout_changed(&mut self, uniforms: &Uniforms, clock: Option<Clock>) -> Task<Message> {
         self.settings.uniforms = uniforms.clone();
         self.settings.clock = clock;
-        self.generate()
+        // Adding or removing a uniform is deliberate, so it may replace settings that couldn't be
+        // read.
+        self.settings_locked = false;
+        self.settings_dirty_since = None;
+        Task::batch([self.generate(), self.persist()])
+    }
+
+    /// Keeps the uniforms and clock the user edited at `now`, and writes the settings once a
+    /// second passes without another edit, so dragging a slider doesn't write on every move.
+    pub fn edited(&mut self, uniforms: &Uniforms, clock: Option<Clock>, now: Instant) {
+        self.settings.uniforms = uniforms.clone();
+        self.settings.clock = clock;
+        // An edit is deliberate, so it may replace settings that couldn't be read.
+        self.settings_locked = false;
+        self.settings_dirty_since = Some(now);
+    }
+
+    /// Keeps the time on the running clock for the next settings write, without writing.
+    pub fn ticked(&mut self, clock: Option<Clock>) {
+        self.settings.clock = clock;
+    }
+
+    /// Keeps the uniforms and clock as the folder is left and writes the settings, so the folder
+    /// reopens with them. Settings that couldn't be read stay untouched, since leaving isn't a
+    /// deliberate change.
+    pub fn leave(&mut self, uniforms: &Uniforms, clock: Option<Clock>) -> Task<Message> {
+        self.settings.uniforms = uniforms.clone();
+        self.settings.clock = clock;
+        self.settings_dirty_since = None;
+        self.persist()
     }
 
     /// Whether the first scan arrived, so the folder's files are known.
@@ -814,6 +868,9 @@ fn show(
     document.attach(analyzer);
 }
 
+/// How long the settings stay unwritten after the last edit.
+const SETTLE: Duration = Duration::from_secs(1);
+
 /// The root `wesl.toml`.
 fn manifest() -> Path {
     Path::new(MANIFEST).expect("invariant: the manifest path is valid")
@@ -828,6 +885,7 @@ mod tests {
 
     use super::*;
     use crate::core::folder::MAX_TEXT;
+    use crate::core::uniform::Type;
 
     fn path(text: &str) -> Path {
         Path::new(text).unwrap()
@@ -886,9 +944,14 @@ mod tests {
         }
 
         fn update(&mut self, message: Message) -> Option<Instruction> {
+            self.update_at(message, Instant::now())
+        }
+
+        fn update_at(&mut self, message: Message, now: Instant) -> Option<Instruction> {
             self.state
                 .update(
                     message,
+                    now,
                     &mut self.document,
                     &mut self.analyzer,
                     &core::Settings::default(),
@@ -1191,6 +1254,7 @@ mod tests {
             state
                 .update(
                     message,
+                    Instant::now(),
                     &mut document,
                     &mut analyzer,
                     &core::Settings::default(),
@@ -1359,6 +1423,107 @@ mod tests {
         );
         assert_eq!(open.document.content(), "new", "bulin's writes reach it");
         assert!(!open.document.is_dirty());
+    }
+
+    fn radius(value: f32) -> Uniforms {
+        let mut uniforms = Uniforms::default();
+        uniforms.add("radius", Type::Float(value)).unwrap();
+        uniforms
+    }
+
+    /// The settings the write in flight carries, when it writes them.
+    fn written_settings(state: &State) -> Option<Settings> {
+        let write = state.in_flight()?;
+        (write.path == path(SETTINGS)).then(|| Settings::from_json(&write.text).unwrap())
+    }
+
+    #[test]
+    fn settings_are_written_one_second_after_the_last_edit() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+        let t0 = Instant::now();
+        let at = |seconds: f32| t0 + Duration::from_secs_f32(seconds);
+
+        open.state.edited(&radius(0.5), None, t0);
+        let _ = open.update_at(Message::SettingsDue, at(0.5));
+        assert!(open.state.is_idle());
+
+        open.state.edited(&radius(0.7), None, at(0.8));
+        let _ = open.update_at(Message::SettingsDue, at(1.5));
+        assert!(open.state.is_idle(), "the second edit restarts the wait");
+
+        let _ = open.update_at(Message::SettingsDue, at(1.9));
+        assert_eq!(written_settings(&open.state).unwrap().uniforms, radius(0.7));
+        assert_eq!(open.state.queue.writes.len(), 1);
+        assert_eq!(open.state.settings_dirty_since, None);
+    }
+
+    #[test]
+    fn ticks_dont_persist() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+        let mut clock = Clock::started();
+
+        for _ in 0..100 {
+            clock.advance(Duration::from_millis(10));
+            open.state.ticked(Some(clock));
+        }
+
+        assert_eq!(open.state.settings_dirty_since, None);
+        assert!(open.state.is_idle());
+        assert_eq!(open.state.settings.clock, Some(clock));
+    }
+
+    #[test]
+    fn a_layout_change_writes_settings_right_away() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+        open.state.edited(&radius(0.5), None, Instant::now());
+
+        let _ = open
+            .state
+            .layout_changed(&radius(0.5), Some(Clock::started()));
+
+        let queued = open
+            .state
+            .queue
+            .writes
+            .iter()
+            .map(|write| write.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(queued.contains(&SETTINGS), "{queued:?}");
+        let settings = open.state.queue.newest(&path(SETTINGS)).unwrap();
+        let settings = Settings::from_json(settings).unwrap();
+        assert_eq!(settings.uniforms, radius(0.5));
+        assert_eq!(settings.clock, Some(Clock::started()));
+        assert_eq!(open.state.settings_dirty_since, None);
+    }
+
+    #[test]
+    fn leaving_writes_the_elapsed_clock() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+        let mut clock = Clock::started();
+        for _ in 0..50 {
+            clock.advance(Duration::from_millis(100));
+            open.state.ticked(Some(clock));
+        }
+        assert!(open.state.is_idle());
+
+        let _ = open.state.leave(&Uniforms::default(), Some(clock));
+
+        let settings = written_settings(&open.state).unwrap();
+        assert_eq!(settings.clock.unwrap().seconds(), clock.seconds());
+        assert!(clock.seconds() > 4.9);
+    }
+
+    #[test]
+    fn locked_settings_are_not_overwritten_on_leave() {
+        let (mut state, _) = State::new(handle(), 1, Settings::default(), true);
+        while state.queue.complete(true).is_some() {}
+
+        let _ = state.leave(&radius(0.5), None);
+        assert!(state.is_idle(), "leaving isn't a deliberate change");
+
+        state.edited(&radius(0.7), None, Instant::now());
+        let _ = state.leave(&radius(0.7), None);
+        assert_eq!(written_settings(&state).unwrap().uniforms, radius(0.7));
     }
 
     #[test]

@@ -211,11 +211,24 @@ impl Application {
                 let action = self.uniforms.update(message);
                 let task = action.task.map(Message::Uniforms);
                 match action.instruction {
-                    Some(uniforms::Instruction::Values) => {
+                    Some(uniforms::Instruction::Edited) => {
                         self.viewer.set_values(core::program::bytes(
                             self.uniforms.time(),
                             self.uniforms.uniforms(),
                         ));
+                        if let Mode::Folder(state) = &mut self.mode {
+                            state.edited(self.uniforms.uniforms(), self.uniforms.clock(), now);
+                        }
+                        task
+                    }
+                    Some(uniforms::Instruction::Ticked) => {
+                        self.viewer.set_values(core::program::bytes(
+                            self.uniforms.time(),
+                            self.uniforms.uniforms(),
+                        ));
+                        if let Mode::Folder(state) = &mut self.mode {
+                            state.ticked(self.uniforms.clock());
+                        }
                         task
                     }
                     Some(uniforms::Instruction::Layout) => {
@@ -243,6 +256,7 @@ impl Application {
                 };
                 let action = state.update(
                     message,
+                    now,
                     &mut self.document,
                     &mut self.analyzer,
                     &self.settings,
@@ -289,8 +303,15 @@ impl Application {
                     self.notice = Some(DRAINING.to_owned());
                     return task;
                 }
+                // The settings write joins the queue before the drain waits for it.
+                let leave = match &mut self.mode {
+                    Mode::Folder(state) => state
+                        .leave(self.uniforms.uniforms(), self.uniforms.clock())
+                        .map(Message::Folder),
+                    Mode::Project { .. } => Task::none(),
+                };
                 self.draining = Some(then);
-                Task::batch([task, self.drain()])
+                Task::batch([task, leave, self.drain()])
             }
             Message::ShowMenu => {
                 self.modal = Some(Modal::Menu);
@@ -394,8 +415,14 @@ impl Application {
                     return Task::none();
                 }
                 self.notice = None;
+                let leave = match &mut self.mode {
+                    Mode::Folder(state) => state
+                        .leave(self.uniforms.uniforms(), self.uniforms.clock())
+                        .map(Message::Folder),
+                    Mode::Project { .. } => Task::none(),
+                };
                 self.draining = Some(Pending::CloseFolder);
-                self.drain()
+                Task::batch([leave, self.drain()])
             }
             Message::FolderSettings {
                 session,
@@ -828,9 +855,12 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{Application, DRAINING, Message, Modal, Mode, document, explorer, folder};
+    use super::{
+        Application, DRAINING, Message, Modal, Mode, document, explorer, folder, uniforms,
+    };
     use crate::core;
     use crate::core::folder::{Change, Path, SETTINGS, Settings};
+    use crate::core::uniform::Type;
     use crate::core::{Project, Uniforms};
     use crate::file;
     use crate::menu;
@@ -1233,6 +1263,7 @@ mod tests {
         driver.scan(&a, 1);
 
         driver.open(&b);
+        assert_eq!(driver.pump(), [SETTINGS], "leaving a writes its settings");
         driver.settings(b.path());
         assert_eq!(driver.app.sessions, 2);
         driver.update(Message::Folder(folder::Message::Wrote {
@@ -1431,6 +1462,65 @@ mod tests {
 
         driver.explore(explorer::Message::SetMain(path("main.wesl")));
         assert_eq!(driver.app.viewer.error(), None);
+    }
+
+    #[test]
+    fn folder_exits_queue_settings_before_the_drain() {
+        let next = folder();
+        let json = include_str!("../assets/test_project.bulin");
+        let exits = [
+            Message::CloseFolder,
+            Message::Opener(folder::opener::Message::FolderPicked(Some(
+                next.path().to_owned(),
+            ))),
+            Message::Opener(folder::opener::Message::ProjectPicked(Ok((
+                file::Name::from("/projects/test.bulin"),
+                Arc::new(json.to_owned()),
+            )))),
+        ];
+        let radius = |value| {
+            let mut uniforms = Uniforms::default();
+            uniforms.add("radius", Type::Float(value)).unwrap();
+            uniforms
+        };
+
+        for exit in exits {
+            let dir = folder();
+            let settings = Settings::new(Some(path("main.wesl")), radius(0.5), None);
+            fs::write(dir.path().join(SETTINGS), settings.to_json()).unwrap();
+            let mut driver = Driver::new();
+            driver.enter(&dir);
+            driver.update(Message::Uniforms(uniforms::Message::AddTime));
+            driver.pump();
+            driver.update(Message::Uniforms(uniforms::Message::set(
+                "radius",
+                Type::Float(0.7),
+            )));
+            let clock = driver.app.uniforms.clock();
+
+            driver.update(exit.clone());
+            assert!(driver.app.draining.is_some(), "{exit:?}");
+            let Mode::Folder(state) = &driver.app.mode else {
+                panic!("the folder stays open until its writes are done: {exit:?}");
+            };
+            assert_eq!(
+                state.in_flight().map(|write| write.path.as_str()),
+                Some(SETTINGS),
+                "{exit:?}"
+            );
+
+            assert_eq!(driver.pump(), [SETTINGS], "{exit:?}");
+            assert!(driver.app.draining.is_none(), "{exit:?}");
+            assert!(
+                !driver.is_folder() || driver.app.sessions == 2,
+                "the exit goes on: {exit:?}"
+            );
+            let saved = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
+            let saved = Settings::from_json(&saved).unwrap();
+            assert_eq!(saved.uniforms, radius(0.7), "{exit:?}");
+            assert_eq!(saved.clock, clock, "{exit:?}");
+            assert!(clock.is_some());
+        }
     }
 
     #[test]
