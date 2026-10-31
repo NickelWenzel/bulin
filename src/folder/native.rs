@@ -228,6 +228,62 @@ pub async fn write(
     }])
 }
 
+/// Creates the directory `path` in the folder at `handle`, refusing one that exists.
+pub async fn create_dir(handle: Handle, path: Path) -> Result<(), Error> {
+    tokio::fs::create_dir(handle.root.join(path.as_str()))
+        .await
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::AlreadyExists => Error::Io(format!("{path} already exists")),
+            _ => self::error(error),
+        })
+}
+
+/// Moves the file or directory `from` in the folder at `handle` to `to`, refusing a `to` that
+/// exists. Reports `from` removed and each file now under `to` changed, with its text as the
+/// watcher reads it.
+pub async fn rename(handle: Handle, from: Path, to: Path) -> Result<Vec<Change>, Error> {
+    let root = handle.root;
+    tokio::task::spawn_blocking(move || {
+        let source = root.join(from.as_str());
+        let target = root.join(to.as_str());
+        if fs::symlink_metadata(&target).is_ok() {
+            return Err(Error::Io(format!("{to} already exists")));
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(error)?;
+        }
+        fs::rename(&source, &target).map_err(error)?;
+
+        let mut changes = vec![Change::Removed(from)];
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.is_dir() => changes.extend(
+                walk(&target)
+                    .1
+                    .into_iter()
+                    .filter_map(|file| Some(changed(relative(&root, &file)?, &file))),
+            ),
+            Ok(_) | Err(_) => changes.push(changed(to, &target)),
+        }
+        Ok(changes)
+    })
+    .await
+    .map_err(|error| Error::Io(error.to_string()))?
+}
+
+/// Deletes the file or directory `path` in the folder at `handle`, a directory with everything in
+/// it. A symlink is removed, not what it points to.
+pub async fn remove(handle: Handle, path: Path) -> Result<Vec<Change>, Error> {
+    let target = handle.root.join(path.as_str());
+    let metadata = tokio::fs::symlink_metadata(&target).await.map_err(error)?;
+    let removed = if metadata.is_dir() {
+        tokio::fs::remove_dir_all(&target).await
+    } else {
+        tokio::fs::remove_file(&target).await
+    };
+    removed.map_err(error)?;
+    Ok(vec![Change::Removed(path)])
+}
+
 /// Watches the folder at `handle`: first a scan of its files, then what changes on disk.
 ///
 /// Leftover temp files are removed first, and the scan follows registering the watches, so no
@@ -715,6 +771,127 @@ mod tests {
             runtime.block_on(scan_dir(handle.clone(), Some(path("missing")))),
             Err(Error::Missing)
         );
+    }
+
+    #[test]
+    fn create_dir_then_scan_dir_lists_it() {
+        let runtime = runtime();
+        let (_dir, handle) = folder(&[("main.wesl", "main")]);
+
+        assert_eq!(
+            runtime.block_on(create_dir(handle.clone(), path("shaders"))),
+            Ok(())
+        );
+        assert!(
+            runtime
+                .block_on(scan_dir(handle.clone(), None))
+                .unwrap()
+                .contains(&Entry {
+                    kind: Kind::Dir,
+                    path: path("shaders")
+                })
+        );
+        assert!(matches!(
+            runtime.block_on(create_dir(handle.clone(), path("shaders"))),
+            Err(Error::Io(message)) if message.contains("already exists")
+        ));
+    }
+
+    #[test]
+    fn rename_a_file_and_a_directory() {
+        let runtime = runtime();
+        let (dir, handle) = folder(&[
+            ("a.wesl", "a"),
+            ("x.wesl", "x"),
+            ("dir/b.wesl", "b"),
+            ("dir/sub/c.md", "c"),
+        ]);
+        let rename = |from: &str, to: &str| {
+            runtime.block_on(super::rename(handle.clone(), path(from), path(to)))
+        };
+        let changed = |file: &str, text: Option<&str>| Change::Changed {
+            path: path(file),
+            text: text.map(str::to_owned),
+        };
+
+        assert_eq!(
+            rename("a.wesl", "z.wesl"),
+            Ok(vec![
+                Change::Removed(path("a.wesl")),
+                changed("z.wesl", Some("a"))
+            ])
+        );
+
+        let mut changes = rename("dir", "moved").unwrap();
+        changes[1..].sort_by_key(|change| match change {
+            Change::Changed { path, .. } | Change::Removed(path) => path.clone(),
+        });
+        assert_eq!(
+            changes,
+            [
+                Change::Removed(path("dir")),
+                changed("moved/b.wesl", Some("b")),
+                changed("moved/sub/c.md", None),
+            ]
+        );
+        assert!(!dir.path().join("dir").exists());
+
+        assert!(matches!(
+            rename("x.wesl", "z.wesl"),
+            Err(Error::Io(message)) if message.contains("z.wesl already exists")
+        ));
+        assert_eq!(fs::read_to_string(dir.path().join("x.wesl")).unwrap(), "x");
+        assert_eq!(fs::read_to_string(dir.path().join("z.wesl")).unwrap(), "a");
+    }
+
+    #[test]
+    fn remove_a_file_and_a_directory() {
+        let runtime = runtime();
+        let (dir, handle) = folder(&[
+            ("a.wesl", "a"),
+            ("dir/b.wesl", "b"),
+            ("dir/sub/c.wesl", "c"),
+        ]);
+        let remove = |file: &str| runtime.block_on(super::remove(handle.clone(), path(file)));
+
+        assert_eq!(remove("a.wesl"), Ok(vec![Change::Removed(path("a.wesl"))]));
+        assert_eq!(remove("dir"), Ok(vec![Change::Removed(path("dir"))]));
+        assert!(!dir.path().join("a.wesl").exists());
+        assert!(!dir.path().join("dir").exists());
+        assert_eq!(remove("dir"), Err(Error::Missing));
+    }
+
+    #[test]
+    fn the_watcher_reports_renames_as_content() {
+        let runtime = runtime();
+        let (_dir, handle) = folder(&[
+            ("main.wesl", "main"),
+            ("dir/a.wesl", "a"),
+            ("dir/b.wesl", "b"),
+        ]);
+        let _guard = runtime.enter();
+        let mut watched = Box::pin(stream(handle.clone()));
+        let mut files = Files::new();
+        follow(&runtime, &mut watched, &mut files, |files| files.len() == 3);
+
+        let changes = runtime
+            .block_on(super::rename(handle, path("dir"), path("moved")))
+            .unwrap();
+        let mut expected = files.clone();
+        for change in changes {
+            match change {
+                Change::Changed { path, text } => {
+                    expected.insert(path, text);
+                }
+                Change::Removed(removed) => expected
+                    .retain(|path, _| *path != removed && path.strip_prefix(&removed).is_none()),
+            }
+        }
+        assert!(has(&expected, "moved/a.wesl", Some("a")), "{expected:?}");
+
+        follow(&runtime, &mut watched, &mut files, |files| {
+            *files == expected
+        });
     }
 
     #[test]

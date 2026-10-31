@@ -38,6 +38,12 @@ pub fn file_key(id: Id, path: &Path) -> (Id, String) {
     (id, path.as_str().to_owned())
 }
 
+/// The path part of the key that marks `dir` as a directory, so the directory persists while it
+/// holds no file. [`collapse`] lists it as a directory.
+pub fn marker_key(dir: &Path) -> String {
+    format!("{dir}/")
+}
+
 /// The paths of the keys under `dir`, `None` being the entry's root: from the first path,
 /// inclusive, up to the [`Upper`] bound.
 pub fn range(dir: Option<&Path>) -> (String, Upper) {
@@ -101,6 +107,24 @@ mod tests {
         assert!(!inside(&dir, "dir0"));
         assert!(!inside(&dir, "dir.x"));
         assert!(!inside(&dir, "dir"));
+    }
+
+    #[test]
+    fn markers_list_as_directories() {
+        let empty = Path::new("empty").unwrap();
+        assert_eq!(marker_key(&empty), "empty/");
+        assert_eq!(
+            collapse(None, [marker_key(&empty).as_str()]),
+            [Entry {
+                kind: Kind::Dir,
+                path: empty
+            }]
+        );
+
+        let dir = Path::new("dir").unwrap();
+        let inner = marker_key(&Path::new("dir/sub").unwrap());
+        assert!(inside(&range(Some(&dir)), &inner));
+        assert!(inside(&range(Some(&dir)), &marker_key(&dir)));
     }
 
     #[test]

@@ -9,8 +9,8 @@ use iced::futures::{Stream, StreamExt, stream};
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::{Center, Element, Fill, Task};
 use idb::{
-    Database, DatabaseEvent, Factory, KeyPath, KeyRange, ObjectStoreParams, Query, TransactionMode,
-    TransactionResult,
+    Database, DatabaseEvent, Factory, KeyPath, KeyRange, ObjectStore, ObjectStoreParams, Query,
+    TransactionMode, TransactionResult,
 };
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
@@ -311,6 +311,138 @@ pub async fn write(
     }])
 }
 
+/// Creates the directory `path` in the folder at `handle`, refusing one that exists. A marker key
+/// keeps it while it holds no file.
+pub async fn create_dir(handle: Handle, path: Path) -> Result<(), Error> {
+    let file = file(handle.id, &path);
+    let dir = range(handle.id, Some(&path))?;
+    let marker = key(handle.id, &library::marker_key(&path));
+    let database = open().await?;
+
+    // As in `write`, the transaction awaits nothing but its own requests.
+    let transaction = database
+        .0
+        .transaction(&[FILES], TransactionMode::ReadWrite)
+        .map_err(error)?;
+    let files = transaction.object_store(FILES).map_err(error)?;
+    if holds(&files, file, dir).await? {
+        let _ = transaction.abort();
+        return Err(Error::Io(format!("{path} already exists")));
+    }
+    files
+        .put(&JsValue::from_str(""), Some(&marker))
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    committed(transaction.await)
+}
+
+/// Moves the file or directory `from` in the folder at `handle` to `to`, refusing a `to` that
+/// exists. Reports `from` removed and each file now under `to` changed, with its text as the scan
+/// reads it.
+///
+/// Every key under `from` moves in one transaction, so the folder never holds half a rename.
+pub async fn rename(handle: Handle, from: Path, to: Path) -> Result<Vec<Change>, Error> {
+    if to == from || to.strip_prefix(&from).is_some() {
+        return Err(Error::Io(format!("{from} can't move into itself")));
+    }
+    let source = file(handle.id, &from);
+    let sources = range(handle.id, Some(&from))?;
+    let target = file(handle.id, &to);
+    let targets = range(handle.id, Some(&to))?;
+    let database = open().await?;
+
+    // As in `write`, the transaction awaits nothing but its own requests: the new keys are
+    // computed from what it reads without awaiting anything else.
+    let transaction = database
+        .0
+        .transaction(&[FILES], TransactionMode::ReadWrite)
+        .map_err(error)?;
+    let files = transaction.object_store(FILES).map_err(error)?;
+    if holds(&files, target, targets).await? {
+        let _ = transaction.abort();
+        return Err(Error::Io(format!("{to} already exists")));
+    }
+    let text = files
+        .get(source.clone())
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    let keys = files
+        .get_all_keys(Some(Query::KeyRange(sources.clone())), None)
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    let values = files
+        .get_all(Some(Query::KeyRange(sources.clone())), None)
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+
+    // Each moved key's new path and value; both lists follow the keys' order.
+    let moved = text
+        .map(|text| (to.as_str().to_owned(), text))
+        .into_iter()
+        .chain(keys.into_iter().zip(values).filter_map(|(key, value)| {
+            let rest = path_of(key)?.strip_prefix(from.as_str())?.to_owned();
+            Some((format!("{to}{rest}"), value))
+        }))
+        .collect::<Vec<_>>();
+    if moved.is_empty() {
+        let _ = transaction.abort();
+        return Err(Error::Missing);
+    }
+    for (path, value) in &moved {
+        files
+            .put(value, Some(&key(handle.id, path)))
+            .map_err(error)?
+            .await
+            .map_err(error)?;
+    }
+    for old in [Query::Key(source), Query::KeyRange(sources)] {
+        files.delete(old).map_err(error)?.await.map_err(error)?;
+    }
+    committed(transaction.await)?;
+
+    // Markers end in `/`, which no file path does.
+    let changed = moved.into_iter().filter_map(|(path, value)| {
+        let path = Path::new(&path)
+            .ok()
+            .filter(|path| !folder::is_skipped(path))?;
+        let text = reads_text(&path)
+            .then(|| value.as_string().filter(|text| text.len() <= MAX_TEXT))
+            .flatten();
+        Some(Change::Changed { path, text })
+    });
+    Ok(std::iter::once(Change::Removed(from))
+        .chain(changed)
+        .collect())
+}
+
+/// Deletes the file or directory `path` in the folder at `handle`, a directory with every key
+/// under it.
+pub async fn remove(handle: Handle, path: Path) -> Result<Vec<Change>, Error> {
+    let file = file(handle.id, &path);
+    let dir = range(handle.id, Some(&path))?;
+    let database = open().await?;
+
+    // As in `write`, the transaction awaits nothing but its own requests.
+    let transaction = database
+        .0
+        .transaction(&[FILES], TransactionMode::ReadWrite)
+        .map_err(error)?;
+    let files = transaction.object_store(FILES).map_err(error)?;
+    if !holds(&files, file.clone(), dir.clone()).await? {
+        let _ = transaction.abort();
+        return Err(Error::Missing);
+    }
+    for gone in [Query::Key(file), Query::KeyRange(dir)] {
+        files.delete(gone).map_err(error)?.await.map_err(error)?;
+    }
+    committed(transaction.await)?;
+    Ok(vec![Change::Removed(path)])
+}
+
 /// The folder at `handle`: a scan of its files. Nobody else writes to the library while bulin
 /// runs, and bulin learns of its own writes when they finish, so nothing follows.
 pub fn stream(handle: Handle) -> impl Stream<Item = Watched> {
@@ -487,6 +619,22 @@ fn committed(result: Result<TransactionResult, idb::Error>) -> Result<(), Error>
     }
 }
 
+/// Whether `files` holds the key `file` or any key in `dir`, the range under it: whether a file or
+/// a directory has that path.
+async fn holds(files: &ObjectStore, file: JsValue, dir: KeyRange) -> Result<bool, Error> {
+    for query in [Query::Key(file), Query::KeyRange(dir)] {
+        let count = files
+            .count(Some(query))
+            .map_err(error)?
+            .await
+            .map_err(error)?;
+        if count > 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// The keys of the files under the directory `dir` of the entry `id`, `None` being its root.
 fn range(id: Id, dir: Option<&Path>) -> Result<KeyRange, Error> {
     let (lower, upper) = library::range(dir);
@@ -529,7 +677,9 @@ fn error(error: idb::Error) -> Error {
         | idb::Error::GetAllFailed(value)
         | idb::Error::GetAllKeysFailed(value)
         | idb::Error::AddFailed(value)
-        | idb::Error::UpdateFailed(value) => value.dyn_ref::<DomException>().cloned(),
+        | idb::Error::UpdateFailed(value)
+        | idb::Error::DeleteFailed(value)
+        | idb::Error::CountFailed(value) => value.dyn_ref::<DomException>().cloned(),
         _ => None,
     };
     match exception.as_ref().map(DomException::name).as_deref() {

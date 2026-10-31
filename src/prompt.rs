@@ -14,6 +14,8 @@ pub enum Prompt {
     ChangedOnDisk { path: Path, deleted: bool },
     /// Saving the folder file `path` found it changed or deleted on disk since bulin read it.
     Conflict { path: Path, deleted: bool },
+    /// The user asked to delete the folder file or directory `path`.
+    Delete { path: Path },
 }
 
 /// How the user answered a [`Prompt`].
@@ -25,6 +27,7 @@ pub enum Answer {
     Reload,
     KeepMine,
     Overwrite,
+    Delete,
 }
 
 impl Prompt {
@@ -71,6 +74,10 @@ impl Prompt {
             } => (
                 format!("{path} was deleted on disk, so it wasn't saved."),
                 &[("Overwrite", Answer::Overwrite), ("Cancel", Answer::Cancel)],
+            ),
+            Prompt::Delete { path } => (
+                format!("Delete {path}?"),
+                &[("Delete", Answer::Delete), ("Cancel", Answer::Cancel)],
             ),
         };
 
