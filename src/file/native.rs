@@ -64,3 +64,6 @@ pub async fn save_file(
         .map_err(Arc::new)
         .map_err(Error::Io)
 }
+
+/// Nothing: closing the window asks first through its close request.
+pub fn warn_on_unload(_dirty: bool) {}

@@ -9,8 +9,8 @@ use crate::action::Action;
 use crate::analyzer::Analyzer;
 use crate::core;
 use crate::core::folder::{Path, same_text};
+use crate::file;
 use crate::settings::keymap;
-use crate::{file, folder};
 
 use iced::widget::container;
 use iced::{Element, Task};
@@ -88,7 +88,8 @@ pub enum Message {
     FileOpened(Result<(file::Name, Arc<String>), file::Error>),
     SaveFile,
     SaveFileAs,
-    FileSaved(Result<file::Name, file::Error>),
+    /// Where the file was saved, with the text saved there.
+    FileSaved(Result<(file::Name, String), file::Error>),
     Undo,
     Redo,
 }
@@ -103,6 +104,9 @@ pub enum Instruction {
         text: String,
         base: Option<String>,
     },
+    /// Saving to a file picked in a dialog ended: it succeeded, or why not, a closed dialog
+    /// included.
+    FileSaved(Result<(), String>),
 }
 
 impl State {
@@ -290,7 +294,7 @@ impl State {
                 self.is_loading = true;
 
                 Action::task(Task::perform(
-                    file::save_file(file, "shader.wesl", self.content()),
+                    save(file, self.content()),
                     Message::FileSaved,
                 ))
             }
@@ -302,7 +306,7 @@ impl State {
                     self.failure = None;
 
                     Action::task(Task::perform(
-                        file::save_file(None, "shader.wesl", self.content()),
+                        save(None, self.content()),
                         Message::FileSaved,
                     ))
                 }
@@ -310,8 +314,8 @@ impl State {
             Message::FileSaved(result) => {
                 self.is_loading = false;
 
-                match result {
-                    Ok(path) => {
+                let saved = match result {
+                    Ok((path, text)) => {
                         let location = Location::File(path);
                         analyzer.saved(&mut self.editor, &self.location, &location);
                         self.label = match &location {
@@ -319,34 +323,32 @@ impl State {
                             Location::Untitled | Location::Folder(_) => None,
                         };
                         self.location = location;
-                        self.base = Some(self.content());
+                        // What was typed while the dialog was open isn't saved.
+                        self.base = Some(text);
                         self.check_dirty();
+                        Ok(())
                     }
-                    Err(file::Error::DialogClosed) => {}
+                    Err(file::Error::DialogClosed) => Err(file::Error::DialogClosed.to_string()),
                     Err(error) => {
                         self.failure = Some(format!("Could not save the shader: {error}"));
+                        Err(error.to_string())
                     }
-                }
+                };
 
-                Action::none()
+                Action::instruction(Instruction::FileSaved(saved))
             }
         }
     }
 
-    /// Takes in how saving the folder file `path` went, when it is still this document: the saved
-    /// text on success, or on a conflict what storage holds instead, so the next save overwrites
-    /// it.
-    pub fn saved(&mut self, path: &Path, result: &Result<String, folder::Error>) {
+    /// Takes in that the folder file `path` was saved with `text`, when it is still this
+    /// document.
+    pub fn saved(&mut self, path: &Path, text: &str) {
         // A read-only document saves nothing, so a write to its file is bulin's and reaches it as
         // a change on disk.
         if !self.is_at(path) || self.read_only {
             return;
         }
-        match result {
-            Ok(text) => self.base = Some(text.clone()),
-            Err(folder::Error::Conflict { disk }) => self.base = disk.clone(),
-            Err(_) => return,
-        }
+        self.base = Some(text.to_owned());
         self.check_dirty();
     }
 
@@ -436,14 +438,9 @@ impl State {
         Theme::Dark
     }
 
-    /// The shader's file for a title, marked when it has unsaved changes.
-    pub fn title(&self) -> String {
-        let label = self.label.as_deref().unwrap_or("New file");
-        if self.dirty {
-            format!("{label} •")
-        } else {
-            label.to_owned()
-        }
+    /// The shader's file for a title.
+    pub fn label(&self) -> &str {
+        self.label.as_deref().unwrap_or("New file")
     }
 
     /// Why the last file action failed.
@@ -481,6 +478,12 @@ impl State {
             Location::Untitled | Location::File(_) => action.with_instruction(Instruction::Changed),
         }
     }
+}
+
+/// Writes `text` to `file`, or to a file the user picks, returning where with the text.
+async fn save(file: Option<file::Name>, text: String) -> Result<(file::Name, String), file::Error> {
+    let name = file::save_file(file, "shader.wesl", text.clone()).await?;
+    Ok((name, text))
 }
 
 /// Whether `event` changes the text, which a read-only document refuses.
@@ -663,7 +666,7 @@ mod tests {
         let action = document.update(typed, Instant::now(), &mut analyzer, &Settings::default());
         assert!(action.instruction.is_none());
         assert!(document.is_dirty());
-        assert_eq!(document.title(), "main.wesl •");
+        assert_eq!(document.label(), "main.wesl");
 
         let _ = document.update(
             Message::Undo,

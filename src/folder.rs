@@ -36,7 +36,8 @@ use crate::core::folder::{
 };
 use crate::core::program::{self, Module, Program};
 use crate::core::{self, Clock, Uniforms};
-use crate::{document, explorer};
+use crate::prompt::Prompt;
+use crate::{Pending, document, explorer};
 
 /// Why storage couldn't read or write a file. It holds only text, so the messages carrying it can
 /// cross threads.
@@ -114,8 +115,15 @@ pub struct State {
     /// The modules the last compile read, `None` when it failed before telling.
     read: Option<BTreeSet<Module>>,
     explorer: explorer::State,
-    /// The file being read to become the document, until a later open supersedes it.
-    opening: Option<Path>,
+    /// The file being read to become the document, until a later open supersedes it, and whether
+    /// the document's unsaved changes were given up for it.
+    opening: Option<(Path, bool)>,
+    /// Whether the user is answering a question, during which changes on disk leave the document
+    /// alone until [`State::release`] checks it again.
+    held: bool,
+    /// What storage last reported for a file since it became the document, `None` text meaning
+    /// the file is gone. Without a report, storage holds the document's `base`.
+    disk: Option<(Path, Option<String>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +162,8 @@ pub enum Instruction {
     ProgramChanged,
     /// Every queued write finished.
     Drained,
+    /// Ask the user before going on. The folder leaves the document alone until it is released.
+    Ask(Prompt),
 }
 
 /// Picking a folder or a project to open: the system's dialogs natively, the library on the web.
@@ -277,6 +287,8 @@ impl State {
             read: None,
             explorer: explorer::State::new(),
             opening: None,
+            held: false,
+            disk: None,
         };
         let generate = state.generate();
         let settings = state.persist();
@@ -288,8 +300,8 @@ impl State {
     }
 
     /// Applies `message`, which arrived at `now`. Opening a file replaces `document`, and changes
-    /// on disk reach it by the rules for unsaved changes. `notice` receives what the user should
-    /// know.
+    /// on disk reach it by the rules for unsaved changes, asking the user when they would lose
+    /// some. `notice` receives what the user should know.
     pub fn update(
         &mut self,
         message: Message,
@@ -314,19 +326,21 @@ impl State {
                 changes
                     .iter()
                     .for_each(|change| self.explorer.changed(change));
-                let (relevant, task) = self.apply(&changes, document, analyzer, notice);
+                let (relevant, task, prompt) = self.apply(&changes, document, analyzer, notice);
                 let first = !self.scanned;
                 self.scanned = true;
 
                 if first
-                    && let Some(main) = &self.settings.main
-                    && let Some(text) = self.mirror.files().get(main)
+                    && let Some(main) = self.settings.main.clone()
+                    && let Some(text) = self.mirror.files().get(&main).cloned()
                 {
-                    show(document, main.clone(), text, analyzer, settings);
+                    self.show(document, main, &text, analyzer, settings);
                 }
 
                 Action {
-                    instruction: (first || relevant).then_some(Instruction::ProgramChanged),
+                    instruction: prompt
+                        .map(Instruction::Ask)
+                        .or_else(|| (first || relevant).then_some(Instruction::ProgramChanged)),
                     task,
                 }
             }
@@ -339,9 +353,11 @@ impl State {
                 if !self.scanned {
                     return Action::none();
                 }
-                let (relevant, task) = self.apply(&changes, document, analyzer, notice);
+                let (relevant, task, prompt) = self.apply(&changes, document, analyzer, notice);
                 Action {
-                    instruction: relevant.then_some(Instruction::ProgramChanged),
+                    instruction: prompt
+                        .map(Instruction::Ask)
+                        .or_else(|| relevant.then_some(Instruction::ProgramChanged)),
                     task,
                 }
             }
@@ -364,6 +380,7 @@ impl State {
                 let next = self.queue.complete(result.is_ok());
                 let mut task = next.map_or_else(Task::none, |next| self.start(next));
                 let mut relevant = false;
+                let mut prompt = None;
 
                 match result {
                     Ok(changes) => {
@@ -375,7 +392,10 @@ impl State {
                                 Some(text.clone()),
                             )]);
                         }
-                        document.saved(&path, &Ok(text));
+                        document.saved(&path, &text);
+                        if is_open(document, &path) {
+                            self.disk = Some((path.clone(), Some(text)));
+                        }
                         changes
                             .iter()
                             .for_each(|change| self.explorer.changed(change));
@@ -383,21 +403,25 @@ impl State {
                             let applied = self.apply(&changes, document, analyzer, notice);
                             relevant = applied.0;
                             task = Task::batch([task, applied.1]);
+                            prompt = applied.2;
                         }
                     }
                     // The folder has a manifest of its own.
                     Err(Error::Conflict { .. }) if path == manifest() => {}
-                    Err(Error::Conflict { disk }) => {
+                    Err(Error::Conflict { disk }) if is_open(document, &path) => {
                         let deleted = disk.is_none();
-                        document.saved(&path, &Err(Error::Conflict { disk }));
-                        let (what, again) = if deleted {
-                            ("was deleted", "recreates")
+                        self.disk = Some((path.clone(), disk));
+                        // While the user answers another question, the document stays dirty and
+                        // is checked against storage once they have.
+                        prompt = self.ask(Prompt::Conflict { path, deleted });
+                    }
+                    Err(Error::Conflict { disk }) => {
+                        let what = if disk.is_none() {
+                            "was deleted"
                         } else {
-                            ("changed", "overwrites")
+                            "changed"
                         };
-                        *notice = Some(format!(
-                            "{path} {what} on disk, so it wasn't saved. Saving again {again} it."
-                        ));
+                        *notice = Some(format!("{path} {what} on disk, so it wasn't saved."));
                     }
                     Err(Error::Denied(reason)) => {
                         if !self.read_only {
@@ -411,7 +435,9 @@ impl State {
                     Err(error) => *notice = Some(format!("Could not save {path}: {error}")),
                 }
 
-                let instruction = if relevant {
+                let instruction = if let Some(prompt) = prompt {
+                    Some(Instruction::Ask(prompt))
+                } else if relevant {
                     Some(Instruction::ProgramChanged)
                 } else {
                     self.queue.is_empty().then_some(Instruction::Drained)
@@ -419,49 +445,36 @@ impl State {
                 Action { instruction, task }
             }
             Message::Read { path, result, .. } => {
-                if !matches!(document.location(), document::Location::Folder(open) if *open == path)
-                {
+                if !is_open(document, &path) {
                     return Action::none();
                 }
-                match result {
-                    Ok(text) => self.follow(&path, Some(&text), document, analyzer, notice),
-                    Err(Error::Missing) => self.follow(&path, None, document, analyzer, notice),
-                    Err(error) => *notice = Some(format!("Could not read {path}: {error}")),
+                let prompt = match result {
+                    Ok(text) => self.follow(&path, Some(&text), document, analyzer),
+                    Err(Error::Missing) => self.follow(&path, None, document, analyzer),
+                    Err(error) => {
+                        *notice = Some(format!("Could not read {path}: {error}"));
+                        None
+                    }
+                };
+                Action {
+                    instruction: prompt.map(Instruction::Ask),
+                    task: Task::none(),
                 }
-                Action::none()
             }
             Message::Explorer(message) => match self.explorer.update(message) {
                 Some(explorer::Instruction::Expand(dir)) => Action::task(self.list(Some(dir))),
                 Some(explorer::Instruction::Open(path)) => {
-                    let is_open = matches!(
-                        document.location(),
-                        document::Location::Folder(open) if *open == path
-                    );
-                    if is_open || unsaved(document, notice) {
+                    if is_open(document, &path) {
                         return Action::none();
                     }
-                    // A queued write holds newer text than storage does.
-                    let text = self
-                        .queue
-                        .newest(&path)
-                        .or_else(|| self.mirror.files().get(&path).map(String::as_str))
-                        .map(str::to_owned);
-                    if let Some(text) = text {
-                        self.opening = None;
-                        show(document, path, &text, analyzer, settings);
-                        return Action::none();
+                    if unsaved(document) {
+                        let then = Pending::OpenDocument(path);
+                        return Action {
+                            instruction: self.ask(Prompt::Unsaved { then }).map(Instruction::Ask),
+                            task: Task::none(),
+                        };
                     }
-
-                    self.opening = Some(path.clone());
-                    let session = self.session;
-                    Action::task(Task::perform(
-                        read(self.handle.clone(), path.clone()),
-                        move |result| Message::Opened {
-                            session,
-                            path,
-                            result,
-                        },
-                    ))
+                    Action::task(self.open(path, document, analyzer, settings))
                 }
                 Some(explorer::Instruction::SetMain(path)) => {
                     if let Err(error) = Module::of(self.root.as_ref(), &path) {
@@ -495,17 +508,29 @@ impl State {
                 Some(_) | None => Action::none(),
             },
             Message::Opened { path, result, .. } => {
-                if self.opening.as_ref() != Some(&path) {
-                    return Action::none();
-                }
+                let discarded = match &self.opening {
+                    Some((opening, discarded)) if *opening == path => *discarded,
+                    Some(_) | None => return Action::none(),
+                };
                 self.opening = None;
                 match result {
-                    // The window stays usable while the file is read.
-                    Ok(_) if unsaved(document, notice) => {}
-                    Ok(text) => show(document, path, &text, analyzer, settings),
-                    Err(error) => *notice = Some(format!("Could not open {path}: {error}")),
+                    // The window stays usable while the file is read, so the user may have typed.
+                    Ok(_) if !discarded && unsaved(document) => {
+                        let then = Pending::OpenDocument(path);
+                        Action {
+                            instruction: self.ask(Prompt::Unsaved { then }).map(Instruction::Ask),
+                            task: Task::none(),
+                        }
+                    }
+                    Ok(text) => {
+                        self.show(document, path, &text, analyzer, settings);
+                        Action::none()
+                    }
+                    Err(error) => {
+                        *notice = Some(format!("Could not open {path}: {error}"));
+                        Action::none()
+                    }
                 }
-                Action::none()
             }
         }
     }
@@ -551,6 +576,85 @@ impl State {
         self.queue
             .save(self.handle.clone(), path, text, base)
             .map_or_else(Task::none, |next| self.start(next))
+    }
+
+    /// Makes the folder file `path` the document, reading it first unless its text is known.
+    /// Unsaved changes to the document are given up.
+    pub fn open(
+        &mut self,
+        path: Path,
+        document: &mut document::State,
+        analyzer: &mut Analyzer,
+        settings: &core::Settings,
+    ) -> Task<Message> {
+        // A queued write holds newer text than storage does.
+        let text = self
+            .queue
+            .newest(&path)
+            .or_else(|| self.mirror.files().get(&path).map(String::as_str))
+            .map(str::to_owned);
+        if let Some(text) = text {
+            self.opening = None;
+            self.show(document, path, &text, analyzer, settings);
+            return Task::none();
+        }
+
+        self.opening = Some((path.clone(), unsaved(document)));
+        let session = self.session;
+        Task::perform(read(self.handle.clone(), path.clone()), move |result| {
+            Message::Opened {
+                session,
+                path,
+                result,
+            }
+        })
+    }
+
+    /// Keeps changes on disk from touching the document while the user answers a question.
+    pub fn hold(&mut self) {
+        self.held = true;
+    }
+
+    /// Lets changes on disk reach the document again once the user answered, checking it against
+    /// what storage holds now, which may raise the next question.
+    pub fn release(
+        &mut self,
+        document: &mut document::State,
+        analyzer: &mut Analyzer,
+    ) -> Action<Instruction, Message> {
+        self.held = false;
+        let document::Location::Folder(path) = document.location().clone() else {
+            return Action::none();
+        };
+        let disk = self.on_disk(&path, document);
+        Action {
+            instruction: self
+                .follow(&path, disk.as_deref(), document, analyzer)
+                .map(Instruction::Ask),
+            task: Task::none(),
+        }
+    }
+
+    /// Replaces the document's text with what storage holds for the folder file `path` now, when
+    /// it holds anything.
+    pub fn reload(&self, path: &Path, document: &mut document::State, analyzer: &mut Analyzer) {
+        if let Some(text) = self.on_disk(path, document) {
+            document.reloaded(path, &text, analyzer);
+        }
+    }
+
+    /// Keeps the document's text over what storage holds for the folder file `path` now, so the
+    /// next save overwrites it.
+    pub fn keep(&self, path: &Path, document: &mut document::State) {
+        document.disk_changed(path, self.on_disk(path, document).as_deref());
+    }
+
+    /// Writes `text` to `path` whatever storage holds there, unless the folder is gone.
+    pub fn overwrite(&mut self, path: Path, text: String) -> Task<Message> {
+        if self.gone {
+            return Task::none();
+        }
+        self.enqueue(path, text, Expect::Anything)
     }
 
     /// The program of the main file with `uniforms` and `time`, or `None` while there is no main
@@ -640,16 +744,18 @@ impl State {
     }
 
     /// Applies `changes` to the mirror, the root manifest, the document and the analyzer, returning
-    /// whether the program may read a changed file and the reads and writes they call for.
+    /// whether the program may read a changed file, the reads and writes they call for, and what
+    /// to ask the user about the document.
     fn apply(
         &mut self,
         changes: &[Change],
         document: &mut document::State,
         analyzer: &mut Analyzer,
         notice: &mut Option<String>,
-    ) -> (bool, Task<Message>) {
+    ) -> (bool, Task<Message>, Option<Prompt>) {
         let generated = generated("").map(|(path, _)| path);
         let mut relevant = false;
+        let mut prompt = None;
         let mut regenerate = false;
         let mut tasks = Vec::new();
         let mut files = Vec::new();
@@ -670,7 +776,8 @@ impl State {
             match change {
                 Change::Changed { path, text } if *path == open => match text {
                     Some(text) => {
-                        self.follow(&open, Some(text.as_str()), document, analyzer, notice)
+                        let asked = self.follow(&open, Some(text.as_str()), document, analyzer);
+                        prompt = prompt.or(asked);
                     }
                     // A queued write's text would be bulin's own, an echo.
                     None if self.queue.newest(path).is_some() => {}
@@ -688,7 +795,8 @@ impl State {
                     }
                 },
                 Change::Removed(path) if *path == open || open.strip_prefix(path).is_some() => {
-                    self.follow(&open, None, document, analyzer, notice);
+                    let asked = self.follow(&open, None, document, analyzer);
+                    prompt = prompt.or(asked);
                 }
                 Change::Changed { .. } | Change::Removed(_) => {}
             }
@@ -722,45 +830,86 @@ impl State {
             tasks.push(self.generate());
             tasks.push(self.persist());
         }
-        (relevant, Task::batch(tasks))
+        (relevant, Task::batch(tasks), prompt)
     }
 
     /// Brings the open folder file `path` in line with storage now holding `text`, `None` when
-    /// the file is gone. Unsaved changes are kept, and the user is told the file changed.
+    /// the file is gone, unless the document is held. Returns what to ask the user when that
+    /// would lose unsaved changes or the file is gone.
     fn follow(
-        &self,
+        &mut self,
         path: &Path,
         text: Option<&str>,
         document: &mut document::State,
         analyzer: &mut Analyzer,
-        notice: &mut Option<String>,
-    ) {
+    ) -> Option<Prompt> {
+        self.disk = Some((path.clone(), text.map(str::to_owned)));
+        if self.held {
+            return None;
+        }
         let Some(text) = text else {
-            if document.base().is_some() {
-                document.disk_changed(path, None);
-                *notice = Some(format!(
-                    "{path} was deleted on disk. Saving it again recreates it."
-                ));
-            }
-            return;
+            // A file deleted earlier was asked about then.
+            document.base()?;
+            document.disk_changed(path, None);
+            return self.ask(Prompt::ChangedOnDisk {
+                path: path.clone(),
+                deleted: true,
+            });
         };
 
         // An echo's completion updates the document, and a base equal to `text` is up to date.
         if self.queue.is_echo(path, text)
             || document.base().is_some_and(|base| same_text(base, text))
         {
-            return;
+            return None;
         }
         if same_text(text, &document.content()) {
             document.disk_changed(path, Some(text));
+            None
         } else if !document.is_dirty() {
             document.reloaded(path, text, analyzer);
+            None
         } else {
-            document.disk_changed(path, Some(text));
-            *notice = Some(format!(
-                "{path} changed on disk. Saving it again overwrites that."
-            ));
+            self.ask(Prompt::ChangedOnDisk {
+                path: path.clone(),
+                deleted: false,
+            })
         }
+    }
+
+    /// `prompt`, holding the document until the user answers, unless they answer another question
+    /// already.
+    fn ask(&mut self, prompt: Prompt) -> Option<Prompt> {
+        if self.held {
+            return None;
+        }
+        self.held = true;
+        Some(prompt)
+    }
+
+    /// What storage holds for the folder file `path`, which is `document`: the last report since
+    /// it opened, or else its `base`.
+    fn on_disk(&self, path: &Path, document: &document::State) -> Option<String> {
+        match &self.disk {
+            Some((at, text)) if at == path => text.clone(),
+            Some(_) | None => document.base().map(str::to_owned),
+        }
+    }
+
+    /// Replaces `document` with the folder file `path` holding `text`. A new editor, unlike loading
+    /// the text into the old one, leaves nothing for Undo to bring back from the previous file.
+    fn show(
+        &mut self,
+        document: &mut document::State,
+        path: Path,
+        text: &str,
+        analyzer: &mut Analyzer,
+        settings: &core::Settings,
+    ) {
+        self.disk = None;
+        document.detach(analyzer);
+        *document = document::State::folder(path, text, settings);
+        document.attach(analyzer);
     }
 
     /// Whether the program may read the file `path`, which changed.
@@ -857,31 +1006,14 @@ pub fn watch(session: u64, handle: &Handle) -> Subscription<(u64, Watched)> {
 }
 
 /// Whether `document` is a folder file with unsaved changes, which opening another file or leaving
-/// the folder would lose, telling the user so in `notice`.
-pub fn unsaved(document: &document::State, notice: &mut Option<String>) -> bool {
-    let document::Location::Folder(path) = document.location() else {
-        return false;
-    };
-    if !document.is_dirty() {
-        return false;
-    }
-    *notice = Some(format!("Save {path} or undo its changes first."));
-    true
+/// the folder would lose.
+pub fn unsaved(document: &document::State) -> bool {
+    matches!(document.location(), document::Location::Folder(_)) && document.is_dirty()
 }
 
-/// Replaces `document` with the folder file `path` holding `text`. A new editor, unlike loading
-/// the text into the old one, leaves nothing for Undo to bring back from the previous file. The
-/// editor follows `settings`.
-fn show(
-    document: &mut document::State,
-    path: Path,
-    text: &str,
-    analyzer: &mut Analyzer,
-    settings: &core::Settings,
-) {
-    document.detach(analyzer);
-    *document = document::State::folder(path, text, settings);
-    document.attach(analyzer);
+/// Whether `document` is the folder file `path`.
+fn is_open(document: &document::State, path: &Path) -> bool {
+    matches!(document.location(), document::Location::Folder(open) if open == path)
 }
 
 /// How long the settings stay unwritten after the last edit.
@@ -1199,37 +1331,121 @@ mod tests {
         assert_eq!(open.notice, None);
     }
 
-    #[test]
-    fn a_dirty_document_gets_a_notice_and_keeps_its_text() {
-        let mut open = Open::new(&[("main.wesl", "a")]);
-        open.type_text("x");
-
-        let _ = open.changes(vec![changed("main.wesl", Some("b"))]);
-
-        assert_eq!(open.document.content(), "xa");
-        assert_eq!(open.document.base(), Some("b"));
-        assert!(open.document.is_dirty());
-        assert!(open.notice.as_deref().unwrap().contains("changed on disk"));
-
-        open.notice = None;
-        let _ = open.changes(vec![Change::Removed(path("main.wesl"))]);
-        assert_eq!(open.document.base(), None);
-        assert!(open.notice.as_deref().unwrap().contains("deleted"));
+    /// Releases the document after the user answered, returning what the folder asks next.
+    fn release(open: &mut Open) -> Option<Instruction> {
+        open.state
+            .release(&mut open.document, &mut open.analyzer)
+            .instruction
     }
 
     #[test]
-    fn a_conflict_on_save_sets_base_to_disk() {
+    fn a_dirty_document_asks_and_keeps_its_text() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+        open.type_text("x");
+
+        let instruction = open.changes(vec![changed("main.wesl", Some("b"))]);
+
+        assert!(matches!(
+            instruction,
+            Some(Instruction::Ask(Prompt::ChangedOnDisk {
+                deleted: false,
+                ..
+            }))
+        ));
+        assert_eq!(open.document.content(), "xa");
+        assert_eq!(open.document.base(), Some("a"));
+        assert!(open.document.is_dirty());
+        assert_eq!(open.notice, None);
+
+        open.state.keep(&path("main.wesl"), &mut open.document);
+        assert_eq!(open.document.base(), Some("b"));
+        assert!(release(&mut open).is_none());
+
+        let instruction = open.changes(vec![Change::Removed(path("main.wesl"))]);
+        assert!(matches!(
+            instruction,
+            Some(Instruction::Ask(Prompt::ChangedOnDisk {
+                deleted: true,
+                ..
+            }))
+        ));
+        assert_eq!(open.document.base(), None);
+        assert_eq!(open.document.content(), "xa");
+    }
+
+    #[test]
+    fn deleting_a_clean_document_asks_and_keeps_it() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+
+        let instruction = open.changes(vec![Change::Removed(path("main.wesl"))]);
+
+        assert!(matches!(
+            instruction,
+            Some(Instruction::Ask(Prompt::ChangedOnDisk {
+                deleted: true,
+                ..
+            }))
+        ));
+        assert_eq!(open.document.content(), "a");
+        assert!(open.document.is_dirty());
+    }
+
+    #[test]
+    fn a_conflict_on_save_asks_and_keeps_base() {
         let mut open = Open::new(&[("main.wesl", "a")]);
         open.type_text("x");
         let text = open.save();
 
         let disk = Some("disk".to_owned());
-        open.wrote("main.wesl", &text, Err(Error::Conflict { disk }));
+        let instruction = open.update(Message::Wrote {
+            session: 1,
+            path: path("main.wesl"),
+            text,
+            result: Err(Error::Conflict { disk }),
+        });
 
-        assert_eq!(open.document.base(), Some("disk"));
+        assert!(matches!(
+            instruction,
+            Some(Instruction::Ask(Prompt::Conflict { deleted: false, .. }))
+        ));
+        assert_eq!(open.document.base(), Some("a"));
         assert!(open.document.is_dirty());
-        assert!(open.notice.is_some());
+        assert_eq!(open.notice, None);
         assert!(open.state.is_idle());
+
+        open.state
+            .reload(&path("main.wesl"), &mut open.document, &mut open.analyzer);
+        assert_eq!(
+            open.document.content(),
+            "disk",
+            "Reload takes what storage holds"
+        );
+        assert!(!open.document.is_dirty());
+    }
+
+    #[test]
+    fn changes_while_held_wait_for_the_release() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+        open.type_text("x");
+        open.state.hold();
+
+        for text in ["b", "c"] {
+            let instruction = open.changes(vec![changed("main.wesl", Some(text))]);
+            assert!(!matches!(instruction, Some(Instruction::Ask(_))));
+        }
+        assert_eq!(open.state.mirror.files()[&path("main.wesl")], "c");
+        assert_eq!(open.document.base(), Some("a"));
+
+        assert!(matches!(
+            release(&mut open),
+            Some(Instruction::Ask(Prompt::ChangedOnDisk {
+                deleted: false,
+                ..
+            }))
+        ));
+        open.state
+            .reload(&path("main.wesl"), &mut open.document, &mut open.analyzer);
+        assert_eq!(open.document.content(), "c", "Reload takes the newest text");
     }
 
     #[test]
@@ -1348,17 +1564,64 @@ mod tests {
     }
 
     #[test]
-    fn opening_while_dirty_is_refused() {
+    fn opening_while_dirty_asks() {
         let mut open = Open::new(&[("main.wesl", "a"), ("other.wesl", "o")]);
         open.type_text("x");
 
-        let _ = open.explore(explorer::Message::Open(path("other.wesl")));
+        let instruction = open.explore(explorer::Message::Open(path("other.wesl")));
+        assert!(matches!(
+            instruction,
+            Some(Instruction::Ask(Prompt::Unsaved {
+                then: Pending::OpenDocument(file),
+            })) if file == path("other.wesl")
+        ));
         assert_eq!(open.document.content(), "xa");
-        assert!(open.notice.take().unwrap().contains("main.wesl"));
+        assert!(release(&mut open).is_none());
 
-        open.open_read("notes.md", Ok("notes".to_owned()));
+        let _ = open.state.open(
+            path("other.wesl"),
+            &mut open.document,
+            &mut open.analyzer,
+            &core::Settings::default(),
+        );
+        assert_eq!(open.document.content(), "o", "discarding opens it anyway");
+    }
+
+    #[test]
+    fn typing_while_a_file_is_read_asks_before_it_opens() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+
+        let _ = open.explore(explorer::Message::Open(path("notes.md")));
+        open.type_text("x");
+        let instruction = open.update(Message::Opened {
+            session: 1,
+            path: path("notes.md"),
+            result: Ok("notes".to_owned()),
+        });
+
+        assert!(matches!(
+            instruction,
+            Some(Instruction::Ask(Prompt::Unsaved { .. }))
+        ));
         assert_eq!(open.document.content(), "xa");
-        assert!(open.notice.is_some());
+
+        let _ = release(&mut open);
+        let _ = open.state.open(
+            path("notes.md"),
+            &mut open.document,
+            &mut open.analyzer,
+            &core::Settings::default(),
+        );
+        let _ = open.update(Message::Opened {
+            session: 1,
+            path: path("notes.md"),
+            result: Ok("notes".to_owned()),
+        });
+        assert_eq!(
+            open.document.content(),
+            "notes",
+            "discarding opens it anyway"
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ mod file;
 mod folder;
 mod layout;
 mod menu;
+mod prompt;
 mod settings;
 mod uniforms;
 mod viewer;
@@ -21,11 +22,14 @@ use iced::widget::{
 };
 use iced::{
     Center, Element, Event, Fill, Font, Function, Length, Subscription, Task, Theme, color, event,
-    keyboard,
+    keyboard, window,
 };
 use matcha_iced::lsp;
 
 use std::sync::Arc;
+
+use crate::core::folder::same_text;
+use crate::prompt::{Answer, Prompt};
 
 /// matcha's default id for the editor, which takes focus back when a modal closes.
 const EDITOR: &str = "matcha-editor";
@@ -44,8 +48,11 @@ pub struct Application {
     layout: layout::State,
     mode: Mode,
     opener: folder::opener::Opener,
-    /// What to do once the folder's queued writes are done.
-    draining: Option<Pending>,
+    /// The question the user is answering. Nothing else that would replace work runs until they
+    /// do.
+    prompt: Option<Prompt>,
+    /// What runs once the saves it waits for are done.
+    draining: Option<Drain>,
     /// Counts folder openings and analyzer starts, numbering each so results meant for an earlier
     /// one are dropped.
     sessions: u64,
@@ -71,23 +78,50 @@ enum Modal {
 
 /// What the editor works on: a project, or a folder of files.
 enum Mode {
-    /// A project, saved in `file` once it has one.
+    /// A project, saved in `file` once it has one. `text` is its shader as last loaded or saved,
+    /// and `dirty` says its uniforms or clock were edited since.
     Project {
         file: Option<file::Name>,
+        dirty: bool,
+        text: String,
     },
     Folder(Box<folder::State>),
 }
 
-/// What waits for the folder's writes before it leaves the folder.
+/// What the user asked for that waits for an answer or for saves to finish.
 enum Pending {
     OpenFolder(folder::Handle),
     /// A project file and its text, which parses.
     OpenProject(file::Name, Arc<String>),
     CloseFolder,
+    /// A folder file to make the document.
+    OpenDocument(core::folder::Path),
+    NewProject,
+    OpenFile,
+    NewFile,
+    Quit,
+}
+
+/// `then`, waiting for the save `step`.
+struct Drain {
+    then: Pending,
+    step: Step,
+}
+
+/// Which save a [`Drain`] waits for.
+enum Step {
+    /// The document's file, picked in a dialog.
+    File,
+    /// The project.
+    Project,
+    /// The folder's queued writes.
+    Queue,
 }
 
 /// Why the app can't take another file action now.
 enum Busy {
+    /// A question waits for an answer.
+    Prompt,
     /// A dialog or the library is open.
     Dialog,
     /// The folder's writes are finishing before it is left.
@@ -101,6 +135,7 @@ pub enum Message {
     Layout(layout::Message),
     Folder(folder::Message),
     Opener(folder::opener::Message),
+    Prompt(Answer),
     ShowMenu,
     CloseModal,
     Escape,
@@ -117,7 +152,10 @@ pub enum Message {
     NewProject,
     SaveProject,
     SaveProjectAs,
-    ProjectSaved(Result<file::Name, file::Error>),
+    /// Where the project was saved, with the shader and uniforms saved there.
+    ProjectSaved(Result<(file::Name, String, core::Uniforms), file::Error>),
+    /// The user asked to close the window.
+    CloseRequested,
     /// An event of the analyzer with this generation.
     Analyzer(u64, lsp::client::Event),
     /// A key no widget took, which may be a shortcut bulin handles.
@@ -127,6 +165,22 @@ pub enum Message {
         modifiers: keyboard::Modifiers,
     },
     SettingsSaved(Result<(), settings::storage::Error>),
+}
+
+impl Pending {
+    /// Whether this leaves the folder, when one is open.
+    fn leaves(&self) -> bool {
+        match self {
+            Pending::OpenFolder(_)
+            | Pending::OpenProject(..)
+            | Pending::CloseFolder
+            | Pending::Quit => true,
+            Pending::OpenDocument(_)
+            | Pending::NewProject
+            | Pending::OpenFile
+            | Pending::NewFile => false,
+        }
+    }
 }
 
 impl Application {
@@ -166,8 +220,13 @@ impl Application {
             uniforms,
             viewer,
             layout: layout::State::new(),
-            mode: Mode::Project { file: None },
+            mode: Mode::Project {
+                file: None,
+                dirty: false,
+                text: project.shader,
+            },
             opener: folder::opener::Opener::default(),
+            prompt: None,
             draining: None,
             sessions: 0,
             is_loading: false,
@@ -183,15 +242,26 @@ impl Application {
     }
 
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
+        let task = self.react(message, now);
+        file::warn_on_unload(self.is_dirty());
+        task
+    }
+
+    /// Applies `message`, the part of [`Application::update`] each message differs in.
+    fn react(&mut self, message: Message, now: Instant) -> Task<Message> {
         match message {
             Message::Document(message) => {
+                // Replacing the document waits for an answer when something is unsaved.
+                if matches!(message, document::Message::NewFile) {
+                    return self.ask(Pending::NewFile, now);
+                }
+                if matches!(message, document::Message::OpenFile) {
+                    return self.ask(Pending::OpenFile, now);
+                }
                 // A document dialog answering after a project switch would land in the new project.
                 let file_action = matches!(
                     message,
-                    document::Message::NewFile
-                        | document::Message::OpenFile
-                        | document::Message::SaveFile
-                        | document::Message::SaveFileAs
+                    document::Message::SaveFile | document::Message::SaveFileAs
                 );
                 if file_action && self.refuse() {
                     return Task::none();
@@ -216,6 +286,18 @@ impl Application {
                             return Task::batch([task, save.map(Message::Folder)]);
                         }
                     }
+                    Some(document::Instruction::FileSaved(result)) => {
+                        // Only a Save answered at a prompt waits for the file; a failed or
+                        // cancelled save leaves what waits undone.
+                        if let Some(drain) = self
+                            .draining
+                            .take_if(|drain| matches!(drain.step, Step::File))
+                            && result.is_ok()
+                        {
+                            let next = self.save_from(drain.then, Step::Project, now);
+                            return Task::batch([task, next]);
+                        }
+                    }
                     None => {}
                 }
                 task
@@ -229,8 +311,11 @@ impl Application {
                             self.uniforms.time(),
                             self.uniforms.uniforms(),
                         ));
-                        if let Mode::Folder(state) = &mut self.mode {
-                            state.edited(self.uniforms.uniforms(), self.uniforms.clock(), now);
+                        match &mut self.mode {
+                            Mode::Folder(state) => {
+                                state.edited(self.uniforms.uniforms(), self.uniforms.clock(), now)
+                            }
+                            Mode::Project { dirty, .. } => *dirty = true,
                         }
                         task
                     }
@@ -253,7 +338,10 @@ impl Application {
                                     .layout_changed(self.uniforms.uniforms(), self.uniforms.clock())
                                     .map(Message::Folder),
                             ]),
-                            Mode::Project { .. } => task,
+                            Mode::Project { dirty, .. } => {
+                                *dirty = true;
+                                task
+                            }
                         }
                     }
                     None => task,
@@ -267,21 +355,33 @@ impl Application {
                 let Mode::Folder(state) = &mut self.mode else {
                     return Task::none();
                 };
+                let mut notice = None;
                 let action = state.update(
                     message,
                     now,
                     &mut self.document,
                     running(&mut self.analyzer),
                     &self.settings,
-                    &mut self.notice,
+                    &mut notice,
                 );
                 let task = action.task.map(Message::Folder);
                 match action.instruction {
                     Some(folder::Instruction::ProgramChanged) => self.program_changed(),
+                    // The change that asks may be one the program reads.
+                    Some(folder::Instruction::Ask(prompt)) => {
+                        self.program_changed();
+                        self.raise(prompt);
+                    }
                     Some(folder::Instruction::Drained) | None => {}
                 }
+                if notice.is_some() {
+                    self.notice = notice;
+                    // A notice while the writes finish tells of one that failed, so what waits
+                    // for them doesn't run.
+                    self.draining = None;
+                }
                 // A completion can finish the queue whatever else it reports.
-                Task::batch([task, self.drain()])
+                Task::batch([task, self.drain(now)])
             }
             Message::Opener(message) => {
                 let action = self.opener.update(message);
@@ -308,23 +408,109 @@ impl Application {
                 let Some(then) = then else {
                     return task;
                 };
-                // The window stays usable while the user picks, so the folder may have changed.
-                if self.unsaved() {
-                    return task;
-                }
-                if self.draining.is_some() {
-                    self.notice = Some(DRAINING.to_owned());
-                    return task;
-                }
-                // The settings write joins the queue before the drain waits for it.
-                let leave = match &mut self.mode {
-                    Mode::Folder(state) => state
-                        .leave(self.uniforms.uniforms(), self.uniforms.clock())
-                        .map(Message::Folder),
-                    Mode::Project { .. } => Task::none(),
+                // The window stays usable while the user picks, so what is unsaved may have
+                // changed.
+                Task::batch([task, self.ask(then, now)])
+            }
+            Message::Prompt(answer) => {
+                let Some(prompt) = self.prompt.take() else {
+                    return Task::none();
                 };
-                self.draining = Some(then);
-                Task::batch([task, leave, self.drain()])
+                let task = match (prompt, answer) {
+                    (Prompt::Unsaved { then }, Answer::Save) => match &mut self.mode {
+                        Mode::Folder(state) => {
+                            // Straight to the document: the prompt would refuse its save.
+                            let action = self.document.update(
+                                document::Message::SaveFile,
+                                now,
+                                running(&mut self.analyzer),
+                                &self.settings,
+                            );
+                            let mut tasks = vec![action.task.map(Message::Document)];
+                            let mut notice = None;
+                            if let Some(document::Instruction::Save { path, text, base }) =
+                                action.instruction
+                            {
+                                tasks.push(
+                                    state
+                                        .save(path, text, base, &mut notice)
+                                        .map(Message::Folder),
+                                );
+                            }
+                            if notice.is_some() {
+                                // The save was refused, so what waits for it doesn't run.
+                                self.notice = notice;
+                            } else {
+                                if then.leaves() {
+                                    tasks.push(
+                                        state
+                                            .leave(self.uniforms.uniforms(), self.uniforms.clock())
+                                            .map(Message::Folder),
+                                    );
+                                }
+                                self.draining = Some(Drain {
+                                    then,
+                                    step: Step::Queue,
+                                });
+                                tasks.push(self.drain(now));
+                            }
+                            Task::batch(tasks)
+                        }
+                        Mode::Project { .. } => self.save_from(then, Step::File, now),
+                    },
+                    (Prompt::Unsaved { then }, Answer::Discard) => self.start(then, now),
+                    (
+                        Prompt::Unsaved { .. },
+                        Answer::Cancel | Answer::Reload | Answer::KeepMine | Answer::Overwrite,
+                    ) => Task::none(),
+                    (
+                        Prompt::ChangedOnDisk { path, .. } | Prompt::Conflict { path, .. },
+                        Answer::Reload,
+                    ) => {
+                        if let Mode::Folder(state) = &mut self.mode {
+                            state.reload(&path, &mut self.document, running(&mut self.analyzer));
+                        }
+                        Task::none()
+                    }
+                    // Cancel is the choice that loses nothing.
+                    (Prompt::ChangedOnDisk { path, .. }, Answer::KeepMine | Answer::Cancel) => {
+                        if let Mode::Folder(state) = &mut self.mode {
+                            state.keep(&path, &mut self.document);
+                        }
+                        Task::none()
+                    }
+                    (
+                        Prompt::ChangedOnDisk { .. },
+                        Answer::Save | Answer::Discard | Answer::Overwrite,
+                    ) => Task::none(),
+                    // What the editor holds now, typed after the question too.
+                    (Prompt::Conflict { path, .. }, Answer::Overwrite) => match &mut self.mode {
+                        Mode::Folder(state) => {
+                            // The user has seen what storage holds, so it isn't asked about again.
+                            state.keep(&path, &mut self.document);
+                            state
+                                .overwrite(path, self.document.content())
+                                .map(Message::Folder)
+                        }
+                        Mode::Project { .. } => Task::none(),
+                    },
+                    (
+                        Prompt::Conflict { .. },
+                        Answer::Cancel | Answer::Save | Answer::Discard | Answer::KeepMine,
+                    ) => Task::none(),
+                };
+
+                // The document is checked against what changed on disk while the user answered.
+                let Mode::Folder(state) = &mut self.mode else {
+                    return task;
+                };
+                let action = state.release(&mut self.document, running(&mut self.analyzer));
+                match action.instruction {
+                    Some(folder::Instruction::Ask(prompt)) => self.raise(prompt),
+                    Some(folder::Instruction::ProgramChanged) => self.program_changed(),
+                    Some(folder::Instruction::Drained) | None => {}
+                }
+                Task::batch([task, action.task.map(Message::Folder)])
             }
             Message::ShowMenu => {
                 self.modal = Some(Modal::Menu);
@@ -338,11 +524,12 @@ impl Application {
                 None => Task::none(),
             },
             Message::Escape => match self.busy() {
+                Some(Busy::Prompt) => self.react(Message::Prompt(Answer::Cancel), now),
                 Some(Busy::Dialog) if self.opener.is_busy() => {
                     self.opener.close();
                     Task::none()
                 }
-                Some(Busy::Dialog | Busy::Draining) | None => self.update(Message::CloseModal, now),
+                Some(Busy::Dialog | Busy::Draining) | None => self.react(Message::CloseModal, now),
             },
             Message::Menu(message) => {
                 self.modal = None;
@@ -353,7 +540,7 @@ impl Application {
                     }
                     // The find bar takes focus as it opens.
                     menu::Message::Find => {
-                        return self.update(
+                        return self.react(
                             Message::Document(document::Message::Editor(
                                 matcha_iced::Event::OpenFind,
                             )),
@@ -361,7 +548,7 @@ impl Application {
                         );
                     }
                     menu::Message::Replace => {
-                        return self.update(
+                        return self.react(
                             Message::Document(document::Message::Editor(
                                 matcha_iced::Event::OpenReplace,
                             )),
@@ -381,7 +568,7 @@ impl Application {
                     menu::Message::OpenFolder => Message::OpenFolder,
                     menu::Message::CloseFolder => Message::CloseFolder,
                 };
-                Task::batch([operation::focus(EDITOR), self.update(message, now)])
+                Task::batch([operation::focus(EDITOR), self.react(message, now)])
             }
             Message::Settings(message) => {
                 let Some(Modal::Settings(state)) = &mut self.modal else {
@@ -411,8 +598,9 @@ impl Application {
                     None => task,
                 }
             }
+            // What is unsaved is asked about once the user picked something to open.
             Message::OpenProject | Message::OpenFolder => {
-                if self.refuse() || self.unsaved() {
+                if self.refuse() {
                     return Task::none();
                 }
                 self.notice = None;
@@ -424,18 +612,10 @@ impl Application {
                 task.map(Message::Opener)
             }
             Message::CloseFolder => {
-                if !matches!(self.mode, Mode::Folder(_)) || self.refuse() || self.unsaved() {
+                if !matches!(self.mode, Mode::Folder(_)) {
                     return Task::none();
                 }
-                self.notice = None;
-                let leave = match &mut self.mode {
-                    Mode::Folder(state) => state
-                        .leave(self.uniforms.uniforms(), self.uniforms.clock())
-                        .map(Message::Folder),
-                    Mode::Project { .. } => Task::none(),
-                };
-                self.draining = Some(Pending::CloseFolder);
-                Task::batch([leave, self.drain()])
+                self.ask(Pending::CloseFolder, now)
             }
             Message::FolderSettings {
                 session,
@@ -480,54 +660,59 @@ impl Application {
                 Task::batch([events, task.map(Message::Folder)])
             }
             Message::NewProject => {
-                if matches!(self.mode, Mode::Project { .. }) && !self.refuse() {
-                    self.mode = Mode::Project { file: None };
-                    self.notice = None;
-                    self.load(core::Project::untitled());
+                if !matches!(self.mode, Mode::Project { .. }) {
+                    return Task::none();
                 }
-                Task::none()
+                self.ask(Pending::NewProject, now)
             }
             Message::SaveProject | Message::SaveProjectAs => {
                 if self.refuse() {
                     return Task::none();
                 }
-                let Mode::Project { file } = &self.mode else {
+                let Mode::Project { file, .. } = &self.mode else {
                     return Task::none();
                 };
-                let file = match message {
-                    Message::SaveProject => file.clone(),
-                    _ => None,
+                let file = if matches!(message, Message::SaveProject) {
+                    file.clone()
+                } else {
+                    None
                 };
-                self.is_loading = true;
-                self.notice = None;
-                let project = core::Project::new(
-                    self.document.content(),
-                    self.uniforms.uniforms().clone(),
-                    self.uniforms.clock(),
-                );
-
-                Task::perform(
-                    file::save_file(file, "project.bulin", project.to_json()),
-                    Message::ProjectSaved,
-                )
+                self.save_project(file)
             }
             Message::ProjectSaved(result) => {
                 self.is_loading = false;
 
-                match result {
-                    Ok(path) => {
-                        if let Mode::Project { file } = &mut self.mode {
-                            *file = Some(path);
+                let saved = match result {
+                    Ok((name, shader, uniforms)) => {
+                        if let Mode::Project { file, dirty, text } = &mut self.mode {
+                            *file = Some(name);
+                            *text = shader;
+                            // Uniforms edited while the dialog was open aren't saved.
+                            if *self.uniforms.uniforms() == uniforms {
+                                *dirty = false;
+                            }
                         }
+                        true
                     }
-                    Err(file::Error::DialogClosed) => {}
+                    Err(file::Error::DialogClosed) => false,
                     Err(error) => {
-                        self.notice = Some(format!("Could not save the project: {error}"))
+                        self.notice = Some(format!("Could not save the project: {error}"));
+                        false
                     }
-                }
+                };
 
-                Task::none()
+                // Only a Save answered at a prompt waits for the project; a failed or cancelled
+                // save leaves what waits undone.
+                match self
+                    .draining
+                    .take_if(|drain| matches!(drain.step, Step::Project))
+                {
+                    Some(drain) if saved => self.start(drain.then, now),
+                    Some(_) | None => Task::none(),
+                }
             }
+            // A question already open decides first.
+            Message::CloseRequested => self.ask(Pending::Quit, now),
             Message::Analyzer(generation, event) => {
                 // The client asserts an event is its own, and an event doesn't say whose it is.
                 if generation != self.generation {
@@ -536,7 +721,9 @@ impl Application {
                 let action = self.document.lsp(running(&mut self.analyzer), event);
                 match action.instruction {
                     Some(document::Instruction::Changed) => self.program_changed(),
-                    Some(document::Instruction::Save { .. }) | None => {}
+                    Some(document::Instruction::Save { .. })
+                    | Some(document::Instruction::FileSaved(_))
+                    | None => {}
                 }
                 action.task.map(Message::Document)
             }
@@ -606,7 +793,9 @@ impl Application {
 
     /// Why a file action can't run now, if it can't.
     fn busy(&self) -> Option<Busy> {
-        if self.is_loading || self.document.is_loading() || self.opener.is_busy() {
+        if self.prompt.is_some() {
+            Some(Busy::Prompt)
+        } else if self.is_loading || self.document.is_loading() || self.opener.is_busy() {
             Some(Busy::Dialog)
         } else if self.draining.is_some() {
             Some(Busy::Draining)
@@ -615,10 +804,11 @@ impl Application {
         }
     }
 
-    /// Whether a file action must wait, telling the user why unless a dialog shows it.
+    /// Whether a file action must wait, telling the user why unless a dialog or a question shows
+    /// it.
     fn refuse(&mut self) -> bool {
         match self.busy() {
-            Some(Busy::Dialog) => true,
+            Some(Busy::Prompt | Busy::Dialog) => true,
             Some(Busy::Draining) => {
                 self.notice = Some(DRAINING.to_owned());
                 true
@@ -627,21 +817,136 @@ impl Application {
         }
     }
 
-    /// Whether the folder's open file has unsaved changes, which leaving the folder would lose,
-    /// telling the user so.
-    fn unsaved(&mut self) -> bool {
-        matches!(self.mode, Mode::Folder(_)) && folder::unsaved(&self.document, &mut self.notice)
+    /// Whether anything has unsaved changes: the project or its file, or the folder's document.
+    fn is_dirty(&self) -> bool {
+        match &self.mode {
+            Mode::Project { .. } => self.is_project_dirty() || self.is_file_dirty(),
+            Mode::Folder(_) => folder::unsaved(&self.document),
+        }
+    }
+
+    /// Whether the project's shader, uniforms or clock changed since it was last loaded or saved,
+    /// whatever file the document is.
+    fn is_project_dirty(&self) -> bool {
+        match &self.mode {
+            Mode::Project { dirty, text, .. } => {
+                *dirty || !same_text(text, &self.document.content())
+            }
+            Mode::Folder(_) => false,
+        }
+    }
+
+    /// Whether the document is a file picked in a dialog, with unsaved changes.
+    fn is_file_dirty(&self) -> bool {
+        matches!(self.document.location(), document::Location::File(_)) && self.document.is_dirty()
+    }
+
+    /// Does `then` unless the app is busy, asking first when it would replace unsaved changes.
+    fn ask(&mut self, then: Pending, now: Instant) -> Task<Message> {
+        if self.refuse() {
+            return Task::none();
+        }
+        if self.is_dirty() {
+            self.raise(Prompt::Unsaved { then });
+            return Task::none();
+        }
+        self.start(then, now)
+    }
+
+    /// Shows `prompt`, and has the folder leave its document alone until the user answers. A
+    /// question while saves finish means one of them needs the user, so what waits for them
+    /// doesn't run.
+    fn raise(&mut self, prompt: Prompt) {
+        if let Mode::Folder(state) = &mut self.mode {
+            state.hold();
+        }
+        self.draining = None;
+        self.prompt = Some(prompt);
+    }
+
+    /// Starts `then`. Leaving a folder first writes its settings and waits for its writes.
+    fn start(&mut self, then: Pending, now: Instant) -> Task<Message> {
+        let leave = match &mut self.mode {
+            Mode::Folder(state) if then.leaves() => state
+                .leave(self.uniforms.uniforms(), self.uniforms.clock())
+                .map(Message::Folder),
+            Mode::Folder(_) | Mode::Project { .. } => return self.run(then, now),
+        };
+        self.draining = Some(Drain {
+            then,
+            step: Step::Queue,
+        });
+        Task::batch([leave, self.drain(now)])
+    }
+
+    /// Saves what is unsaved from `step` on, the document's file before the project, then starts
+    /// `then`. A failed or cancelled save leaves `then` undone.
+    fn save_from(&mut self, then: Pending, step: Step, now: Instant) -> Task<Message> {
+        if matches!(step, Step::File) && self.is_file_dirty() {
+            self.draining = Some(Drain {
+                then,
+                step: Step::File,
+            });
+            // Straight to the document: draining would refuse its save.
+            let action = self.document.update(
+                document::Message::SaveFile,
+                now,
+                running(&mut self.analyzer),
+                &self.settings,
+            );
+            return action.task.map(Message::Document);
+        }
+        if let Mode::Project { file, .. } = &self.mode
+            && self.is_project_dirty()
+        {
+            let file = file.clone();
+            self.draining = Some(Drain {
+                then,
+                step: Step::Project,
+            });
+            return self.save_project(file);
+        }
+        self.start(then, now)
+    }
+
+    /// Saves the project to `file`, or to a file the user picks.
+    fn save_project(&mut self, file: Option<file::Name>) -> Task<Message> {
+        self.is_loading = true;
+        self.notice = None;
+        let shader = self.document.content();
+        let uniforms = self.uniforms.uniforms().clone();
+        let json =
+            core::Project::new(shader.clone(), uniforms.clone(), self.uniforms.clock()).to_json();
+
+        Task::perform(
+            async move {
+                let name = file::save_file(file, "project.bulin", json).await?;
+                Ok((name, shader, uniforms))
+            },
+            Message::ProjectSaved,
+        )
     }
 
     /// Runs what waits for the folder's writes, once they are done.
-    fn drain(&mut self) -> Task<Message> {
+    fn drain(&mut self, now: Instant) -> Task<Message> {
         if let Mode::Folder(state) = &self.mode
             && !state.is_idle()
         {
             return Task::none();
         }
-        match self.draining.take() {
-            Some(Pending::OpenFolder(handle)) => {
+        match self
+            .draining
+            .take_if(|drain| matches!(drain.step, Step::Queue))
+        {
+            Some(drain) => self.run(drain.then, now),
+            None => Task::none(),
+        }
+    }
+
+    /// Does `then`, now that nothing unsaved or unwritten stands in its way.
+    fn run(&mut self, then: Pending, now: Instant) -> Task<Message> {
+        match then {
+            Pending::OpenFolder(handle) => {
                 self.sessions += 1;
                 self.is_loading = true;
                 let session = self.sessions;
@@ -656,11 +961,10 @@ impl Application {
                     }
                 })
             }
-            Some(Pending::OpenProject(name, text)) => match core::Project::from_json(&text) {
+            Pending::OpenProject(name, text) => match core::Project::from_json(&text) {
                 Ok(project) => {
                     let events = self.leave();
-                    self.mode = Mode::Project { file: Some(name) };
-                    self.load(project);
+                    self.load(Some(name), project);
                     events
                 }
                 Err(error) => {
@@ -668,13 +972,43 @@ impl Application {
                     Task::none()
                 }
             },
-            Some(Pending::CloseFolder) => {
+            Pending::CloseFolder => {
                 let events = self.leave();
-                self.mode = Mode::Project { file: None };
-                self.load(core::Project::untitled());
+                self.load(None, core::Project::untitled());
                 events
             }
-            None => Task::none(),
+            Pending::OpenDocument(path) => match &mut self.mode {
+                Mode::Folder(state) => state
+                    .open(
+                        path,
+                        &mut self.document,
+                        running(&mut self.analyzer),
+                        &self.settings,
+                    )
+                    .map(Message::Folder),
+                Mode::Project { .. } => Task::none(),
+            },
+            Pending::NewProject => {
+                self.notice = None;
+                self.load(None, core::Project::untitled());
+                Task::none()
+            }
+            Pending::OpenFile | Pending::NewFile => {
+                let message = if matches!(then, Pending::OpenFile) {
+                    document::Message::OpenFile
+                } else {
+                    document::Message::NewFile
+                };
+                let action =
+                    self.document
+                        .update(message, now, running(&mut self.analyzer), &self.settings);
+                if matches!(action.instruction, Some(document::Instruction::Changed)) {
+                    self.program_changed();
+                }
+                action.task.map(Message::Document)
+            }
+            // Nothing queued after this runs.
+            Pending::Quit => iced::exit(),
         }
     }
 
@@ -732,12 +1066,17 @@ impl Application {
         running(&mut self.analyzer).set_uniforms(&core::program::uniforms_package(time, uniforms));
     }
 
-    /// Replaces the shader and uniforms with `project`'s.
-    fn load(&mut self, project: core::Project) {
+    /// Makes `project`, saved in `file` when it is, what the editor works on.
+    fn load(&mut self, file: Option<file::Name>, project: core::Project) {
         self.document.detach(running(&mut self.analyzer));
         self.document = document::State::new(&project.shader, &self.settings);
         self.document.attach(running(&mut self.analyzer));
         self.uniforms = uniforms::State::new(project.uniforms, project.clock);
+        self.mode = Mode::Project {
+            file,
+            dirty: false,
+            text: project.shader,
+        };
         self.program_changed();
     }
 
@@ -763,7 +1102,10 @@ impl Application {
             .on_drag(|e| Message::Layout(layout::Message::Dragged(e)))
             .on_resize(10, |e| Message::Layout(layout::Message::Resized(e)));
 
-        let document = self.document.title();
+        let mut document = self.document.label().to_owned();
+        if self.is_dirty() {
+            document.push_str(" •");
+        }
         let (location, status) = match &self.mode {
             Mode::Project { .. } => (document, None),
             Mode::Folder(state) => (format!("{} · {document}", state.name()), state.status()),
@@ -802,11 +1144,17 @@ impl Application {
         });
 
         stack![content]
-            .push(layer.map(|layer| modal(layer, Message::CloseModal)))
+            .push(layer.map(|layer| modal(layer, Some(Message::CloseModal))))
             .push(
                 self.opener
                     .view()
-                    .map(|opener| modal(opener.map(Message::Opener), Message::Escape)),
+                    .map(|opener| modal(opener.map(Message::Opener), Some(Message::Escape))),
+            )
+            // Only an answer closes a question.
+            .push(
+                self.prompt
+                    .as_ref()
+                    .map(|prompt| modal(prompt.view().map(Message::Prompt), None)),
             )
             .into()
     }
@@ -827,8 +1175,8 @@ impl Application {
             ]);
         }
 
-        // Escape closes the library or a modal even while the editor holds focus and captures
-        // keys.
+        // Escape answers a question or closes the library or a modal even while the editor holds
+        // focus and captures keys.
         let escape = event::listen_with(|event, _status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(key::Named::Escape),
@@ -862,6 +1210,7 @@ impl Application {
             folder,
             escape,
             shortcuts,
+            window::close_requests().map(|_| Message::CloseRequested),
         ])
     }
 }
@@ -885,15 +1234,20 @@ fn menu_icon<'a>() -> Element<'a, Message> {
         .into()
 }
 
-/// `content` over a dimmed backdrop that swallows input and sends `on_blur` when clicked.
-fn modal<'a>(content: impl Into<Element<'a, Message>>, on_blur: Message) -> Element<'a, Message> {
-    opaque(
-        mouse_area(center(opaque(content)).style(|_theme| container::Style {
-            background: Some(color!(0x000000, 0.8).into()),
-            ..container::Style::default()
-        }))
-        .on_press(on_blur),
-    )
+/// `content` over a dimmed backdrop that swallows input, sending `on_blur` when clicked if there
+/// is one.
+fn modal<'a>(
+    content: impl Into<Element<'a, Message>>,
+    on_blur: Option<Message>,
+) -> Element<'a, Message> {
+    let backdrop = center(opaque(content)).style(|_theme| container::Style {
+        background: Some(color!(0x000000, 0.8).into()),
+        ..container::Style::default()
+    });
+    match on_blur {
+        Some(on_blur) => opaque(mouse_area(backdrop).on_press(on_blur)),
+        None => opaque(backdrop),
+    }
 }
 
 #[cfg(test)]
@@ -911,7 +1265,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        Application, DRAINING, Message, Modal, Mode, analyzer, document, explorer, folder, uniforms,
+        Application, DRAINING, Drain, Message, Modal, Mode, Pending, Step, analyzer, document,
+        explorer, folder, uniforms,
     };
     use crate::core;
     use crate::core::folder::{Change, Path, SETTINGS, Settings};
@@ -919,6 +1274,7 @@ mod tests {
     use crate::core::{Project, Uniforms};
     use crate::file;
     use crate::menu;
+    use crate::prompt::{Answer, Prompt};
     use crate::settings;
 
     const MAIN: &str = "import package::lib::shade;\n\
@@ -1077,6 +1433,42 @@ mod tests {
 
         fn is_folder(&self) -> bool {
             matches!(self.app.mode, Mode::Folder(_))
+        }
+
+        fn answer(&mut self, answer: Answer) {
+            self.update(Message::Prompt(answer));
+        }
+
+        /// Runs the last update's task to its end, returning the messages it produced.
+        fn outputs(&mut self) -> Vec<Message> {
+            let task = std::mem::replace(&mut self.task, Task::none());
+            let Some(stream) = iced_runtime::task::into_stream(task) else {
+                return Vec::new();
+            };
+            self.runtime.block_on(
+                stream
+                    .filter_map(|action| async move {
+                        match action {
+                            iced_runtime::Action::Output(message) => Some(message),
+                            _ => None,
+                        }
+                    })
+                    .collect(),
+            )
+        }
+
+        /// Whether the last update's task exits the app.
+        fn exits(&mut self) -> bool {
+            let task = std::mem::replace(&mut self.task, Task::none());
+            let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+                return false;
+            };
+            while let Some(Some(action)) = stream.next().now_or_never() {
+                if matches!(action, iced_runtime::Action::Exit) {
+                    return true;
+                }
+            }
+            false
         }
     }
 
@@ -1379,7 +1771,10 @@ mod tests {
             "the regenerated files are still being written"
         );
         driver.pump();
-        assert!(matches!(driver.app.mode, Mode::Project { file: Some(_) }));
+        assert!(matches!(
+            driver.app.mode,
+            Mode::Project { file: Some(_), .. }
+        ));
         assert_eq!(
             driver.app.document.content(),
             Project::from_json(json).unwrap().shader
@@ -1456,29 +1851,526 @@ mod tests {
         assert!(!driver.app.document.is_dirty());
     }
 
+    /// What the folder's write in flight writes, with what it expects.
+    fn in_flight(driver: &Driver) -> Option<folder::Write> {
+        let Mode::Folder(state) = &driver.app.mode else {
+            return None;
+        };
+        state.in_flight().cloned()
+    }
+
+    /// A project saved in a file of `dir`, whose shader has unsaved changes.
+    fn dirty_project(driver: &mut Driver, dir: &TempDir) -> std::path::PathBuf {
+        let file = dir.path().join("project.bulin");
+        driver.app.mode = Mode::Project {
+            file: Some(file::Name::from(file.to_str().unwrap())),
+            dirty: false,
+            text: driver.app.document.content(),
+        };
+        driver.type_text("// edited\n");
+        file
+    }
+
     #[test]
-    fn dirty_folder_refuses_open_and_close() {
+    fn project_text_edit_asks_and_save_writes_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut driver = Driver::new();
+        let file = dirty_project(&mut driver, &dir);
+        let edited = driver.app.document.content();
+        assert!(driver.app.is_dirty());
+
+        driver.update(Message::NewProject);
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::Unsaved {
+                then: Pending::NewProject
+            })
+        ));
+        assert_eq!(driver.app.document.content(), edited);
+
+        driver.answer(Answer::Save);
+        assert!(matches!(
+            driver.app.draining,
+            Some(Drain {
+                step: Step::Project,
+                ..
+            })
+        ));
+        for message in driver.outputs() {
+            driver.update(message);
+        }
+
+        let saved = Project::from_json(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(saved.shader, edited);
+        assert_eq!(driver.app.document.content(), Project::untitled().shader);
+        assert!(matches!(driver.app.mode, Mode::Project { file: None, .. }));
+        assert!(driver.app.prompt.is_none());
+        assert!(driver.app.draining.is_none());
+        assert!(!driver.app.is_dirty());
+    }
+
+    /// Opens `text` as the file `dir/shader.wesl`, makes the project hold what the editor does, and
+    /// then types, so only the file has unsaved changes.
+    fn dirty_file(driver: &mut Driver, dir: &TempDir) -> std::path::PathBuf {
+        let file = dir.path().join("shader.wesl");
+        fs::write(&file, LIB).unwrap();
+        driver.update(Message::Document(document::Message::FileOpened(Ok((
+            file::Name::from(file.to_str().unwrap()),
+            Arc::new(LIB.to_owned()),
+        )))));
+        driver.type_text("// edited\n");
+        if let Mode::Project { text, .. } = &mut driver.app.mode {
+            *text = driver.app.document.content();
+        }
+        assert!(driver.app.is_file_dirty());
+        assert!(!driver.app.is_project_dirty());
+        file
+    }
+
+    #[test]
+    fn quit_with_a_dirty_file_and_a_clean_project_saves_the_file_and_exits() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut driver = Driver::new();
+        let file = dirty_file(&mut driver, &dir);
+
+        driver.update(Message::CloseRequested);
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::Unsaved {
+                then: Pending::Quit
+            })
+        ));
+        assert!(!driver.exits());
+
+        driver.answer(Answer::Save);
+        let outputs = driver.outputs();
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            format!("// edited\n{LIB}")
+        );
+        for message in outputs {
+            driver.update(message);
+        }
+
+        assert!(driver.exits());
+        assert!(driver.app.draining.is_none());
+        assert!(driver.app.prompt.is_none());
+    }
+
+    #[test]
+    fn a_failed_save_cancels_and_clears_draining() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut driver = Driver::new();
+        let _ = dirty_file(&mut driver, &dir);
+
+        driver.update(Message::CloseRequested);
+        driver.answer(Answer::Save);
+        assert!(driver.app.draining.is_some());
+        let error = file::Error::Io(Arc::new(std::io::Error::other("disk on fire")));
+        driver.update(Message::Document(document::Message::FileSaved(Err(error))));
+
+        assert!(!driver.exits());
+        assert!(driver.app.draining.is_none());
+        assert!(driver.app.prompt.is_none());
+        assert!(driver.app.is_dirty());
+    }
+
+    #[test]
+    fn quit_in_a_clean_folder_writes_settings_and_waits() {
         let dir = folder();
-        let other = folder();
         let mut driver = Driver::new();
         driver.enter(&dir);
-        driver.type_text(" ");
+
+        driver.update(Message::CloseRequested);
+        assert!(driver.app.prompt.is_none());
+        assert!(!driver.exits());
+        assert!(matches!(
+            driver.app.draining,
+            Some(Drain {
+                then: Pending::Quit,
+                step: Step::Queue
+            })
+        ));
+        assert_eq!(in_flight(&driver).unwrap().path, path(SETTINGS));
+
+        assert_eq!(driver.pump(), [SETTINGS]);
+        assert!(driver.exits());
+    }
+
+    /// A way to ask for something that waits for an answer, and whether it has happened.
+    struct Case {
+        name: &'static str,
+        trigger: fn(&mut Driver, &TempDir),
+        happened: fn(&mut Driver) -> bool,
+    }
+
+    fn pick_folder(driver: &mut Driver, next: &TempDir) {
+        driver.update(Message::Opener(folder::opener::Message::FolderPicked(
+            Some(next.path().to_owned()),
+        )));
+    }
+
+    fn pick_project(driver: &mut Driver, _: &TempDir) {
+        let json = include_str!("../assets/test_project.bulin");
+        driver.update(Message::Opener(folder::opener::Message::ProjectPicked(Ok(
+            (
+                file::Name::from("/projects/test.bulin"),
+                Arc::new(json.to_owned()),
+            ),
+        ))));
+    }
+
+    fn opened_project(driver: &mut Driver) -> bool {
+        let json = include_str!("../assets/test_project.bulin");
+        matches!(driver.app.mode, Mode::Project { file: Some(_), .. })
+            && driver.app.document.content() == Project::from_json(json).unwrap().shader
+    }
+
+    /// Whether the app is reading the settings of a folder it opens.
+    fn opening_folder(driver: &mut Driver) -> bool {
+        driver.app.is_loading
+    }
+
+    #[test]
+    fn each_prompt_with_each_continuation_in_a_project() {
+        let cases = [
+            Case {
+                name: "new project",
+                trigger: |driver, _| driver.update(Message::NewProject),
+                happened: |driver| {
+                    matches!(driver.app.mode, Mode::Project { file: None, .. })
+                        && driver.app.document.content() == Project::untitled().shader
+                },
+            },
+            Case {
+                name: "open file",
+                trigger: |driver, _| driver.update(Message::Document(document::Message::OpenFile)),
+                happened: |driver| driver.app.document.is_loading(),
+            },
+            Case {
+                name: "new file",
+                trigger: |driver, _| driver.update(Message::Document(document::Message::NewFile)),
+                happened: |driver| {
+                    matches!(driver.app.mode, Mode::Project { file: Some(_), .. })
+                        && driver.app.document.content() == crate::core::program::DEFAULT_SOURCE
+                },
+            },
+            Case {
+                name: "quit",
+                trigger: |driver, _| driver.update(Message::CloseRequested),
+                happened: Driver::exits,
+            },
+            Case {
+                name: "open folder",
+                trigger: pick_folder,
+                happened: opening_folder,
+            },
+            Case {
+                name: "open project",
+                trigger: pick_project,
+                happened: opened_project,
+            },
+        ];
+
+        for case in cases {
+            for answer in [Answer::Save, Answer::Discard, Answer::Cancel] {
+                let (dir, next) = (tempfile::tempdir().unwrap(), folder());
+                let mut driver = Driver::new();
+                let file = dirty_project(&mut driver, &dir);
+                let edited = driver.app.document.content();
+                let name = format!("{} after {answer:?}", case.name);
+
+                (case.trigger)(&mut driver, &next);
+                assert!(
+                    matches!(driver.app.prompt, Some(Prompt::Unsaved { .. })),
+                    "{name}"
+                );
+                assert!(!(case.happened)(&mut driver), "{name} waits for the answer");
+
+                driver.answer(answer);
+                if answer == Answer::Save {
+                    for message in driver.outputs() {
+                        driver.update(message);
+                    }
+                    let saved = Project::from_json(&fs::read_to_string(&file).unwrap()).unwrap();
+                    assert_eq!(saved.shader, edited, "{name}");
+                }
+                assert!(driver.app.prompt.is_none(), "{name}");
+                assert!(driver.app.draining.is_none(), "{name}");
+                if answer == Answer::Cancel {
+                    assert!(!(case.happened)(&mut driver), "{name}");
+                    assert_eq!(driver.app.document.content(), edited, "{name}");
+                } else {
+                    assert!((case.happened)(&mut driver), "{name}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn each_prompt_with_each_continuation_in_a_folder() {
+        let cases = [
+            Case {
+                name: "close folder",
+                trigger: |driver, _| driver.update(Message::CloseFolder),
+                happened: |driver| !driver.is_folder(),
+            },
+            Case {
+                name: "open document",
+                trigger: |driver, _| driver.explore(explorer::Message::Open(path("other.wesl"))),
+                happened: |driver| driver.app.document.content() == OTHER,
+            },
+            Case {
+                name: "open folder",
+                trigger: pick_folder,
+                happened: opening_folder,
+            },
+            Case {
+                name: "open project",
+                trigger: pick_project,
+                happened: opened_project,
+            },
+            Case {
+                name: "quit",
+                trigger: |driver, _| driver.update(Message::CloseRequested),
+                happened: Driver::exits,
+            },
+        ];
+
+        for case in cases {
+            for answer in [Answer::Save, Answer::Discard, Answer::Cancel] {
+                let (dir, next) = (folder(), folder());
+                let mut driver = Driver::new();
+                driver.enter(&dir);
+                driver.type_text("// edited\n");
+                let name = format!("{} after {answer:?}", case.name);
+
+                (case.trigger)(&mut driver, &next);
+                assert!(
+                    matches!(driver.app.prompt, Some(Prompt::Unsaved { .. })),
+                    "{name}"
+                );
+                assert!(!(case.happened)(&mut driver), "{name} waits for the answer");
+
+                driver.answer(answer);
+                driver.pump();
+                assert!(driver.app.prompt.is_none(), "{name}");
+                assert!(driver.app.draining.is_none(), "{name}");
+                let disk = fs::read_to_string(dir.path().join("main.wesl")).unwrap();
+                match answer {
+                    Answer::Save => {
+                        assert_eq!(disk, format!("// edited\n{MAIN}"), "{name}");
+                        assert!((case.happened)(&mut driver), "{name}");
+                    }
+                    Answer::Discard => {
+                        assert_eq!(disk, MAIN, "{name}");
+                        assert!((case.happened)(&mut driver), "{name}");
+                    }
+                    Answer::Cancel => {
+                        assert_eq!(disk, MAIN, "{name}");
+                        assert!(!(case.happened)(&mut driver), "{name}");
+                        assert!(driver.app.document.is_dirty(), "{name}");
+                    }
+                    Answer::Reload | Answer::KeepMine | Answer::Overwrite => unreachable!(),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_disk_change_during_a_prompt_is_rechecked_on_close() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        driver.type_text("// edited\n");
+        let edited = driver.app.document.content();
 
         driver.update(Message::CloseFolder);
-        assert!(driver.app.notice.is_some());
-        assert!(driver.app.draining.is_none());
-        driver.app.notice = None;
-        driver.update(Message::OpenFolder);
-        assert!(driver.app.notice.is_some());
-        assert!(!driver.app.opener.is_busy());
-        driver.app.notice = None;
-        driver.update(Message::OpenProject);
-        assert!(driver.app.notice.is_some());
+        driver.changes(vec![changed("main.wesl", "// theirs\n")]);
+        assert_eq!(driver.app.document.content(), edited);
+        assert_eq!(driver.app.document.base(), Some(MAIN));
+        assert!(matches!(driver.app.prompt, Some(Prompt::Unsaved { .. })));
 
-        driver.open(&other);
-        assert!(driver.app.draining.is_none());
-        assert_eq!(driver.app.sessions, 2);
+        driver.answer(Answer::Cancel);
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::ChangedOnDisk { deleted: false, .. })
+        ));
+        driver.changes(vec![changed("main.wesl", "// newest\n")]);
+        assert_eq!(driver.app.document.content(), edited);
+
+        driver.answer(Answer::Reload);
+        assert_eq!(driver.app.document.content(), "// newest\n");
+        assert!(!driver.app.document.is_dirty());
+        assert!(driver.app.prompt.is_none());
         assert!(driver.is_folder());
+    }
+
+    #[test]
+    fn keep_mine_makes_the_next_save_overwrite() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        driver.type_text("// edited\n");
+        let edited = driver.app.document.content();
+
+        fs::write(dir.path().join("main.wesl"), "// theirs\n").unwrap();
+        driver.changes(vec![changed("main.wesl", "// theirs\n")]);
+        driver.answer(Answer::KeepMine);
+        assert!(driver.app.prompt.is_none());
+        assert_eq!(driver.app.document.content(), edited);
+
+        driver.save();
+        driver.pump();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("main.wesl")).unwrap(),
+            edited
+        );
+        assert!(driver.app.prompt.is_none());
+        assert!(!driver.app.document.is_dirty());
+    }
+
+    #[test]
+    fn a_conflict_during_another_prompt_raises_nothing() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        driver.type_text("// edited\n");
+        driver.save();
+        let write = in_flight(&driver).unwrap();
+
+        driver.update(Message::CloseFolder);
+        driver.update(Message::Folder(folder::Message::Wrote {
+            session: driver.app.sessions,
+            path: write.path,
+            text: write.text,
+            result: Err(folder::Error::Conflict {
+                disk: Some("// theirs\n".to_owned()),
+            }),
+        }));
+
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::Unsaved {
+                then: Pending::CloseFolder
+            })
+        ));
+        assert!(driver.app.document.is_dirty());
+        assert_eq!(driver.app.document.base(), Some(MAIN));
+
+        driver.answer(Answer::Cancel);
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::ChangedOnDisk { deleted: false, .. })
+        ));
+    }
+
+    #[test]
+    fn overwrite_writes_the_current_editor_text() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        fs::write(dir.path().join("main.wesl"), "// theirs\n").unwrap();
+        driver.type_text("// edited\n");
+        driver.save();
+        driver.pump();
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::Conflict { deleted: false, .. })
+        ));
+
+        driver.type_text("// more\n");
+        driver.answer(Answer::Overwrite);
+        let write = in_flight(&driver).unwrap();
+        assert_eq!(write.text, driver.app.document.content());
+        assert_eq!(write.text, format!("// edited\n// more\n{MAIN}"));
+        assert_eq!(write.expect, crate::core::folder::Expect::Anything);
+
+        driver.pump();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("main.wesl")).unwrap(),
+            write.text
+        );
+        assert!(!driver.app.document.is_dirty());
+        assert!(driver.app.prompt.is_none());
+    }
+
+    #[test]
+    fn after_a_delete_the_next_save_expects_missing() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+
+        fs::remove_file(dir.path().join("main.wesl")).unwrap();
+        driver.changes(vec![Change::Removed(path("main.wesl"))]);
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::ChangedOnDisk { deleted: true, .. })
+        ));
+        driver.answer(Answer::KeepMine);
+        assert!(driver.app.document.is_dirty());
+
+        driver.save();
+        assert_eq!(
+            in_flight(&driver).unwrap().expect,
+            crate::core::folder::Expect::Missing
+        );
+        driver.pump();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("main.wesl")).unwrap(),
+            MAIN
+        );
+        assert!(!driver.app.document.is_dirty());
+    }
+
+    #[test]
+    fn escape_cancels_a_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut driver = Driver::new();
+        let _ = dirty_project(&mut driver, &dir);
+        let edited = driver.app.document.content();
+        driver.update(Message::NewProject);
+        assert!(driver.app.prompt.is_some());
+
+        driver.update(Message::Escape);
+
+        assert!(driver.app.prompt.is_none());
+        assert_eq!(driver.app.document.content(), edited);
+        assert!(driver.app.is_dirty());
+    }
+
+    #[test]
+    fn a_prompt_refuses_other_file_actions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut driver = Driver::new();
+        let _ = dirty_project(&mut driver, &dir);
+        driver.update(Message::NewProject);
+
+        driver.update(Message::CloseRequested);
+        driver.update(Message::OpenFolder);
+        driver.save();
+
+        assert!(matches!(
+            driver.app.prompt,
+            Some(Prompt::Unsaved {
+                then: Pending::NewProject
+            })
+        ));
+        assert!(!driver.app.opener.is_busy());
+        assert!(!driver.app.document.is_loading());
+    }
+
+    #[test]
+    fn the_header_marks_unsaved_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut driver = Driver::new();
+        assert!(!driver.app.is_dirty());
+
+        driver.update(Message::Uniforms(uniforms::Message::AddTime));
+        assert!(driver.app.is_dirty(), "a layout change dirties the project");
+
+        let _ = dirty_project(&mut driver, &dir);
+        assert!(driver.app.is_dirty());
     }
 
     #[test]
@@ -1594,7 +2486,10 @@ mod tests {
             ),
         ))));
 
-        assert!(matches!(driver.app.mode, Mode::Project { file: Some(_) }));
+        assert!(matches!(
+            driver.app.mode,
+            Mode::Project { file: Some(_), .. }
+        ));
         assert_eq!(
             driver.app.document.content(),
             Project::from_json(json).unwrap().shader
