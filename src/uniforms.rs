@@ -105,7 +105,7 @@ impl State {
                         *hex_text = None;
                     }
                     // A zero vector has no angle to give, so the chosen one stays.
-                    Some((open, uniform::Editor::Pad { angle, .. })) if *open == name => {
+                    Some((open, uniform::Editor::Circle { angle })) if *open == name => {
                         if let Type::VecFloat2((x, y)) = value
                             && (x, y) != (0.0, 0.0)
                         {
@@ -161,17 +161,12 @@ impl State {
                 };
                 match uniform.value {
                     Type::VecFloat2((x, y)) => {
-                        // The smallest of 1, 10, 100, ... that the value fits in.
-                        let mut extent = 1.0;
-                        while extent < x.abs().max(y.abs()) {
-                            extent *= 10.0;
-                        }
                         let angle = if (x, y) == (0.0, 0.0) {
                             0.0
                         } else {
                             y.atan2(x)
                         };
-                        self.editor = Some((name, uniform::Editor::Pad { extent, angle }));
+                        self.editor = Some((name, uniform::Editor::Circle { angle }));
                     }
                     Type::Col3(_) | Type::Col4(_) => {
                         let ([r, g, b, _], _) = uniform.value.components();
@@ -195,33 +190,13 @@ impl State {
             }
             Message::Uniform {
                 name,
-                message: uniform::Message::Pad(point),
+                message:
+                    message @ (uniform::Message::Circle(_)
+                    | uniform::Message::Radius(_)
+                    | uniform::Message::Angle(_)),
             } => {
                 self.typing = None;
-                let Some((_, uniform::Editor::Pad { extent, angle })) =
-                    self.editor.as_mut().filter(|(open, _)| *open == name)
-                else {
-                    return Action::none();
-                };
-                let (x, y) = (
-                    (point.x * 2.0 - 1.0) * *extent,
-                    (point.y * 2.0 - 1.0) * *extent,
-                );
-                if (x, y) != (0.0, 0.0) {
-                    *angle = y.atan2(x);
-                }
-                if self.uniforms.set(&name, Type::VecFloat2((x, y))) {
-                    Action::instruction(Instruction::Values)
-                } else {
-                    Action::none()
-                }
-            }
-            Message::Uniform {
-                name,
-                message: message @ (uniform::Message::Radius(_) | uniform::Message::Angle(_)),
-            } => {
-                self.typing = None;
-                let Some((_, uniform::Editor::Pad { angle, .. })) =
+                let Some((_, uniform::Editor::Circle { angle })) =
                     self.editor.as_mut().filter(|(open, _)| *open == name)
                 else {
                     return Action::none();
@@ -238,6 +213,14 @@ impl State {
                 // The value always joins the length to the kept angle, so neither one is lost
                 // when the other changes.
                 let radius = match message {
+                    // The marker stays on the rim, so dragging it only ever turns the value.
+                    uniform::Message::Circle(point) => {
+                        let (towards_x, towards_y) = (point.x * 2.0 - 1.0, point.y * 2.0 - 1.0);
+                        if (towards_x, towards_y) != (0.0, 0.0) {
+                            *angle = towards_y.atan2(towards_x);
+                        }
+                        x.hypot(y)
+                    }
                     uniform::Message::Radius(new) => new.clamp(0.0, f32::MAX),
                     uniform::Message::Angle(degrees) => {
                         *angle = degrees.to_radians();
@@ -798,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn opening_and_closing_a_vec2_shows_and_hides_its_pad() {
+    fn opening_and_closing_a_vec2_shows_and_hides_its_circle() {
         let mut state = vec2s(&["offset"], (0.5, 0.5));
 
         let _ = state.update(uniform("offset", uniform::Message::Open));
@@ -806,8 +789,7 @@ mod tests {
             state.editor,
             Some((
                 "offset".to_owned(),
-                uniform::Editor::Pad {
-                    extent: 1.0,
+                uniform::Editor::Circle {
                     angle: std::f32::consts::FRAC_PI_4
                 }
             ))
@@ -840,34 +822,24 @@ mod tests {
     }
 
     #[test]
-    fn the_pad_s_extent_is_the_power_of_ten_covering_the_value() {
-        for (component, extent) in [(0.5, 1.0), (7.0, 10.0), (-42.0, 100.0)] {
-            let mut state = vec2s(&["offset"], (0.0, component));
-
-            let _ = state.update(uniform("offset", uniform::Message::Open));
-
-            assert!(
-                matches!(state.editor.unwrap().1, uniform::Editor::Pad { extent: open, .. } if open == extent),
-                "{component}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_pad_message_sets_the_value_inside_the_extent() {
+    fn dragging_the_circle_turns_a_vec2_keeping_its_length() {
         let mut state = vec2s(&["offset"], (7.0, 0.0));
         let _ = state.update(uniform("offset", uniform::Message::Open));
 
         let instruction = state
             .update(uniform(
                 "offset",
-                uniform::Message::Pad(iced::Point::new(0.75, 0.0)),
+                uniform::Message::Circle(iced::Point::new(0.5, 0.1)),
             ))
             .instruction;
 
         assert!(matches!(instruction, Some(Instruction::Values)));
-        assert_eq!(value(&state), Type::VecFloat2((5.0, -10.0)));
+        let Type::VecFloat2((x, y)) = value(&state) else {
+            panic!("not a vec2");
+        };
+        assert!(x.abs() < 1e-5 && (y + 7.0).abs() < 1e-5, "{x}, {y}");
     }
+
     #[test]
     fn the_angle_turns_a_vec2_keeping_its_length() {
         let mut state = vec2s(&["offset"], (2.0, 0.0));
