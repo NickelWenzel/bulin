@@ -3,14 +3,17 @@
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use iced::widget::{
-    button, column, combo_box, container, row, rule, space, stack, text, text_input,
+    button, canvas, column, combo_box, container, row, rule, space, stack, text, text_input,
 };
-use iced::{Center, Color, Element, Fill, FillPortion, Length, Point, Theme, border, gradient};
+use iced::{
+    Center, Color, Element, Fill, FillPortion, Length, Point, Theme, Vector, border, gradient,
+};
 use num_traits::AsPrimitive;
 
 use super::{ROW_HEIGHT, TYPING_ID, Typing};
-use crate::control::{outside, pad, popover, scrub};
+use crate::control::{outside, pad, popover, scrub, trackball};
 use crate::core::color;
+use crate::core::rotation::Rotation;
 use crate::core::uniform::{Error, Type, Uniform, Uniforms, split};
 
 #[derive(Debug, Clone)]
@@ -35,10 +38,13 @@ pub enum Message {
     HexChanged(String),
     /// Applies the typed hex code when the color can hold it.
     HexSubmitted,
-    /// Points a vector to this point of its disc, in `[0, 1]²`, keeping its length and side.
-    Disc(Point),
-    /// Turns a vector to the other side of its disc, toward or away from the viewer.
-    Flip,
+    /// Rolls a vector's sphere by this drag, in radii with `y` up, keeping its length.
+    Turn(Vector),
+    /// Turns a vector to this polar angle in degrees from `+z`, keeping its azimuth and length.
+    Polar(f32),
+    /// Turns a vector to this azimuth in degrees counterclockwise from `+x`, keeping its polar
+    /// angle and length.
+    Azimuth(f32),
     /// Sets a vector's length, keeping its direction.
     Length(f32),
 }
@@ -56,16 +62,16 @@ pub enum Editor {
         saturation: f32,
         hex_text: Option<String>,
     },
-    /// A direction disc and a length. The unit direction is kept so it survives a length of 0,
-    /// and its `z`'s sign, even a zero's, tells which side of the disc it points to.
-    Direction { direction: (f32, f32, f32) },
+    /// A trackball and a length. The sphere's rotation takes `+z` to the vector's direction
+    /// and is kept so the direction survives a length of 0 and the sphere keeps its twist.
+    Sphere { rotation: Rotation },
 }
 
 const AXES: [&str; 4] = ["x", "y", "z", "w"];
 
 const CHANNELS: [&str; 4] = ["r", "g", "b", "a"];
 
-/// The side of the square a pad, circle or disc fills, in logical pixels.
+/// The side of the square a pad, circle or sphere fills, in logical pixels.
 const PAD_SIZE: f32 = 160.0;
 
 /// The thickness of a color picker's hue and alpha strips, in logical pixels.
@@ -119,7 +125,7 @@ pub fn view<'a>(
                 .padding([0, 4])
                 .height(ROW_HEIGHT);
             let content = match editor {
-                Some(&Editor::Direction { direction }) => Some(disc(uniform, value, direction)),
+                Some(&Editor::Sphere { rotation }) => Some(sphere(uniform, value, rotation)),
                 _ => None,
             };
 
@@ -254,51 +260,36 @@ fn circle<'a>(uniform: &'a Uniform, (x, y): (f32, f32), angle: f32) -> Element<'
     })
 }
 
-/// The popover of a vec3: a disc picking the unit `direction` seen from the front, the side it
-/// points to, the length, and the components' fields.
-fn disc<'a>(
+/// The popover of a vec3: a trackball turned by `rotation`, the length and spherical angles,
+/// and the components' fields.
+fn sphere<'a>(
     uniform: &'a Uniform,
     (x, y, z): (f32, f32, f32),
-    direction: (f32, f32, f32),
+    rotation: Rotation,
 ) -> Element<'a, super::Message> {
     let value = uniform.value;
     let length = split((x, y, z)).map_or(0.0, |(length, _)| length);
-    let disc = stack![
-        container(space())
-            .width(Fill)
-            .height(Fill)
-            .style(|theme: &Theme| container::Style {
-                background: Some(theme.palette().background.weak.color.into()),
-                border: border::rounded(PAD_SIZE / 2.0),
-                ..container::Style::default()
-            }),
-        container(rule::horizontal(1).style(rule::weak)).center_y(Fill),
-        container(rule::vertical(1).style(rule::weak)).center_x(Fill),
-        pad::pad(
-            Point::new((direction.0 + 1.0) / 2.0, (direction.1 + 1.0) / 2.0),
-            Message::Disc,
-        ),
+    let (polar, azimuth) = rotation.angles();
+    let sphere = canvas(trackball::trackball(rotation, Message::Turn))
+        .width(PAD_SIZE)
+        .height(PAD_SIZE);
+    let spherical = row![
+        scrub::scrub(length, Message::Length)
+            .label("r")
+            .speed(0.01)
+            .range(0.0..=f32::MAX)
+            .height(ROW_HEIGHT),
+        scrub::scrub(polar.to_degrees(), Message::Polar)
+            .label("θ")
+            .speed(1.0)
+            .range(0.0..=180.0)
+            .height(ROW_HEIGHT),
+        scrub::scrub(azimuth.to_degrees(), Message::Azimuth)
+            .label("φ")
+            .speed(1.0)
+            .height(ROW_HEIGHT),
     ]
-    .width(PAD_SIZE)
-    .height(PAD_SIZE);
-    let side = button(
-        text(if direction.2.is_sign_negative() {
-            "Back"
-        } else {
-            "Front"
-        })
-        .size(14)
-        .center()
-        .height(Fill),
-    )
-    .on_press(Message::Flip)
-    .padding([0, 6])
-    .height(ROW_HEIGHT);
-    let length = scrub::scrub(length, Message::Length)
-        .label("length")
-        .speed(0.01)
-        .range(0.0..=f32::MAX)
-        .height(ROW_HEIGHT);
+    .spacing(2);
     let fields = row((0..3).map(|index| {
         scrub::scrub([x, y, z][index], move |component: f32| {
             Message::Set(
@@ -314,7 +305,7 @@ fn disc<'a>(
     }))
     .spacing(2);
 
-    let content: Element<'a, Message> = column![disc, row![side, length].spacing(2), fields]
+    let content: Element<'a, Message> = column![sphere, spherical, fields]
         .spacing(4)
         .padding(8)
         .width(PAD_SIZE + 16.0)
