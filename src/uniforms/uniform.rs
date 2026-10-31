@@ -20,8 +20,8 @@ pub enum Message {
     StartTyping(usize),
     /// Opens the value's editor in a popover.
     Open,
-    /// Moves a vector to this point of its pad, in `[0, 1]²`.
-    Pad(Point),
+    /// Turns a vector toward this point of its circle, in `[0, 1]²`, keeping its length.
+    Circle(Point),
     /// Sets a vector's length, keeping its angle.
     Radius(f32),
     /// Turns a vector to this angle in degrees, counterclockwise from the x axis, keeping its
@@ -46,9 +46,9 @@ pub enum Message {
 /// The open popover of a uniform, holding what its value can't give back.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Editor {
-    /// An XY pad spanning `[-extent, extent]²`, chosen when it opens so it doesn't move along.
-    /// The angle, in radians, is kept so it survives a length of 0.
-    Pad { extent: f32, angle: f32 },
+    /// A circle picking the angle and a length. The angle, in radians, is kept so it survives
+    /// a length of 0.
+    Circle { angle: f32 },
     /// An HSV picker. The hue and saturation are kept for when the value can't tell them, as
     /// for black and greys, and the hex code being typed, if any, replaces the derived one.
     Color {
@@ -65,7 +65,7 @@ const AXES: [&str; 4] = ["x", "y", "z", "w"];
 
 const CHANNELS: [&str; 4] = ["r", "g", "b", "a"];
 
-/// The side of the pad's square, in logical pixels.
+/// The side of the square a pad, circle or disc fills, in logical pixels.
 const PAD_SIZE: f32 = 160.0;
 
 /// The thickness of a color picker's hue and alpha strips, in logical pixels.
@@ -97,7 +97,7 @@ pub fn view<'a>(
                 .padding([0, 4])
                 .height(ROW_HEIGHT);
             let content = match editor {
-                Some(&Editor::Pad { extent, angle }) => Some(xy_pad(uniform, value, extent, angle)),
+                Some(&Editor::Circle { angle }) => Some(circle(uniform, value, angle)),
                 _ => None,
             };
 
@@ -193,32 +193,25 @@ pub fn view<'a>(
         .into()
 }
 
-/// The popover of a vec2: a pad over axes and the unit circle spanning `[-extent, extent]²`,
-/// the extent, the length and `angle`, and the components' fields.
-fn xy_pad<'a>(
-    uniform: &'a Uniform,
-    (x, y): (f32, f32),
-    extent: f32,
-    angle: f32,
-) -> Element<'a, super::Message> {
+/// The popover of a vec2: a circle over axes with a marker at `angle` on its rim, the length
+/// and angle, and the components' fields.
+fn circle<'a>(uniform: &'a Uniform, (x, y): (f32, f32), angle: f32) -> Element<'a, super::Message> {
     let value = uniform.value;
-    let diameter = PAD_SIZE / extent;
-    let circle = container(space())
-        .width(diameter)
-        .height(diameter)
-        .style(move |theme: &Theme| container::Style {
-            border: border::rounded(diameter / 2.0)
-                .color(theme.palette().background.strong.color)
-                .width(1),
-            ..container::Style::default()
-        });
-    let axes = stack![
-        container(rule::horizontal(1)).center_y(Fill),
-        container(rule::vertical(1)).center_x(Fill),
-        container(circle).center(Fill),
+    let circle = stack![
+        container(space())
+            .width(Fill)
+            .height(Fill)
+            .style(|theme: &Theme| container::Style {
+                border: border::rounded(PAD_SIZE / 2.0)
+                    .color(theme.palette().background.strong.color)
+                    .width(1),
+                ..container::Style::default()
+            }),
+        container(rule::horizontal(1).style(rule::weak)).center_y(Fill),
+        container(rule::vertical(1).style(rule::weak)).center_x(Fill),
         pad::pad(
-            Point::new((x / extent + 1.0) / 2.0, (y / extent + 1.0) / 2.0),
-            Message::Pad,
+            Point::new((angle.cos() + 1.0) / 2.0, (angle.sin() + 1.0) / 2.0),
+            Message::Circle,
         ),
     ]
     .width(PAD_SIZE)
@@ -250,20 +243,11 @@ fn xy_pad<'a>(
     ]
     .spacing(2);
 
-    let content: Element<'a, Message> = column![
-        axes,
-        text(format!("extent {extent}"))
-            .size(12)
-            .style(|theme: &Theme| text::Style {
-                color: Some(theme.palette().background.base.text.scale_alpha(0.5)),
-            }),
-        polar,
-        fields,
-    ]
-    .spacing(4)
-    .padding(8)
-    .width(PAD_SIZE + 16.0)
-    .into();
+    let content: Element<'a, Message> = column![circle, polar, fields]
+        .spacing(4)
+        .padding(8)
+        .width(PAD_SIZE + 16.0)
+        .into();
     content.map(move |message| super::Message::Uniform {
         name: uniform.name().to_owned(),
         message,
