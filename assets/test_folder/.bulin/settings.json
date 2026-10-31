@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "main": "main.wesl",
+  "uniforms": [],
+  "clock": {
+    "elapsed": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "running": true
+  }
+}
