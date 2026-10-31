@@ -23,6 +23,8 @@ use native::stream;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{Handle, create_dir, read, remove, rename, scan_dir, write};
 #[cfg(target_arch = "wasm32")]
+pub(crate) use web::store_project;
+#[cfg(target_arch = "wasm32")]
 use web::stream;
 #[cfg(target_arch = "wasm32")]
 pub use web::{Handle, create_dir, read, remove, rename, scan, scan_dir, write};
@@ -975,6 +977,11 @@ impl State {
     /// The folder's name, for a title.
     pub fn name(&self) -> &str {
         self.handle.name()
+    }
+
+    /// Where the folder is stored.
+    pub fn handle(&self) -> &Handle {
+        &self.handle
     }
 
     /// What stays wrong with the folder, for as long as it does.

@@ -686,19 +686,35 @@ impl Application {
                 }
                 self.ask(Pending::NewProject, now)
             }
-            Message::SaveProject | Message::SaveProjectAs => {
+            Message::SaveProject => {
                 if self.refuse() {
                     return Task::none();
                 }
                 let Mode::Project { file, .. } = &self.mode else {
                     return Task::none();
                 };
-                let file = if matches!(message, Message::SaveProject) {
-                    file.clone()
-                } else {
-                    None
-                };
+                let file = file.clone();
                 self.save_project(file)
+            }
+            Message::SaveProjectAs => {
+                if self.refuse() || !matches!(self.mode, Mode::Project { .. }) {
+                    return Task::none();
+                }
+                self.is_loading = true;
+                self.notice = None;
+                let shader = self.document.content();
+                let uniforms = self.uniforms.uniforms().clone();
+                let json =
+                    core::Project::new(shader.clone(), uniforms.clone(), self.uniforms.clock())
+                        .to_json();
+
+                Task::perform(
+                    async move {
+                        let name = file::save_file(None, "project.bulin", json).await?;
+                        Ok((name, shader, uniforms))
+                    },
+                    Message::ProjectSaved,
+                )
             }
             Message::ProjectSaved(result) => {
                 self.is_loading = false;
@@ -930,7 +946,7 @@ impl Application {
         self.start(then, now)
     }
 
-    /// Saves the project to `file`, or to a file the user picks.
+    /// Saves the project to `file`, or where the user says.
     fn save_project(&mut self, file: Option<file::Name>) -> Task<Message> {
         self.is_loading = true;
         self.notice = None;
@@ -941,7 +957,7 @@ impl Application {
 
         Task::perform(
             async move {
-                let name = file::save_file(file, "project.bulin", json).await?;
+                let name = file::save_project(file, json).await?;
                 Ok((name, shader, uniforms))
             },
             Message::ProjectSaved,
@@ -1156,6 +1172,11 @@ impl Application {
             }
         };
         let content = column![header, body];
+        // The library entry that is open, which the library mustn't rename or delete.
+        let current = match &self.mode {
+            Mode::Folder(state) => state.handle().library_id(),
+            Mode::Project { file, .. } => file.as_ref().and_then(file::Name::library_id),
+        };
 
         // The content keeps its place in the widget tree whether a modal is open or not, so
         // opening one doesn't reset the editor's document, the combo box or the panes.
@@ -1168,7 +1189,7 @@ impl Application {
             .push(layer.map(|layer| modal(layer, Some(Message::CloseModal))))
             .push(
                 self.opener
-                    .view()
+                    .view(current)
                     .map(|opener| modal(opener.map(Message::Opener), Some(Message::Escape))),
             )
             // Only an answer closes a question.

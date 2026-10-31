@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::Error;
+use crate::core::library;
 
 #[derive(Debug, Clone)]
 pub struct Name(PathBuf);
@@ -13,6 +14,11 @@ impl Name {
 
     pub fn file_name(&self) -> Option<&str> {
         self.0.file_name()?.to_str()
+    }
+
+    /// Nothing: a file on disk isn't in the browser's library.
+    pub fn library_id(&self) -> Option<library::Id> {
+        None
     }
 }
 
@@ -65,5 +71,34 @@ pub async fn save_file(
         .map_err(Error::Io)
 }
 
+/// Writes the project `json` to `path`, or to a file the user picks.
+pub async fn save_project(path: Option<Name>, json: String) -> Result<Name, Error> {
+    save_file(path, "project.bulin", json).await
+}
+
 /// Nothing: closing the window asks first through its close request.
 pub fn warn_on_unload(_dirty: bool) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_project_writes_to_a_known_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sky.bulin");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let name = runtime
+            .block_on(save_project(
+                Some(Name::from(path.to_str().unwrap())),
+                "{}".to_owned(),
+            ))
+            .unwrap();
+
+        assert_eq!(name.0, path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+    }
+}

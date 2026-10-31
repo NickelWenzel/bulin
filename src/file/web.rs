@@ -1,4 +1,5 @@
 use std::cell::{Cell, OnceCell};
+use std::io;
 use std::sync::Arc;
 
 use wasm_bindgen::JsCast;
@@ -6,17 +7,38 @@ use wasm_bindgen::closure::Closure;
 use web_sys::BeforeUnloadEvent;
 
 use super::Error;
+use crate::core::library;
+use crate::folder;
 
+/// A file the user opened or saved: a project in the browser's library, or a file uploaded or
+/// downloaded under its name.
 #[derive(Debug, Clone)]
-pub struct Name(String);
+pub enum Name {
+    Library { id: library::Id, name: String },
+    Upload(String),
+}
 
 impl Name {
     pub fn as_str(&self) -> Option<&str> {
-        Some(&self.0)
+        Some(self.name())
     }
 
     pub fn file_name(&self) -> Option<&str> {
-        Some(&self.0)
+        Some(self.name())
+    }
+
+    /// The library entry holding the project, if the library holds it.
+    pub fn library_id(&self) -> Option<library::Id> {
+        match self {
+            Self::Library { id, .. } => Some(*id),
+            Self::Upload(_) => None,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Library { name, .. } | Self::Upload(name) => name,
+        }
     }
 }
 
@@ -28,7 +50,7 @@ pub async fn open_file() -> Result<(Name, Arc<String>), Error> {
         .ok_or(Error::DialogClosed)?;
 
     String::from_utf8(picked_file.read().await)
-        .map(|contents| (Name(picked_file.file_name()), Arc::new(contents)))
+        .map(|contents| (Name::Upload(picked_file.file_name()), Arc::new(contents)))
         .map_err(Error::ReadFile)
 }
 
@@ -39,7 +61,7 @@ pub async fn save_file(
     suggested_name: &str,
     contents: String,
 ) -> Result<Name, Error> {
-    let filename = filename.map_or(suggested_name.to_owned(), |f| f.0);
+    let filename = filename.map_or(suggested_name.to_owned(), |f| f.name().to_owned());
     let file_handle = rfd::AsyncFileDialog::new()
         .set_title("Save file...")
         .set_file_name(filename)
@@ -50,9 +72,39 @@ pub async fn save_file(
     file_handle
         .write(contents.as_bytes())
         .await
-        .map(|()| Name(file_handle.file_name()))
+        .map(|()| Name::Upload(file_handle.file_name()))
         .map_err(Arc::new)
         .map_err(Error::Io)
+}
+
+/// Stores the project `json` in the browser's library: under its entry when `name` is a library
+/// project, otherwise as a new entry named by the user.
+pub async fn save_project(name: Option<Name>, json: String) -> Result<Name, Error> {
+    let (id, name) = match name {
+        Some(Name::Library { id, name }) => (Some(id), name),
+        Some(Name::Upload(name)) => (None, ask_name(&name)?),
+        None => (None, ask_name("project")?),
+    };
+    let id = folder::store_project(id, name.clone(), json)
+        .await
+        .map_err(|error| Error::Io(Arc::new(io::Error::other(error.to_string()))))?;
+    Ok(Name::Library { id, name })
+}
+
+/// A name for a new library project, suggesting `suggested`, or `DialogClosed` when the user gives
+/// none.
+fn ask_name(suggested: &str) -> Result<String, Error> {
+    let answer = web_sys::window()
+        .and_then(|window| {
+            window
+                .prompt_with_message_and_default("Project name", suggested)
+                .ok()
+        })
+        .flatten();
+    answer
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .ok_or(Error::DialogClosed)
 }
 
 thread_local! {

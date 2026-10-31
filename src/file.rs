@@ -8,7 +8,7 @@ pub enum Error {
     DialogClosed,
     #[error("Could not read file content")]
     ReadFile(#[from] FromUtf8Error),
-    #[error("I/O error occurred")]
+    #[error("I/O error occurred: {0}")]
     Io(#[source] Arc<io::Error>),
 }
 

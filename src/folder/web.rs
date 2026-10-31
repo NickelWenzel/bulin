@@ -1,7 +1,8 @@
 //! A folder in the browser's library: an entry of IndexedDB's `entries` store, whose files are
 //! records of the `files` store keyed by the entry's id and the file's path, and the modal that
-//! lists the library's folders.
+//! lists the library's folders and projects.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -14,17 +15,18 @@ use idb::{
 };
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
 use web_sys::DomException;
 
 use super::opener::Instruction;
 use super::{Error, Watched};
 use crate::action::Action;
-use crate::core::Uniforms;
 use crate::core::folder::{
     self, Change, Entry, Expect, MAX_TEXT, Path, SETTINGS, Settings, reads_text,
 };
 use crate::core::library::{self, Id, Upper};
 use crate::core::program::DEFAULT_SOURCE;
+use crate::core::{Project, Uniforms};
 use crate::file;
 
 const DATABASE: &str = "bulin";
@@ -33,10 +35,17 @@ const VERSION: u32 = 1;
 const ENTRIES: &str = "entries";
 /// The store of the entries' files: their texts, keyed by `[id, path]`.
 const FILES: &str = "files";
-/// The `kind` of an entry that is a folder.
-const FOLDER: &str = "folder";
 /// The file a new folder starts with, as its main file.
 const MAIN: &str = "main.wesl";
+/// The file holding a project's JSON.
+const PROJECT: &str = "project.bulin";
+
+thread_local! {
+    /// Whether the browser was asked to keep the library.
+    static ASKED: Cell<bool> = const { Cell::new(false) };
+    /// Whether the browser refused to keep the library, until the library modal says so.
+    static REFUSED: Cell<bool> = const { Cell::new(false) };
+}
 
 /// A folder, by its library entry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -45,30 +54,59 @@ pub struct Handle {
     name: String,
 }
 
-/// The library modal, listing the folders to open.
+/// The library modal, listing the folders or the projects to open, create, rename and delete.
 #[derive(Debug, Default)]
 pub struct Opener {
-    shown: Option<Section>,
-    entries: Vec<(Id, String)>,
-    /// The name typed for a new folder.
+    /// The kind of entries the modal lists, while it shows.
+    shown: Option<Kind>,
+    entries: Vec<Item>,
+    /// The name typed for a new entry.
     new_name: String,
-    /// Whether a folder is being created or a project uploaded.
+    /// The entry being renamed or asked about deleting.
+    edit: Option<Edit>,
+    /// Whether the browser refused to keep the library, which the modal says this once.
+    refused: bool,
+    /// Whether an entry is being created, read, renamed or deleted, or a project uploaded.
     busy: bool,
 }
 
+/// What a library entry holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Section {
-    Folders,
-    Projects,
+pub enum Kind {
+    Folder,
+    Project,
+}
+
+/// A library entry, as the modal lists it.
+#[derive(Debug, Clone)]
+pub struct Item {
+    id: Id,
+    name: String,
+    kind: Kind,
+}
+
+/// A change to one entry the user is making.
+#[derive(Debug)]
+enum Edit {
+    Rename { id: Id, name: String },
+    Delete(Id),
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Listed(Result<Vec<(Id, String)>, Error>),
-    Open(Id, String),
+    Listed(Result<Vec<Item>, Error>),
+    Open(Item),
+    ProjectRead(Result<(file::Name, Arc<String>), Error>),
     NameChanged(String),
     Create,
-    Created(Result<Handle, Error>),
+    Created(Kind, Result<Item, Error>),
+    Rename(Item),
+    Delete(Item),
+    EditChanged(String),
+    Confirm,
+    Cancel,
+    Renamed(Result<(), Error>),
+    Deleted(Result<(), Error>),
     Upload,
     Uploaded(Result<(file::Name, Arc<String>), file::Error>),
 }
@@ -87,19 +125,38 @@ impl Handle {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    /// The library entry holding the folder.
+    pub fn library_id(&self) -> Option<Id> {
+        Some(self.id)
+    }
+}
+
+impl Kind {
+    /// The entry's `kind` field.
+    fn as_str(self) -> &'static str {
+        match self {
+            Kind::Folder => "folder",
+            Kind::Project => "project",
+        }
+    }
 }
 
 impl Opener {
     /// Shows the library's folders.
     pub fn open_folder(&mut self) -> Task<Message> {
-        self.shown = Some(Section::Folders);
+        self.shown = Some(Kind::Folder);
+        self.edit = None;
+        self.refused = REFUSED.replace(false);
         Task::perform(list(), Message::Listed)
     }
 
-    /// Shows the projects to open.
+    /// Shows the library's projects and the upload of a project file.
     pub fn open_project(&mut self) -> Task<Message> {
-        self.shown = Some(Section::Projects);
-        Task::none()
+        self.shown = Some(Kind::Project);
+        self.edit = None;
+        self.refused = REFUSED.replace(false);
+        Task::perform(list(), Message::Listed)
     }
 
     pub fn update(&mut self, message: Message) -> Action<Instruction, Message> {
@@ -114,32 +171,149 @@ impl Opener {
                     "Could not read the library: {error}"
                 )))
             }
-            Message::Open(id, name) => {
+            Message::Open(Item {
+                id,
+                name,
+                kind: Kind::Folder,
+            }) => {
                 self.shown = None;
                 Action::instruction(Instruction::OpenFolder(Handle { id, name }))
+            }
+            Message::Open(Item {
+                id,
+                name,
+                kind: Kind::Project,
+            }) => {
+                if self.busy {
+                    return Action::none();
+                }
+                self.shown = None;
+                self.busy = true;
+                let path = Path::new(PROJECT).expect("invariant: the project's path is valid");
+                let handle = Handle {
+                    id,
+                    name: name.clone(),
+                };
+                let name = file::Name::Library { id, name };
+                Action::task(Task::perform(
+                    async move {
+                        let text = read(handle, path).await?;
+                        Ok((name, Arc::new(text)))
+                    },
+                    Message::ProjectRead,
+                ))
+            }
+            Message::ProjectRead(result) => {
+                self.busy = false;
+                Action::instruction(match result {
+                    Ok((name, text)) => Instruction::OpenProject(name, text),
+                    Err(error) => {
+                        Instruction::Failed(format!("Could not open the project: {error}"))
+                    }
+                })
             }
             Message::NameChanged(name) => {
                 self.new_name = name;
                 Action::none()
             }
             Message::Create => {
-                let name = self.new_name.trim();
+                let name = self.new_name.trim().to_owned();
+                let Some(kind) = self.shown else {
+                    return Action::none();
+                };
                 if name.is_empty() || self.busy {
                     return Action::none();
                 }
                 self.busy = true;
-                Action::task(Task::perform(create(name.to_owned()), Message::Created))
+                let task = match kind {
+                    Kind::Folder => {
+                        Task::perform(create(name), move |result| Message::Created(kind, result))
+                    }
+                    Kind::Project => Task::perform(
+                        async move {
+                            let json = Project::untitled().to_json();
+                            let id = store_project(None, name.clone(), json).await?;
+                            Ok(Item { id, name, kind })
+                        },
+                        move |result| Message::Created(kind, result),
+                    ),
+                };
+                Action::task(task)
             }
-            Message::Created(Ok(handle)) => {
+            Message::Created(_, Ok(Item { id, name, kind })) => {
                 self.busy = false;
                 self.shown = None;
                 self.new_name.clear();
-                Action::instruction(Instruction::OpenFolder(handle))
+                Action::instruction(match kind {
+                    Kind::Folder => Instruction::OpenFolder(Handle { id, name }),
+                    // A new project holds what `Project::untitled` makes, as stored.
+                    Kind::Project => Instruction::OpenProject(
+                        file::Name::Library { id, name },
+                        Arc::new(Project::untitled().to_json()),
+                    ),
+                })
             }
-            Message::Created(Err(error)) => {
+            Message::Created(kind, Err(error)) => {
                 self.busy = false;
                 Action::instruction(Instruction::Failed(format!(
-                    "Could not create the folder: {error}"
+                    "Could not create the {}: {error}",
+                    kind.as_str()
+                )))
+            }
+            Message::Rename(item) => {
+                self.edit = Some(Edit::Rename {
+                    id: item.id,
+                    name: item.name,
+                });
+                Action::none()
+            }
+            Message::Delete(item) => {
+                self.edit = Some(Edit::Delete(item.id));
+                Action::none()
+            }
+            Message::EditChanged(changed) => {
+                if let Some(Edit::Rename { name, .. }) = &mut self.edit {
+                    *name = changed;
+                }
+                Action::none()
+            }
+            Message::Confirm => {
+                if self.busy {
+                    return Action::none();
+                }
+                let task = match &self.edit {
+                    Some(Edit::Rename { id, name }) => {
+                        let name = name.trim().to_owned();
+                        if name.is_empty() {
+                            return Action::none();
+                        }
+                        Task::perform(rename_entry(*id, name), Message::Renamed)
+                    }
+                    Some(Edit::Delete(id)) => Task::perform(delete_entry(*id), Message::Deleted),
+                    None => return Action::none(),
+                };
+                self.busy = true;
+                Action::task(task)
+            }
+            Message::Cancel => {
+                self.edit = None;
+                Action::none()
+            }
+            Message::Renamed(Ok(())) | Message::Deleted(Ok(())) => {
+                self.busy = false;
+                self.edit = None;
+                Action::task(Task::perform(list(), Message::Listed))
+            }
+            Message::Renamed(Err(error)) => {
+                self.busy = false;
+                Action::instruction(Instruction::Failed(format!(
+                    "Could not rename the entry: {error}"
+                )))
+            }
+            Message::Deleted(Err(error)) => {
+                self.busy = false;
+                Action::instruction(Instruction::Failed(format!(
+                    "Could not delete the entry: {error}"
                 )))
             }
             Message::Upload => {
@@ -160,51 +334,90 @@ impl Opener {
         }
     }
 
-    /// The modal, while it shows.
-    pub fn view(&self) -> Option<Element<'_, Message>> {
-        let content: Element<'_, Message> = match self.shown? {
-            Section::Folders => {
-                let entries: Element<'_, Message> = if self.entries.is_empty() {
-                    text("No folders yet.").into()
-                } else {
-                    scrollable(
-                        column(self.entries.iter().map(|(id, name)| {
-                            row![
-                                text(name).width(Fill),
-                                button("Open").on_press(Message::Open(*id, name.clone())),
-                            ]
-                            .spacing(10)
-                            .align_y(Center)
-                            .into()
-                        }))
-                        .spacing(5),
-                    )
-                    .into()
-                };
-                let can_create = !self.busy && !self.new_name.trim().is_empty();
-                let create = row![
-                    text_input("Name", &self.new_name)
-                        .on_input(Message::NameChanged)
-                        .on_submit(Message::Create),
-                    button("New Folder").on_press_maybe(can_create.then_some(Message::Create)),
-                ]
-                .spacing(10);
-
-                column![text("Folders").size(20), entries, create]
-                    .spacing(15)
-                    .into()
-            }
-            Section::Projects => column![
-                text("Projects").size(20),
-                button("Upload a .bulin file").on_press(Message::Upload),
-            ]
-            .spacing(15)
-            .into(),
+    /// The modal, while it shows. The entry `current` is open, so it can't be renamed or deleted.
+    pub fn view(&self, current: Option<Id>) -> Option<Element<'_, Message>> {
+        let kind = self.shown?;
+        let (title, empty, new) = match kind {
+            Kind::Folder => ("Folders", "No folders yet.", "New Folder"),
+            Kind::Project => ("Projects", "No projects yet.", "New Project"),
         };
+
+        let items = self
+            .entries
+            .iter()
+            .filter(|item| item.kind == kind)
+            .map(|item| {
+                let entry = match &self.edit {
+                    Some(Edit::Rename { id, name }) if *id == item.id => {
+                        let can_rename = !self.busy && !name.trim().is_empty();
+                        row![
+                            text_input("Name", name)
+                                .on_input(Message::EditChanged)
+                                .on_submit(Message::Confirm),
+                            button("Rename").on_press_maybe(can_rename.then_some(Message::Confirm)),
+                            button("Cancel")
+                                .style(button::secondary)
+                                .on_press(Message::Cancel),
+                        ]
+                    }
+                    Some(Edit::Delete(id)) if *id == item.id => row![
+                        text(format!("Delete {}?", item.name)).width(Fill),
+                        button("Delete")
+                            .style(button::danger)
+                            .on_press_maybe((!self.busy).then_some(Message::Confirm)),
+                        button("Cancel")
+                            .style(button::secondary)
+                            .on_press(Message::Cancel),
+                    ],
+                    Some(Edit::Rename { .. } | Edit::Delete(_)) | None => {
+                        let is_open = current == Some(item.id);
+                        let can_change = !self.busy && !is_open;
+                        row![
+                            text(&item.name).width(Fill),
+                            is_open.then(|| text("open").size(14)),
+                            button("Open").on_press(Message::Open(item.clone())),
+                            button("Rename")
+                                .style(button::secondary)
+                                .on_press_maybe(can_change.then(|| Message::Rename(item.clone()))),
+                            button("Delete")
+                                .style(button::secondary)
+                                .on_press_maybe(can_change.then(|| Message::Delete(item.clone()))),
+                        ]
+                    }
+                };
+                entry.spacing(10).align_y(Center).into()
+            })
+            .collect::<Vec<Element<'_, Message>>>();
+        let entries: Element<'_, Message> = if items.is_empty() {
+            text(empty).into()
+        } else {
+            scrollable(column(items).spacing(5)).into()
+        };
+
+        let can_create = !self.busy && !self.new_name.trim().is_empty();
+        let create = row![
+            text_input("Name", &self.new_name)
+                .on_input(Message::NameChanged)
+                .on_submit(Message::Create),
+            button(new).on_press_maybe(can_create.then_some(Message::Create)),
+        ]
+        .spacing(10);
+
+        let content = column![
+            self.refused.then(|| text(
+                "The browser may clear stored folders and projects when space runs low."
+            )),
+            text(title).size(20),
+            entries,
+            create,
+            (kind == Kind::Project)
+                .then(|| button("Upload a .bulin file").on_press(Message::Upload)),
+        ]
+        .spacing(15);
 
         Some(
             container(content)
-                .width(400)
+                .width(560)
                 .height(iced::Shrink.max(500))
                 .padding(20)
                 .style(container::rounded_box)
@@ -215,9 +428,10 @@ impl Opener {
     /// Hides the modal.
     pub fn close(&mut self) {
         self.shown = None;
+        self.edit = None;
     }
 
-    /// Whether the modal shows or a folder is being created or a project uploaded.
+    /// Whether the modal shows, or an entry is being created or read or a project uploaded.
     pub fn is_busy(&self) -> bool {
         self.shown.is_some() || self.busy
     }
@@ -502,8 +716,8 @@ pub async fn scan(handle: &Handle) -> Result<Watched, Error> {
     Ok(Watched::Scan(scan))
 }
 
-/// The library's folders, by id and name.
-async fn list() -> Result<Vec<(Id, String)>, Error> {
+/// The library's entries.
+async fn list() -> Result<Vec<Item>, Error> {
     let database = open().await?;
     let transaction = database
         .0
@@ -520,36 +734,31 @@ async fn list() -> Result<Vec<(Id, String)>, Error> {
     let field = |entry: &JsValue, name: &str| Reflect::get(entry, &JsValue::from_str(name)).ok();
     Ok(entries
         .iter()
-        .filter(|entry| {
-            field(entry, "kind")
-                .and_then(|kind| kind.as_string())
-                .as_deref()
-                == Some(FOLDER)
-        })
         .filter_map(|entry| {
+            let kind = field(entry, "kind")?.as_string()?;
+            let kind = [Kind::Folder, Kind::Project]
+                .into_iter()
+                .find(|known| known.as_str() == kind)?;
             let id = field(entry, "id")?.as_f64()?;
             let name = field(entry, "name")?.as_string()?;
-            Some((Id::new(id as u64), name))
+            Some(Item {
+                id: Id::new(id as u64),
+                name,
+                kind,
+            })
         })
         .collect())
 }
 
 /// Adds a folder named `name` to the library, holding a main file with the default shader.
-async fn create(name: String) -> Result<Handle, Error> {
+async fn create(name: String) -> Result<Item, Error> {
     let main = Path::new(MAIN).expect("invariant: the main file's path is valid");
-    let row = Object::new();
-    for (field, value) in [
-        ("name", JsValue::from_str(&name)),
-        ("kind", JsValue::from_str(FOLDER)),
-        ("modified", JsValue::from_f64(js_sys::Date::now())),
-    ] {
-        Reflect::set(&row, &JsValue::from_str(field), &value)
-            .expect("invariant: a plain object takes any field");
-    }
+    let row = record(None, &name, Kind::Folder);
     let source = JsValue::from_str(DEFAULT_SOURCE);
     let settings =
         JsValue::from_str(&Settings::new(Some(main.clone()), Uniforms::default(), None).to_json());
     let settings_path = Path::new(SETTINGS).expect("invariant: the settings path is valid");
+    persist().await;
     let database = open().await?;
 
     // As in `write`, the transaction awaits nothing but its own requests.
@@ -582,7 +791,145 @@ async fn create(name: String) -> Result<Handle, Error> {
         .map_err(error)?;
     committed(transaction.await)?;
 
-    Ok(Handle { id, name })
+    Ok(Item {
+        id,
+        name,
+        kind: Kind::Folder,
+    })
+}
+
+/// Stores the project `json` named `name` under the library entry `id`, or under a new entry when
+/// `None`, and returns the entry's id.
+pub(crate) async fn store_project(id: Option<Id>, name: String, json: String) -> Result<Id, Error> {
+    let row = record(id, &name, Kind::Project);
+    let json = JsValue::from_str(&json);
+    persist().await;
+    let database = open().await?;
+
+    // A transaction commits as soon as no request of its own is pending, so between opening it
+    // and committing nothing awaits anything else: what it stores is computed beforehand.
+    let transaction = database
+        .0
+        .transaction(&[ENTRIES, FILES], TransactionMode::ReadWrite)
+        .map_err(error)?;
+    let id = transaction
+        .object_store(ENTRIES)
+        .map_err(error)?
+        .put(&row, None)
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    let id = Id::new(
+        id.as_f64()
+            .ok_or_else(|| Error::Io("the library didn't number the project".to_owned()))?
+            as u64,
+    );
+    transaction
+        .object_store(FILES)
+        .map_err(error)?
+        .put(&json, Some(&key(id, PROJECT)))
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    committed(transaction.await)?;
+    Ok(id)
+}
+
+/// Renames the library entry `id` to `name`.
+async fn rename_entry(id: Id, name: String) -> Result<(), Error> {
+    let name = JsValue::from_str(&name);
+    let modified = JsValue::from_f64(js_sys::Date::now());
+    let database = open().await?;
+
+    // As in `write`, the transaction awaits nothing but its own requests.
+    let transaction = database
+        .0
+        .transaction(&[ENTRIES], TransactionMode::ReadWrite)
+        .map_err(error)?;
+    let entries = transaction.object_store(ENTRIES).map_err(error)?;
+    let Some(row) = entries
+        .get(entry(id))
+        .map_err(error)?
+        .await
+        .map_err(error)?
+    else {
+        let _ = transaction.abort();
+        return Err(Error::Missing);
+    };
+    for (field, value) in [("name", &name), ("modified", &modified)] {
+        Reflect::set(&row, &JsValue::from_str(field), value)
+            .map_err(|_| Error::Io("the library's entry isn't an object".to_owned()))?;
+    }
+    entries
+        .put(&row, None)
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    committed(transaction.await)
+}
+
+/// Deletes the library entry `id` with every file it holds.
+async fn delete_entry(id: Id) -> Result<(), Error> {
+    let files = range(id, None)?;
+    let database = open().await?;
+
+    // As in `write`, the transaction awaits nothing but its own requests.
+    let transaction = database
+        .0
+        .transaction(&[ENTRIES, FILES], TransactionMode::ReadWrite)
+        .map_err(error)?;
+    transaction
+        .object_store(ENTRIES)
+        .map_err(error)?
+        .delete(Query::Key(entry(id)))
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    transaction
+        .object_store(FILES)
+        .map_err(error)?
+        .delete(Query::KeyRange(files))
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    committed(transaction.await)
+}
+
+/// Asks the browser, the first time, to keep the library even when space runs low. A refusal waits
+/// for the library modal to show it.
+async fn persist() {
+    if ASKED.replace(true) {
+        return;
+    }
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let kept = match window.navigator().storage().persist() {
+        Ok(promise) => JsFuture::from(promise)
+            .await
+            .ok()
+            .and_then(|kept| kept.as_bool()),
+        Err(_) => None,
+    };
+    if kept != Some(true) {
+        REFUSED.set(true);
+    }
+}
+
+/// The `entries` row of an entry named `name` holding a `kind`, modified now: the entry `id`, or a
+/// new entry IndexedDB numbers when `None`.
+fn record(id: Option<Id>, name: &str, kind: Kind) -> Object {
+    let row = Object::new();
+    let fields = [
+        ("name", JsValue::from_str(name)),
+        ("kind", JsValue::from_str(kind.as_str())),
+        ("modified", JsValue::from_f64(js_sys::Date::now())),
+    ];
+    for (field, value) in id.map(|id| ("id", entry(id))).into_iter().chain(fields) {
+        Reflect::set(&row, &JsValue::from_str(field), &value)
+            .expect("invariant: a plain object takes any field");
+    }
+    row
 }
 
 /// Opens the library, creating its stores the first time.
