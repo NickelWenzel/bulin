@@ -65,6 +65,9 @@ const PAD_SIZE: f32 = 160.0;
 /// The thickness of a color picker's hue and alpha strips, in logical pixels.
 const STRIP: f32 = 12.0;
 
+/// The narrowest a color channel field gets, so its letter stays clear of its value.
+const CHANNEL_WIDTH: f32 = 60.0;
+
 /// A uniform's name and a scrub field for each component of its value, or a text input for
 /// the component being typed. A vec2 and a vec3 have a button opening their `editor` next to
 /// them, and a color shows a swatch and its hex code that open it.
@@ -335,6 +338,8 @@ fn picker<'a>(
         Color::from_rgb(r, g, b)
     };
     let (r, g, b) = rgb;
+    let (components, count) = value.components();
+    let width = (count as f32 * CHANNEL_WIDTH + (count - 1) as f32 * 2.0).max(PAD_SIZE);
 
     // An angle of π/2 runs left to right, and π top to bottom.
     let sv = stack![
@@ -353,7 +358,7 @@ fn picker<'a>(
             Message::Sv,
         ),
     ]
-    .width(PAD_SIZE)
+    .width(width)
     .height(PAD_SIZE);
     let hues = (0..=6).fold(gradient::Linear::new(FRAC_PI_2), |hues, sixth| {
         let offset = sixth as f32 / 6.0;
@@ -366,7 +371,7 @@ fn picker<'a>(
             .style(gradient(hues)),
         pad::pad(Point::new(hue, 0.5), |point| Message::Hue(point.x)),
     ]
-    .width(PAD_SIZE)
+    .width(width)
     .height(STRIP);
     let alpha_strip = alpha.map(|alpha| {
         stack![
@@ -378,7 +383,7 @@ fn picker<'a>(
             )),
             pad::pad(Point::new(alpha, 0.5), |point| Message::Alpha(point.x)),
         ]
-        .width(PAD_SIZE)
+        .width(width)
         .height(STRIP)
     });
 
@@ -406,7 +411,6 @@ fn picker<'a>(
         }
     });
 
-    let (components, count) = value.components();
     let fields = row((0..count).map(|index| {
         scrub::scrub(components[index] as f32, move |component: f32| {
             Message::Set(
@@ -429,7 +433,7 @@ fn picker<'a>(
         .push(fields)
         .spacing(6)
         .padding(8)
-        .width(PAD_SIZE + 16.0)
+        .width(width + 16.0)
         .into();
     content.map(move |message| super::Message::Uniform {
         name: uniform.name().to_owned(),
