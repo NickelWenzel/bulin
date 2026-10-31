@@ -80,6 +80,16 @@ const STRIP: f32 = 12.0;
 /// The narrowest a color channel field gets, so its letter stays clear of its value.
 const CHANNEL_WIDTH: f32 = 60.0;
 
+/// The narrowest a vector component or angle field gets, so its letter stays clear of a value
+/// with a sign and a few integer digits.
+const AXIS_WIDTH: f32 = 80.0;
+
+/// The width of a popover's content holding rows of up to `count` fields at least `field`
+/// wide, or `PAD_SIZE` if that is wider.
+fn content_width(count: usize, field: f32) -> f32 {
+    (count as f32 * field + (count - 1) as f32 * 2.0).max(PAD_SIZE)
+}
+
 /// A uniform's name and a scrub field for each component of its value, or a text input for
 /// the component being typed. A vec2 and a vec3 have a button opening their `editor` next to
 /// them, and a color shows a swatch and its hex code that open it.
@@ -252,7 +262,8 @@ fn circle<'a>(uniform: &'a Uniform, (x, y): (f32, f32), angle: f32) -> Element<'
     let content: Element<'a, Message> = column![circle, polar, fields]
         .spacing(4)
         .padding(8)
-        .width(PAD_SIZE + 16.0)
+        .width(content_width(2, AXIS_WIDTH) + 16.0)
+        .align_x(Center)
         .into();
     content.map(move |message| super::Message::Uniform {
         name: uniform.name().to_owned(),
@@ -308,7 +319,8 @@ fn sphere<'a>(
     let content: Element<'a, Message> = column![sphere, spherical, fields]
         .spacing(4)
         .padding(8)
-        .width(PAD_SIZE + 16.0)
+        .width(content_width(3, AXIS_WIDTH) + 16.0)
+        .align_x(Center)
         .into();
     content.map(move |message| super::Message::Uniform {
         name: uniform.name().to_owned(),
@@ -345,7 +357,7 @@ fn picker<'a>(
     };
     let (r, g, b) = rgb;
     let (components, count) = value.components();
-    let width = (count as f32 * CHANNEL_WIDTH + (count - 1) as f32 * 2.0).max(PAD_SIZE);
+    let width = content_width(count, CHANNEL_WIDTH);
 
     // An angle of π/2 runs left to right, and π top to bottom.
     let sv = stack![
