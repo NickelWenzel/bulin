@@ -104,6 +104,14 @@ impl State {
                         follow(value, hue, saturation);
                         *hex_text = None;
                     }
+                    // A zero vector has no angle to give, so the chosen one stays.
+                    Some((open, uniform::Editor::Pad { angle, .. })) if *open == name => {
+                        if let Type::VecFloat2((x, y)) = value
+                            && (x, y) != (0.0, 0.0)
+                        {
+                            *angle = y.atan2(x);
+                        }
+                    }
                     // A zero vector has no direction to give, so the chosen one stays.
                     Some((open, uniform::Editor::Direction { direction })) if *open == name => {
                         if let Type::VecFloat3(vector) = value
@@ -158,7 +166,12 @@ impl State {
                         while extent < x.abs().max(y.abs()) {
                             extent *= 10.0;
                         }
-                        self.editor = Some((name, uniform::Editor::Pad { extent }));
+                        let angle = if (x, y) == (0.0, 0.0) {
+                            0.0
+                        } else {
+                            y.atan2(x)
+                        };
+                        self.editor = Some((name, uniform::Editor::Pad { extent, angle }));
                     }
                     Type::Col3(_) | Type::Col4(_) => {
                         let ([r, g, b, _], _) = uniform.value.components();
@@ -185,15 +198,54 @@ impl State {
                 message: uniform::Message::Pad(point),
             } => {
                 self.typing = None;
-                let Some((_, uniform::Editor::Pad { extent })) =
-                    self.editor.as_ref().filter(|(open, _)| *open == name)
+                let Some((_, uniform::Editor::Pad { extent, angle })) =
+                    self.editor.as_mut().filter(|(open, _)| *open == name)
                 else {
                     return Action::none();
                 };
-                let value = Type::VecFloat2((
-                    (point.x * 2.0 - 1.0) * extent,
-                    (point.y * 2.0 - 1.0) * extent,
-                ));
+                let (x, y) = (
+                    (point.x * 2.0 - 1.0) * *extent,
+                    (point.y * 2.0 - 1.0) * *extent,
+                );
+                if (x, y) != (0.0, 0.0) {
+                    *angle = y.atan2(x);
+                }
+                if self.uniforms.set(&name, Type::VecFloat2((x, y))) {
+                    Action::instruction(Instruction::Values)
+                } else {
+                    Action::none()
+                }
+            }
+            Message::Uniform {
+                name,
+                message: message @ (uniform::Message::Radius(_) | uniform::Message::Angle(_)),
+            } => {
+                self.typing = None;
+                let Some((_, uniform::Editor::Pad { angle, .. })) =
+                    self.editor.as_mut().filter(|(open, _)| *open == name)
+                else {
+                    return Action::none();
+                };
+                let Some(Type::VecFloat2((x, y))) = self
+                    .uniforms
+                    .iter()
+                    .find(|uniform| uniform.name() == name)
+                    .map(|uniform| uniform.value)
+                else {
+                    return Action::none();
+                };
+
+                // The value always joins the length to the kept angle, so neither one is lost
+                // when the other changes.
+                let radius = match message {
+                    uniform::Message::Radius(new) => new.clamp(0.0, f32::MAX),
+                    uniform::Message::Angle(degrees) => {
+                        *angle = degrees.to_radians();
+                        x.hypot(y)
+                    }
+                    _ => x.hypot(y),
+                };
+                let value = Type::VecFloat2((radius * angle.cos(), radius * angle.sin()));
                 if self.uniforms.set(&name, value) {
                     Action::instruction(Instruction::Values)
                 } else {
@@ -752,7 +804,13 @@ mod tests {
         let _ = state.update(uniform("offset", uniform::Message::Open));
         assert_eq!(
             state.editor,
-            Some(("offset".to_owned(), uniform::Editor::Pad { extent: 1.0 }))
+            Some((
+                "offset".to_owned(),
+                uniform::Editor::Pad {
+                    extent: 1.0,
+                    angle: std::f32::consts::FRAC_PI_4
+                }
+            ))
         );
 
         let _ = state.update(Message::Close);
@@ -788,9 +846,8 @@ mod tests {
 
             let _ = state.update(uniform("offset", uniform::Message::Open));
 
-            assert_eq!(
-                state.editor.unwrap().1,
-                uniform::Editor::Pad { extent },
+            assert!(
+                matches!(state.editor.unwrap().1, uniform::Editor::Pad { extent: open, .. } if open == extent),
                 "{component}"
             );
         }
@@ -811,6 +868,34 @@ mod tests {
         assert!(matches!(instruction, Some(Instruction::Values)));
         assert_eq!(value(&state), Type::VecFloat2((5.0, -10.0)));
     }
+    #[test]
+    fn the_angle_turns_a_vec2_keeping_its_length() {
+        let mut state = vec2s(&["offset"], (2.0, 0.0));
+        let _ = state.update(uniform("offset", uniform::Message::Open));
+
+        let _ = state.update(uniform("offset", uniform::Message::Angle(90.0)));
+
+        let Type::VecFloat2((x, y)) = value(&state) else {
+            panic!("not a vec2");
+        };
+        assert!(x.abs() < 1e-6 && (y - 2.0).abs() < 1e-6, "{x}, {y}");
+    }
+
+    #[test]
+    fn a_vec2_keeps_its_angle_through_a_length_of_0() {
+        let mut state = vec2s(&["offset"], (0.0, 3.0));
+        let _ = state.update(uniform("offset", uniform::Message::Open));
+
+        let _ = state.update(uniform("offset", uniform::Message::Radius(0.0)));
+        assert_eq!(value(&state), Type::VecFloat2((0.0, 0.0)));
+        let _ = state.update(uniform("offset", uniform::Message::Radius(2.0)));
+
+        let Type::VecFloat2((x, y)) = value(&state) else {
+            panic!("not a vec2");
+        };
+        assert!(x.abs() < 1e-6 && (y - 2.0).abs() < 1e-6, "{x}, {y}");
+    }
+
     /// A state with the color `value` named `tint` and its picker open.
     fn picking(value: Type) -> State {
         let mut uniforms = Uniforms::default();

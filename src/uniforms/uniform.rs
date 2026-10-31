@@ -22,6 +22,11 @@ pub enum Message {
     Open,
     /// Moves a vector to this point of its pad, in `[0, 1]²`.
     Pad(Point),
+    /// Sets a vector's length, keeping its angle.
+    Radius(f32),
+    /// Turns a vector to this angle in degrees, counterclockwise from the x axis, keeping its
+    /// length.
+    Angle(f32),
     /// Sets a color's saturation and value to this point's `x` and `y`, keeping its hue.
     Sv(Point),
     /// Sets a color's hue, keeping its saturation and value.
@@ -42,7 +47,8 @@ pub enum Message {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Editor {
     /// An XY pad spanning `[-extent, extent]²`, chosen when it opens so it doesn't move along.
-    Pad { extent: f32 },
+    /// The angle, in radians, is kept so it survives a length of 0.
+    Pad { extent: f32, angle: f32 },
     /// An HSV picker. The hue and saturation are kept for when the value can't tell them, as
     /// for black and greys, and the hex code being typed, if any, replaces the derived one.
     Color {
@@ -91,7 +97,7 @@ pub fn view<'a>(
                 .padding([0, 4])
                 .height(ROW_HEIGHT);
             let content = match editor {
-                Some(&Editor::Pad { extent }) => Some(xy_pad(uniform, value, extent)),
+                Some(&Editor::Pad { extent, angle }) => Some(xy_pad(uniform, value, extent, angle)),
                 _ => None,
             };
 
@@ -187,17 +193,29 @@ pub fn view<'a>(
         .into()
 }
 
-/// The popover of a vec2: a pad over axes spanning `[-extent, extent]²`, the extent, and the
-/// components' fields.
+/// The popover of a vec2: a pad over axes and the unit circle spanning `[-extent, extent]²`,
+/// the extent, the length and `angle`, and the components' fields.
 fn xy_pad<'a>(
     uniform: &'a Uniform,
     (x, y): (f32, f32),
     extent: f32,
+    angle: f32,
 ) -> Element<'a, super::Message> {
     let value = uniform.value;
+    let diameter = PAD_SIZE / extent;
+    let circle = container(space())
+        .width(diameter)
+        .height(diameter)
+        .style(move |theme: &Theme| container::Style {
+            border: border::rounded(diameter / 2.0)
+                .color(theme.palette().background.strong.color)
+                .width(1),
+            ..container::Style::default()
+        });
     let axes = stack![
         container(rule::horizontal(1)).center_y(Fill),
         container(rule::vertical(1)).center_x(Fill),
+        container(circle).center(Fill),
         pad::pad(
             Point::new((x / extent + 1.0) / 2.0, (y / extent + 1.0) / 2.0),
             Message::Pad,
@@ -219,6 +237,18 @@ fn xy_pad<'a>(
         .into()
     }))
     .spacing(2);
+    let polar = row![
+        scrub::scrub(x.hypot(y), Message::Radius)
+            .label("r")
+            .speed(0.01)
+            .range(0.0..=f32::MAX)
+            .height(ROW_HEIGHT),
+        scrub::scrub(angle.to_degrees(), Message::Angle)
+            .label("θ")
+            .speed(1.0)
+            .height(ROW_HEIGHT),
+    ]
+    .spacing(2);
 
     let content: Element<'a, Message> = column![
         axes,
@@ -227,6 +257,7 @@ fn xy_pad<'a>(
             .style(|theme: &Theme| text::Style {
                 color: Some(theme.palette().background.base.text.scale_alpha(0.5)),
             }),
+        polar,
         fields,
     ]
     .spacing(4)
