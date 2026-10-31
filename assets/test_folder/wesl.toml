@@ -1,0 +1,6 @@
+edition = "2026_pre"
+root = "."
+
+[dependencies]
+bulin = { path = ".bulin/bulin" }
+uniforms = { path = ".bulin/uniforms" }
