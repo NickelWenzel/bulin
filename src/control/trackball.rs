@@ -56,11 +56,15 @@ impl<Message> canvas::Program<Message> for Trackball<'_, Message> {
         match event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let position = cursor.position_over(bounds)?;
+                if position.distance(bounds.center()) > radius(bounds) {
+                    return None;
+                }
                 state.last = Some(position);
                 Some(canvas::Action::capture())
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                let last = state.last.replace(*position)?;
+                let last = state.last?;
+                state.last = Some(*position);
                 let radius = radius(bounds);
                 let drag = Vector::new(
                     (position.x - last.x) / radius,
@@ -156,7 +160,10 @@ impl<Message> canvas::Program<Message> for Trackball<'_, Message> {
     ) -> mouse::Interaction {
         if state.last.is_some() {
             mouse::Interaction::Grabbing
-        } else if cursor.is_over(bounds) {
+        } else if cursor
+            .position_over(bounds)
+            .is_some_and(|position| position.distance(bounds.center()) <= radius(bounds))
+        {
             mouse::Interaction::Grab
         } else {
             mouse::Interaction::None
@@ -176,6 +183,75 @@ fn stroke(color: Color, width: f32) -> Stroke<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether each of `events`, sent in turn to a sphere filling a 100 × 100 canvas,
+    /// published a turn.
+    fn turns(events: &[canvas::Event]) -> Vec<bool> {
+        let trackball = trackball(Rotation::IDENTITY, |drag| drag);
+        let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(100.0, 100.0));
+        let mut state = State::default();
+        let mut position = Point::ORIGIN;
+        events
+            .iter()
+            .map(|event| {
+                if let canvas::Event::Mouse(mouse::Event::CursorMoved { position: moved }) = event {
+                    position = *moved;
+                }
+                let action = canvas::Program::update(
+                    &trackball,
+                    &mut state,
+                    event,
+                    bounds,
+                    mouse::Cursor::Available(position),
+                );
+                action.is_some_and(|action| action.into_inner().0.is_some())
+            })
+            .collect()
+    }
+
+    fn moved(x: f32, y: f32) -> canvas::Event {
+        canvas::Event::Mouse(mouse::Event::CursorMoved {
+            position: Point::new(x, y),
+        })
+    }
+
+    fn pressed() -> canvas::Event {
+        canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+    }
+
+    fn released() -> canvas::Event {
+        canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+    }
+
+    #[test]
+    fn hovering_does_not_turn_the_sphere() {
+        assert_eq!(
+            turns(&[moved(50.0, 50.0), moved(60.0, 50.0), moved(70.0, 50.0)]),
+            [false, false, false]
+        );
+    }
+
+    #[test]
+    fn only_a_drag_from_a_press_on_the_sphere_turns_it() {
+        assert_eq!(
+            turns(&[
+                moved(50.0, 50.0),
+                pressed(),
+                moved(60.0, 50.0),
+                released(),
+                moved(70.0, 50.0),
+            ]),
+            [false, false, true, false, false]
+        );
+    }
+
+    #[test]
+    fn a_press_in_a_corner_outside_the_sphere_does_not_grab_it() {
+        assert_eq!(
+            turns(&[moved(2.0, 2.0), pressed(), moved(10.0, 10.0)]),
+            [false, false, false]
+        );
+    }
 
     #[test]
     fn dragging_right_rolls_the_front_toward_x() {
