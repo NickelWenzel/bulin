@@ -25,13 +25,14 @@ pub use native::{Handle, read, scan_dir, write};
 #[cfg(target_arch = "wasm32")]
 use web::stream;
 #[cfg(target_arch = "wasm32")]
-pub use web::{Handle, read, scan_dir, write};
+pub use web::{Handle, read, scan, scan_dir, write};
 
 use crate::action::Action;
 use crate::analyzer::Analyzer;
 use crate::core::folder::{
-    Change, DEPENDENCY_LINES, Entry, Expect, MANIFEST, Mirror, Path, SETTINGS, Settings,
-    declares_dependencies, generated, is_shader, package_root, root_manifest, same_text,
+    Change, DEPENDENCY_LINES, Effect, Entry, Expect, MANIFEST, Mirror, Path, SETTINGS, Settings,
+    declares_dependencies, generated, is_shader, is_skipped, package_root, root_manifest,
+    same_text,
 };
 use crate::core::program::{self, Module, Program};
 use crate::core::{self, Clock, Uniforms};
@@ -366,6 +367,14 @@ impl State {
 
                 match result {
                     Ok(changes) => {
+                        // The mirror leaves out bulin's own files, which the analyzer still reads.
+                        if is_skipped(&path) {
+                            analyzer.changed(&[(
+                                path.clone(),
+                                Effect::Changed,
+                                Some(text.clone()),
+                            )]);
+                        }
                         document.saved(&path, &Ok(text));
                         changes
                             .iter()
@@ -630,8 +639,8 @@ impl State {
         self.queue.writes.front()
     }
 
-    /// Applies `changes` to the mirror, the root manifest and the document, returning whether the
-    /// program may read a changed file and the reads and writes they call for.
+    /// Applies `changes` to the mirror, the root manifest, the document and the analyzer, returning
+    /// whether the program may read a changed file and the reads and writes they call for.
     fn apply(
         &mut self,
         changes: &[Change],
@@ -643,10 +652,16 @@ impl State {
         let mut relevant = false;
         let mut regenerate = false;
         let mut tasks = Vec::new();
+        let mut files = Vec::new();
 
         for change in changes {
-            for (path, _) in self.mirror.apply(change) {
+            for (path, effect) in self.mirror.apply(change) {
                 relevant |= self.is_relevant(&path);
+                let text = match effect {
+                    Effect::Created | Effect::Changed => self.mirror.files().get(&path).cloned(),
+                    Effect::Removed => None,
+                };
+                files.push((path, effect, text));
             }
 
             let document::Location::Folder(open) = document.location().clone() else {
@@ -680,6 +695,7 @@ impl State {
 
             regenerate |= matches!(change, Change::Removed(path) if generated.contains(path));
         }
+        analyzer.changed(&files);
 
         let manifest = self.mirror.files().get(&manifest()).cloned();
         if manifest != self.manifest {
@@ -884,6 +900,7 @@ mod tests {
     use matcha_iced::lsp::client::Events;
 
     use super::*;
+    use crate::analyzer::Workspace;
     use crate::core::folder::MAX_TEXT;
     use crate::core::uniform::Type;
 
@@ -925,7 +942,7 @@ mod tests {
             let settings = Settings::new(Some(path("main.wesl")), Uniforms::default(), None);
             let (mut state, _) = State::new(handle(), 1, settings, false);
             while state.queue.complete(true).is_some() {}
-            let (analyzer, events) = Analyzer::start();
+            let (analyzer, events) = Analyzer::start(Workspace::Scratch);
             let mut open = Self {
                 state,
                 document: document::State::new("", &core::Settings::default()),
@@ -1247,7 +1264,7 @@ mod tests {
     fn changes_before_the_first_scan_are_discarded() {
         let settings = Settings::new(Some(path("main.wesl")), Uniforms::default(), None);
         let (mut state, _) = State::new(handle(), 1, settings, false);
-        let (mut analyzer, _events) = Analyzer::start();
+        let (mut analyzer, _events) = Analyzer::start(Workspace::Scratch);
         let mut document = document::State::new("", &core::Settings::default());
         let mut notice = None;
         let mut update = |state: &mut State, message| {

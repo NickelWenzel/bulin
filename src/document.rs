@@ -592,14 +592,14 @@ mod tests {
     use iced::time::Instant;
 
     use super::{Instruction, Message, State, shorten};
-    use crate::analyzer::Analyzer;
+    use crate::analyzer::{Analyzer, Workspace};
     use crate::core::folder::Path;
     use crate::core::{Program, Settings, Uniforms};
     use crate::file;
 
     #[test]
     fn a_cancelled_open_keeps_unsaved_changes() {
-        let (mut analyzer, _events) = Analyzer::start();
+        let (mut analyzer, _events) = Analyzer::start(Workspace::Scratch);
         let mut document = State::new("", &Settings::default());
         document.dirty = true;
 
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn a_failed_open_is_reported() {
-        let (mut analyzer, _events) = Analyzer::start();
+        let (mut analyzer, _events) = Analyzer::start(Workspace::Scratch);
         let mut document = State::new("", &Settings::default());
         let error = file::Error::Io(Arc::new(std::io::Error::other("disk on fire")));
 
@@ -633,7 +633,7 @@ mod tests {
 
     #[test]
     fn a_new_file_starts_from_a_shader_that_compiles() {
-        let (mut analyzer, _events) = Analyzer::start();
+        let (mut analyzer, _events) = Analyzer::start(Workspace::Scratch);
         let mut document = State::new("", &Settings::default());
         document.dirty = true;
 
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn typing_in_a_folder_file_marks_it_dirty_without_changing_the_preview() {
-        let (mut analyzer, _events) = Analyzer::start();
+        let (mut analyzer, _events) = Analyzer::start(Workspace::Scratch);
         let mut document =
             State::folder(Path::new("main.wesl").unwrap(), "a", &Settings::default());
         let typed = Message::Editor(matcha_iced::Event::Editor(matcha_iced::Action::Type('x')));
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn an_opened_file_is_analyzed_in_place_of_the_previous_shader() {
-        let (mut analyzer, mut events) = Analyzer::start();
+        let (mut analyzer, mut events) = Analyzer::start(Workspace::Scratch);
         let mut document = State::new("fn f() -> i32 { return 1; }", &Settings::default());
         document.attach(&mut analyzer);
 
