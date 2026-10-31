@@ -6,6 +6,7 @@ pub mod clock;
 pub mod color;
 pub mod program;
 pub mod project;
+pub mod rotation;
 pub mod settings;
 pub mod uniform;
 
