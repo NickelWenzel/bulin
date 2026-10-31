@@ -14,12 +14,14 @@ mod uniforms;
 mod viewer;
 
 use iced::keyboard::key;
+use iced::task;
 use iced::time::Instant;
 use iced::widget::{
     button, center, column, container, mouse_area, opaque, operation, row, stack, text,
 };
 use iced::{
-    Center, Element, Event, Fill, Font, Length, Subscription, Task, Theme, color, event, keyboard,
+    Center, Element, Event, Fill, Font, Function, Length, Subscription, Task, Theme, color, event,
+    keyboard,
 };
 use matcha_iced::lsp;
 
@@ -29,7 +31,13 @@ use std::sync::Arc;
 const EDITOR: &str = "matcha-editor";
 
 pub struct Application {
-    analyzer: analyzer::Analyzer,
+    /// The running language server. It is `None` only inside [`Application::restart`], so the old
+    /// server is gone before the next starts.
+    analyzer: Option<analyzer::Analyzer>,
+    /// Numbers the running analyzer, so events from an earlier one are dropped.
+    generation: u64,
+    /// Aborts the running analyzer's event stream when replaced.
+    analyzer_events: task::Handle,
     document: document::State,
     uniforms: uniforms::State,
     viewer: viewer::State,
@@ -38,7 +46,8 @@ pub struct Application {
     opener: folder::opener::Opener,
     /// What to do once the folder's queued writes are done.
     draining: Option<Pending>,
-    /// How many times a folder was opened, numbering each opening.
+    /// Counts folder openings and analyzer starts, numbering each so results meant for an earlier
+    /// one are dropped.
     sessions: u64,
     is_loading: bool,
     modal: Option<Modal>,
@@ -109,7 +118,8 @@ pub enum Message {
     SaveProject,
     SaveProjectAs,
     ProjectSaved(Result<file::Name, file::Error>),
-    Analyzer(lsp::client::Event),
+    /// An event of the analyzer with this generation.
+    Analyzer(u64, lsp::client::Event),
     /// A key no widget took, which may be a shortcut bulin handles.
     KeyPressed {
         key: keyboard::Key,
@@ -134,7 +144,8 @@ impl Application {
 
     /// Starts on an untitled project with `settings` rather than the stored ones.
     fn with_settings(settings: core::Settings) -> (Self, Task<Message>) {
-        let (mut analyzer, events) = analyzer::Analyzer::start();
+        let (mut analyzer, events) = analyzer::Analyzer::start(analyzer::Workspace::Scratch);
+        let (events, analyzer_events) = Task::run(events, Message::Analyzer.with(0)).abortable();
         let project = core::Project::untitled();
         let mut document = document::State::new(&project.shader, &settings);
         document.attach(&mut analyzer);
@@ -148,7 +159,9 @@ impl Application {
         let viewer = viewer::State::new(&program);
 
         let application = Self {
-            analyzer,
+            analyzer: Some(analyzer),
+            generation: 0,
+            analyzer_events: analyzer_events.abort_on_drop(),
             document,
             uniforms,
             viewer,
@@ -166,7 +179,7 @@ impl Application {
             notice: None,
         };
 
-        (application, Task::run(events, Message::Analyzer))
+        (application, events)
     }
 
     pub fn update(&mut self, message: Message, now: Instant) -> Task<Message> {
@@ -191,9 +204,9 @@ impl Application {
                 {
                     return Task::none();
                 }
-                let action = self
-                    .document
-                    .update(message, now, &mut self.analyzer, &self.settings);
+                let action =
+                    self.document
+                        .update(message, now, running(&mut self.analyzer), &self.settings);
                 let task = action.task.map(Message::Document);
                 match action.instruction {
                     Some(document::Instruction::Changed) => self.program_changed(),
@@ -258,7 +271,7 @@ impl Application {
                     message,
                     now,
                     &mut self.document,
-                    &mut self.analyzer,
+                    running(&mut self.analyzer),
                     &self.settings,
                     &mut self.notice,
                 );
@@ -456,13 +469,15 @@ impl Application {
                     core::folder::Settings::default()
                 });
 
-                self.document.detach(&mut self.analyzer);
+                // The analyzer starts before the folder queues its first writes, so their changes
+                // reach it. The scan opens the main file and attaches it then.
+                let events = self.restart(analyzer::Workspace::Folder(handle.clone()));
                 self.document = document::State::new("", &self.settings);
                 self.uniforms = uniforms::State::new(settings.uniforms.clone(), settings.clock);
-                let (state, task) = folder::State::new(handle, session, settings, locked);
+                let (state, task) = folder::State::new(handle, self.sessions, settings, locked);
                 self.mode = Mode::Folder(Box::new(state));
                 self.program_changed();
-                task.map(Message::Folder)
+                Task::batch([events, task.map(Message::Folder)])
             }
             Message::NewProject => {
                 if matches!(self.mode, Mode::Project { .. }) && !self.refuse() {
@@ -513,8 +528,12 @@ impl Application {
 
                 Task::none()
             }
-            Message::Analyzer(event) => {
-                let action = self.document.lsp(&mut self.analyzer, event);
+            Message::Analyzer(generation, event) => {
+                // The client asserts an event is its own, and an event doesn't say whose it is.
+                if generation != self.generation {
+                    return Task::none();
+                }
+                let action = self.document.lsp(running(&mut self.analyzer), event);
                 match action.instruction {
                     Some(document::Instruction::Changed) => self.program_changed(),
                     Some(document::Instruction::Save { .. }) | None => {}
@@ -637,25 +656,51 @@ impl Application {
                     }
                 })
             }
-            Some(Pending::OpenProject(name, text)) => {
-                match core::Project::from_json(&text) {
-                    Ok(project) => {
-                        self.mode = Mode::Project { file: Some(name) };
-                        self.load(project);
-                    }
-                    Err(error) => {
-                        self.notice = Some(format!("Could not open the project: {error}"));
-                    }
+            Some(Pending::OpenProject(name, text)) => match core::Project::from_json(&text) {
+                Ok(project) => {
+                    let events = self.leave();
+                    self.mode = Mode::Project { file: Some(name) };
+                    self.load(project);
+                    events
                 }
-                Task::none()
-            }
+                Err(error) => {
+                    self.notice = Some(format!("Could not open the project: {error}"));
+                    Task::none()
+                }
+            },
             Some(Pending::CloseFolder) => {
+                let events = self.leave();
                 self.mode = Mode::Project { file: None };
                 self.load(core::Project::untitled());
-                Task::none()
+                events
             }
             None => Task::none(),
         }
+    }
+
+    /// Starts the scratch analyzer when leaving a folder for a project, returning its events.
+    fn leave(&mut self) -> Task<Message> {
+        match self.mode {
+            Mode::Folder(_) => self.restart(analyzer::Workspace::Scratch),
+            Mode::Project { .. } => Task::none(),
+        }
+    }
+
+    /// Replaces the analyzer with one on `workspace`, numbered by the next session. The document
+    /// leaves the old one first, since an editor can't open on a new client while open on another.
+    /// Returns the new analyzer's events.
+    fn restart(&mut self, workspace: analyzer::Workspace) -> Task<Message> {
+        self.document.detach(running(&mut self.analyzer));
+        self.analyzer = None;
+
+        self.sessions += 1;
+        self.generation = self.sessions;
+        let (analyzer, events) = analyzer::Analyzer::start(workspace);
+        self.analyzer = Some(analyzer);
+        let (events, handle) =
+            Task::run(events, Message::Analyzer.with(self.generation)).abortable();
+        self.analyzer_events = handle.abort_on_drop();
+        events
     }
 
     /// Shows the current program and gives the analyzer its uniforms package.
@@ -684,15 +729,14 @@ impl Application {
                     .fail("This folder has no main file. Set one in the explorer.".to_owned()),
             },
         }
-        self.analyzer
-            .set_uniforms(&core::program::uniforms_package(time, uniforms));
+        running(&mut self.analyzer).set_uniforms(&core::program::uniforms_package(time, uniforms));
     }
 
     /// Replaces the shader and uniforms with `project`'s.
     fn load(&mut self, project: core::Project) {
-        self.document.detach(&mut self.analyzer);
+        self.document.detach(running(&mut self.analyzer));
         self.document = document::State::new(&project.shader, &self.settings);
-        self.document.attach(&mut self.analyzer);
+        self.document.attach(running(&mut self.analyzer));
         self.uniforms = uniforms::State::new(project.uniforms, project.clock);
         self.program_changed();
     }
@@ -734,7 +778,7 @@ impl Application {
         let header = row![
             container(menu_icon()).width(Fill),
             text(title),
-            container(text(self.document.status(&self.analyzer)).size(14))
+            container(text(self.document.status(self.analyzer.as_ref().expect(RUNNING))).size(14))
                 .width(Fill)
                 .align_right(Fill),
         ]
@@ -825,6 +869,14 @@ impl Application {
 /// Why an open, close or file action is refused while a folder's writes finish.
 const DRAINING: &str = "Wait until the folder's files are saved.";
 
+/// Why the analyzer is always there to use.
+const RUNNING: &str = "invariant: an analyzer runs except inside a restart";
+
+/// The running analyzer.
+fn running(analyzer: &mut Option<analyzer::Analyzer>) -> &mut analyzer::Analyzer {
+    analyzer.as_mut().expect(RUNNING)
+}
+
 fn menu_icon<'a>() -> Element<'a, Message> {
     const MENU_FONT: Font = Font::new("menu");
 
@@ -846,17 +898,20 @@ fn modal<'a>(content: impl Into<Element<'a, Message>>, on_blur: Message) -> Elem
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::sync::Arc;
+    use std::time::Duration;
+    use std::{fs, thread};
 
+    use iced::Task;
     use iced::advanced::widget::{Tree, tree};
+    use iced::futures::{FutureExt, StreamExt};
     use iced::keyboard::{Key, Modifiers, key};
     use iced::time::Instant;
 
     use tempfile::TempDir;
 
     use super::{
-        Application, DRAINING, Message, Modal, Mode, document, explorer, folder, uniforms,
+        Application, DRAINING, Message, Modal, Mode, analyzer, document, explorer, folder, uniforms,
     };
     use crate::core;
     use crate::core::folder::{Change, Path, SETTINGS, Settings};
@@ -906,6 +961,8 @@ mod tests {
     struct Driver {
         app: Application,
         runtime: tokio::runtime::Runtime,
+        /// The task the last update returned, which the driver doesn't run.
+        task: Task<Message>,
     }
 
     impl Driver {
@@ -913,11 +970,12 @@ mod tests {
             Self {
                 app: Application::new().0,
                 runtime: runtime(),
+                task: Task::none(),
             }
         }
 
         fn update(&mut self, message: Message) {
-            let _ = self.app.update(message, Instant::now());
+            self.task = self.app.update(message, Instant::now());
         }
 
         /// Picks the folder at `dir` and, once the app reads its settings, hands them over.
@@ -926,7 +984,8 @@ mod tests {
             self.update(Message::Opener(folder::opener::Message::FolderPicked(
                 Some(root.clone()),
             )));
-            if self.app.draining.is_some() {
+            // Only a pick that isn't refused or waiting for the queue reads the settings.
+            if self.app.draining.is_some() || !self.app.is_loading {
                 return;
             }
             self.settings(&root);
@@ -1260,14 +1319,14 @@ mod tests {
                 "wesl.toml",
             ]
         );
-        driver.scan(&a, 1);
+        driver.scan(&a, 2);
 
         driver.open(&b);
         assert_eq!(driver.pump(), [SETTINGS], "leaving a writes its settings");
         driver.settings(b.path());
-        assert_eq!(driver.app.sessions, 2);
+        assert_eq!(driver.app.sessions, 4);
         driver.update(Message::Folder(folder::Message::Wrote {
-            session: 1,
+            session: 2,
             path: path("main.wesl"),
             text: "late".to_owned(),
             result: Ok(vec![changed("main.wesl", "late")]),
@@ -1276,11 +1335,11 @@ mod tests {
             panic!("b is open");
         };
         assert!(state.in_flight().is_some(), "b's writes are untouched");
-        driver.scan(&a, 1);
+        driver.scan(&a, 2);
         assert_eq!(driver.app.document.content(), "", "a's scan is dropped");
 
         driver.pump();
-        driver.scan(&b, 2);
+        driver.scan(&b, 4);
         assert_eq!(driver.app.document.content(), MAIN);
     }
 
@@ -1336,17 +1395,17 @@ mod tests {
         driver.open(&dir);
         driver.pump();
         driver.settings(dir.path());
-        assert_eq!(driver.app.sessions, 2);
+        assert_eq!(driver.app.sessions, 4);
         assert_eq!(driver.app.document.content(), "");
 
-        driver.scan(&dir, 1);
+        driver.scan(&dir, 2);
         assert_eq!(
             driver.app.document.content(),
             "",
             "the first opening's scan is dropped"
         );
         driver.pump();
-        driver.scan(&dir, 2);
+        driver.scan(&dir, 4);
         assert_eq!(driver.app.document.content(), MAIN);
         assert_eq!(driver.app.viewer.error(), None);
     }
@@ -1418,7 +1477,7 @@ mod tests {
 
         driver.open(&other);
         assert!(driver.app.draining.is_none());
-        assert_eq!(driver.app.sessions, 1);
+        assert_eq!(driver.app.sessions, 2);
         assert!(driver.is_folder());
     }
 
@@ -1512,7 +1571,7 @@ mod tests {
             assert_eq!(driver.pump(), [SETTINGS], "{exit:?}");
             assert!(driver.app.draining.is_none(), "{exit:?}");
             assert!(
-                !driver.is_folder() || driver.app.sessions == 2,
+                !driver.is_folder() || driver.app.sessions == 3,
                 "the exit goes on: {exit:?}"
             );
             let saved = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
@@ -1555,5 +1614,44 @@ mod tests {
                 .as_deref()
                 .is_some_and(|notice| notice.starts_with("Could not open the project"))
         );
+    }
+
+    #[test]
+    fn a_restart_drops_old_generations_without_panicking() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        let stale = driver.app.generation;
+        // Another client's event, which the running client would assert isn't its own.
+        let (_other, mut other) = analyzer::Analyzer::start(analyzer::Workspace::Scratch);
+        let event = driver.runtime.block_on(other.next()).unwrap();
+
+        driver.update(Message::CloseFolder);
+        driver.pump();
+        assert!(!driver.is_folder());
+        assert_ne!(driver.app.generation, stale);
+        let mut events =
+            iced_runtime::task::into_stream(std::mem::replace(&mut driver.task, Task::none()))
+                .expect("leaving the folder streams the scratch analyzer's events");
+
+        driver.update(Message::Analyzer(stale, event));
+        driver.type_text("@");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let status = driver
+                .app
+                .document
+                .status(driver.app.analyzer.as_ref().unwrap());
+            if status.starts_with(|c: char| c.is_ascii_digit()) && !status.starts_with("0 errors") {
+                break;
+            }
+            assert!(Instant::now() < deadline, "no error within 30 s: {status}");
+            match events.next().now_or_never() {
+                Some(Some(iced_runtime::Action::Output(message))) => driver.update(message),
+                Some(Some(_)) => {}
+                Some(None) => panic!("the analyzer's events ended"),
+                None => thread::sleep(Duration::from_millis(10)),
+            }
+        }
     }
 }

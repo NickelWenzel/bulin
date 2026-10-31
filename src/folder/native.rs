@@ -56,6 +56,11 @@ impl Handle {
         Self { root }
     }
 
+    /// The directory, where the language server analyzes the folder.
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     /// The directory's name.
     pub fn name(&self) -> &str {
         self.root

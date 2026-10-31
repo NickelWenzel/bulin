@@ -4,27 +4,41 @@
 //
 // Callbacks into Rust always run from a fresh task or microtask, never inside a call from Rust,
 // so the Rust side never holds a borrow while one runs.
+//
+// One server runs at a time, numbered by a generation. Each Rust link takes a generation when it is
+// created and may start its server later, once its files are read, so starting and stopping name
+// the generation they mean, and a call for an older one does nothing.
 
 // A worker whose pthreads COEP blocks never finishes starting and reports nothing.
 const START_TIMEOUT_MS = 30_000
 
 let server = null
-// Bumped by every start, stop and failure, so a callback from an older run is ignored.
+// The current generation. Bumped by every begin, stop and failure, so a callback from an older
+// run is ignored.
 let generation = 0
-// Messages sent before the server is up.
+// What the current generation sent before its server is up, in order: LSP messages and file
+// writes and deletions, which must reach the server in the order they were made.
 let queue = []
 
-export function analyzer_start(root, filesJson, onMessage, onFailed) {
-  const mine = ++generation
+function reset() {
+  server?.dispose()
+  server = null
   queue = []
+}
+
+export function analyzer_begin() {
+  reset()
+  return ++generation
+}
+
+export function analyzer_start(mine, root, filesJson, onMessage, onFailed) {
+  if (mine !== generation) return
 
   const fail = (reason) =>
     queueMicrotask(() => {
       if (mine !== generation) return
       generation++
-      server?.dispose()
-      server = null
-      queue = []
+      reset()
       onFailed(reason)
     })
 
@@ -58,7 +72,7 @@ export function analyzer_start(root, filesJson, onMessage, onFailed) {
       server.onMessage((message) => {
         if (mine === generation) onMessage(JSON.stringify(message))
       })
-      for (const message of queue) server.sendMessage(message)
+      for (const item of queue) deliver(item)
       queue = []
     })
     .catch((error) => {
@@ -67,15 +81,40 @@ export function analyzer_start(root, filesJson, onMessage, onFailed) {
     })
 }
 
-export function analyzer_send(json) {
-  const message = JSON.parse(json)
-  if (server) server.sendMessage(message)
-  else queue.push(message)
+function deliver(item) {
+  switch (item.type) {
+    case 'lsp':
+      server.sendMessage(item.message)
+      break
+    case 'write':
+      server.writeFile(item.path, item.text)
+      break
+    case 'delete':
+      server.deleteFile(item.path)
+      break
+  }
 }
 
-export function analyzer_stop() {
+function send(item) {
+  if (server) deliver(item)
+  else queue.push(item)
+}
+
+export function analyzer_send(json) {
+  send({ type: 'lsp', message: JSON.parse(json) })
+}
+
+// `path` is relative to the workspace root.
+export function analyzer_write_file(path, text) {
+  send({ type: 'write', path, text })
+}
+
+export function analyzer_delete_file(path) {
+  send({ type: 'delete', path })
+}
+
+export function analyzer_stop(mine) {
+  if (mine !== generation) return
   generation++
-  server?.dispose()
-  server = null
-  queue = []
+  reset()
 }

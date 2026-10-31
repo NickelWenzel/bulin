@@ -325,7 +325,7 @@ pub fn stream(handle: Handle) -> impl Stream<Item = Watched> {
 
 /// Every file of the folder at `handle` whose text storage reads, or `Gone` when the library no
 /// longer has the folder.
-async fn scan(handle: &Handle) -> Result<Watched, Error> {
+pub async fn scan(handle: &Handle) -> Result<Watched, Error> {
     let database = open().await?;
     let transaction = database
         .0
