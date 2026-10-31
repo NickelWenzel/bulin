@@ -3,6 +3,7 @@
 use std::ops::RangeInclusive;
 
 use iced::advanced::widget::{Tree, tree};
+use iced::advanced::text::Paragraph as _;
 use iced::advanced::{Layout, Shell, Widget, layout, renderer, text};
 use iced::{
     Color, Element, Event, Length, Pixels, Point, Rectangle, Size, Theme, alignment, border,
@@ -15,6 +16,9 @@ const THRESHOLD: f32 = 3.0;
 const TEXT_SIZE: f32 = 14.0;
 
 const PADDING: f32 = 6.0;
+
+/// The space kept between a label and its value, in logical pixels.
+const GAP: f32 = 4.0;
 
 /// A number type a [`Scrub`] can edit.
 pub trait Input:
@@ -299,14 +303,19 @@ where
             ellipsis: text::Ellipsis::None,
             hint_factor: renderer.hint_factor(),
         };
-        let label = self
-            .label
-            .map(|label| text(label.to_owned(), text::Alignment::Left));
         let value = text(format!("{:.3}", self.value), text::Alignment::Right);
 
-        // Long values are cut off at the box instead of spilling over its neighbours.
-        renderer.with_layer(bounds, |renderer| {
-            if let Some(label) = label {
+        // A value too long for its box loses its leading digits rather than covering the label.
+        let mut value_bounds = bounds;
+        if let Some(label) = self.label {
+            let label = text(label.to_owned(), text::Alignment::Left);
+            let width = Renderer::Paragraph::with_text(label.with_content(label.content.as_str()))
+                .min_width();
+            let start = (PADDING + width + GAP).min(bounds.width);
+            value_bounds.x += start;
+            value_bounds.width -= start;
+
+            renderer.with_layer(bounds, |renderer| {
                 renderer.fill_text(
                     label,
                     Point::new(bounds.x + PADDING, bounds.center_y()),
@@ -316,12 +325,14 @@ where
                     },
                     bounds,
                 );
-            }
+            });
+        }
+        renderer.with_layer(value_bounds, |renderer| {
             renderer.fill_text(
                 value,
                 Point::new(bounds.x + bounds.width - PADDING, bounds.center_y()),
                 text_color,
-                bounds,
+                value_bounds,
             );
         });
     }
