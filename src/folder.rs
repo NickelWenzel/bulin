@@ -52,7 +52,19 @@ pub enum Error {
     Conflict { disk: Option<String> },
     #[error("bulin may not write there ({0})")]
     Denied(String),
-    #[error("there is no space left ({0}); free some and save again")]
+    /// Storage is full. On the web, exporting folders and deleting them from the library frees
+    /// space.
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        error("there is no space left ({0}); free some and save again")
+    )]
+    #[cfg_attr(
+        target_arch = "wasm32",
+        error(
+            "there is no space left ({0}); export folders you don't need, delete them from the \
+             library and save again"
+        )
+    )]
     Quota(String),
     #[error("{0}")]
     Io(String),

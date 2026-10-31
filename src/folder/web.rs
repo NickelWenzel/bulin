@@ -1,9 +1,10 @@
 //! A folder in the browser's library: an entry of IndexedDB's `entries` store, whose files are
 //! records of the `files` store keyed by the entry's id and the file's path, and the modal that
-//! lists the library's folders and projects.
+//! lists the library's folders and projects and imports and exports them.
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
 
 use iced::futures::{Stream, StreamExt, stream};
@@ -13,14 +14,18 @@ use idb::{
     Database, DatabaseEvent, Factory, KeyPath, KeyRange, ObjectStore, ObjectStoreParams, Query,
     TransactionMode, TransactionResult,
 };
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, Object, Promise, Reflect, Uint8Array};
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::DomException;
+use web_sys::{DomException, HtmlInputElement};
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use super::opener::Instruction;
 use super::{Error, Watched};
 use crate::action::Action;
+use crate::core::archive::{self, Budget, MAX_COMPRESSED, MAX_ENTRIES};
 use crate::core::folder::{
     self, Change, Entry, Expect, MAX_TEXT, Path, SETTINGS, Settings, reads_text,
 };
@@ -66,7 +71,10 @@ pub struct Opener {
     edit: Option<Edit>,
     /// Whether the browser refused to keep the library, which the modal says this once.
     refused: bool,
-    /// Whether an entry is being created, read, renamed or deleted, or a project uploaded.
+    /// A folder just imported and what its import left out, shown until the user opens it.
+    imported: Option<(Item, Vec<String>)>,
+    /// Whether an entry is being created, read, renamed, deleted, imported or exported, or a
+    /// project uploaded.
     busy: bool,
 }
 
@@ -109,6 +117,15 @@ pub enum Message {
     Deleted(Result<(), Error>),
     Upload,
     Uploaded(Result<(file::Name, Arc<String>), file::Error>),
+    ImportZip,
+    ImportDirectory,
+    /// The folder an import stored, with what it left out, or `None` when the user cancelled.
+    FolderImported(Result<Option<(Item, Vec<String>)>, Error>),
+    ImportProject,
+    /// The project an import stored, with its text, or `None` when the user cancelled.
+    ProjectImported(Result<Option<(Item, Arc<String>)>, Error>),
+    Export(Item),
+    Exported(Result<(), Error>),
 }
 
 /// A connection to the library, closed once its transactions finish when it is dropped.
@@ -147,6 +164,7 @@ impl Opener {
     pub fn open_folder(&mut self) -> Task<Message> {
         self.shown = Some(Kind::Folder);
         self.edit = None;
+        self.imported = None;
         self.refused = REFUSED.replace(false);
         Task::perform(list(), Message::Listed)
     }
@@ -155,6 +173,7 @@ impl Opener {
     pub fn open_project(&mut self) -> Task<Message> {
         self.shown = Some(Kind::Project);
         self.edit = None;
+        self.imported = None;
         self.refused = REFUSED.replace(false);
         Task::perform(list(), Message::Listed)
     }
@@ -177,6 +196,7 @@ impl Opener {
                 kind: Kind::Folder,
             }) => {
                 self.shown = None;
+                self.imported = None;
                 Action::instruction(Instruction::OpenFolder(Handle { id, name }))
             }
             Message::Open(Item {
@@ -331,6 +351,88 @@ impl Opener {
                     ))),
                 }
             }
+            Message::ImportZip | Message::ImportDirectory => {
+                if self.busy {
+                    return Action::none();
+                }
+                self.busy = true;
+                let task = if matches!(message, Message::ImportZip) {
+                    Task::perform(import_zip(), Message::FolderImported)
+                } else {
+                    Task::perform(import_directory(), Message::FolderImported)
+                };
+                Action::task(task)
+            }
+            Message::FolderImported(result) => {
+                self.busy = false;
+                match result {
+                    Ok(None) => Action::none(),
+                    // What was left out shows before the folder opens, unless the modal is gone.
+                    Ok(Some((item, notices))) if !notices.is_empty() && self.shown.is_some() => {
+                        self.imported = Some((item, notices));
+                        Action::task(Task::perform(list(), Message::Listed))
+                    }
+                    Ok(Some((Item { id, name, .. }, _))) => {
+                        self.shown = None;
+                        Action::instruction(Instruction::OpenFolder(Handle { id, name }))
+                    }
+                    Err(error) => {
+                        self.shown = None;
+                        Action::instruction(Instruction::Failed(format!(
+                            "Could not import the folder: {error}"
+                        )))
+                    }
+                }
+            }
+            Message::ImportProject => {
+                if self.busy {
+                    return Action::none();
+                }
+                self.busy = true;
+                Action::task(Task::perform(import_project(), Message::ProjectImported))
+            }
+            Message::ProjectImported(result) => {
+                self.busy = false;
+                match result {
+                    Ok(None) => Action::none(),
+                    Ok(Some((Item { id, name, .. }, text))) => {
+                        self.shown = None;
+                        Action::instruction(Instruction::OpenProject(
+                            file::Name::Library { id, name },
+                            text,
+                        ))
+                    }
+                    Err(error) => {
+                        self.shown = None;
+                        Action::instruction(Instruction::Failed(format!(
+                            "Could not import the project: {error}"
+                        )))
+                    }
+                }
+            }
+            Message::Export(Item { id, name, kind }) => {
+                if self.busy {
+                    return Action::none();
+                }
+                self.busy = true;
+                let task = match kind {
+                    Kind::Folder => Task::perform(export_folder(id, name), Message::Exported),
+                    Kind::Project => Task::perform(export_project(id, name), Message::Exported),
+                };
+                Action::task(task)
+            }
+            Message::Exported(result) => {
+                self.busy = false;
+                match result {
+                    Ok(()) => Action::none(),
+                    Err(error) => {
+                        self.shown = None;
+                        Action::instruction(Instruction::Failed(format!(
+                            "Could not export the entry: {error}"
+                        )))
+                    }
+                }
+            }
         }
     }
 
@@ -403,15 +505,59 @@ impl Opener {
         ]
         .spacing(10);
 
+        let imported = self.imported.as_ref().map(|(item, notices)| {
+            column![
+                text(format!("Imported {}, leaving out:", item.name)),
+                scrollable(
+                    column(notices.iter().map(|notice| text(notice).size(14).into())).spacing(5)
+                )
+                .height(iced::Shrink.max(150)),
+                button("Open").on_press(Message::Open(item.clone())),
+            ]
+            .spacing(10)
+        });
+
+        // Export takes the open entry as stored, without what the editor holds unsaved.
+        let idle = !self.busy;
+        let export = current
+            .and_then(|id| {
+                self.entries
+                    .iter()
+                    .find(|item| item.id == id && item.kind == kind)
+            })
+            .map(|item| {
+                button("Export as saved")
+                    .style(button::secondary)
+                    .on_press_maybe(idle.then(|| Message::Export(item.clone())))
+            });
+        let transfer = match kind {
+            Kind::Folder => row![
+                button("Import a zip").on_press_maybe(idle.then_some(Message::ImportZip)),
+                button("Import a directory")
+                    .on_press_maybe(idle.then_some(Message::ImportDirectory)),
+                export,
+            ],
+            Kind::Project => row![
+                button("Import a .bulin file")
+                    .on_press_maybe(idle.then_some(Message::ImportProject)),
+                button("Upload a .bulin file")
+                    .style(button::secondary)
+                    .on_press(Message::Upload),
+                export,
+            ],
+        }
+        .spacing(10);
+
         let content = column![
             self.refused.then(|| text(
-                "The browser may clear stored folders and projects when space runs low."
+                "The browser may clear stored folders and projects when space runs low. \
+                 Export them to keep a copy."
             )),
+            imported,
             text(title).size(20),
             entries,
             create,
-            (kind == Kind::Project)
-                .then(|| button("Upload a .bulin file").on_press(Message::Upload)),
+            transfer,
         ]
         .spacing(15);
 
@@ -429,9 +575,11 @@ impl Opener {
     pub fn close(&mut self) {
         self.shown = None;
         self.edit = None;
+        self.imported = None;
     }
 
-    /// Whether the modal shows, or an entry is being created or read or a project uploaded.
+    /// Whether the modal shows, or an entry is being created, read, imported or exported, or a
+    /// project uploaded.
     pub fn is_busy(&self) -> bool {
         self.shown.is_some() || self.busy
     }
@@ -753,11 +901,30 @@ async fn list() -> Result<Vec<Item>, Error> {
 /// Adds a folder named `name` to the library, holding a main file with the default shader.
 async fn create(name: String) -> Result<Item, Error> {
     let main = Path::new(MAIN).expect("invariant: the main file's path is valid");
-    let row = record(None, &name, Kind::Folder);
-    let source = JsValue::from_str(DEFAULT_SOURCE);
-    let settings =
-        JsValue::from_str(&Settings::new(Some(main.clone()), Uniforms::default(), None).to_json());
+    let settings = Settings::new(Some(main.clone()), Uniforms::default(), None).to_json();
     let settings_path = Path::new(SETTINGS).expect("invariant: the settings path is valid");
+    store_folder(
+        name,
+        vec![(main, DEFAULT_SOURCE.to_owned()), (settings_path, settings)],
+        Vec::new(),
+    )
+    .await
+}
+
+/// Adds a folder named `name` to the library, holding `files` with their texts and the
+/// directories `dirs`, each kept by a marker key.
+async fn store_folder(
+    name: String,
+    files: Vec<(Path, String)>,
+    dirs: Vec<Path>,
+) -> Result<Item, Error> {
+    let row = record(None, &name, Kind::Folder);
+    let values = files
+        .iter()
+        .map(|(path, text)| (path, JsValue::from_str(text)))
+        .collect::<Vec<_>>();
+    let markers = dirs.iter().map(library::marker_key).collect::<Vec<_>>();
+    let empty = JsValue::from_str("");
     persist().await;
     let database = open().await?;
 
@@ -778,17 +945,21 @@ async fn create(name: String) -> Result<Item, Error> {
             .ok_or_else(|| Error::Io("the library didn't number the folder".to_owned()))?
             as u64,
     );
-    let files = transaction.object_store(FILES).map_err(error)?;
-    files
-        .put(&source, Some(&file(id, &main)))
-        .map_err(error)?
-        .await
-        .map_err(error)?;
-    files
-        .put(&settings, Some(&file(id, &settings_path)))
-        .map_err(error)?
-        .await
-        .map_err(error)?;
+    let store = transaction.object_store(FILES).map_err(error)?;
+    for (path, value) in &values {
+        store
+            .put(value, Some(&file(id, path)))
+            .map_err(error)?
+            .await
+            .map_err(error)?;
+    }
+    for marker in &markers {
+        store
+            .put(&empty, Some(&key(id, marker)))
+            .map_err(error)?
+            .await
+            .map_err(error)?;
+    }
     committed(transaction.await)?;
 
     Ok(Item {
@@ -796,6 +967,236 @@ async fn create(name: String) -> Result<Item, Error> {
         name,
         kind: Kind::Folder,
     })
+}
+
+/// Imports a zip archive the user picks as a new folder, named after the archive. Returns the
+/// folder and what the import left out, or `None` when the user cancels.
+async fn import_zip() -> Result<Option<(Item, Vec<String>)>, Error> {
+    let Some(picked) = rfd::AsyncFileDialog::new()
+        .set_title("Import a folder from a zip archive")
+        .add_filter("Zip archive", &["zip"])
+        .pick_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    if picked.inner().size() > MAX_COMPRESSED as f64 {
+        return Err(refused(archive::Error::TooLarge));
+    }
+    let bytes = picked.read().await;
+
+    let invalid =
+        |error: zip::result::ZipError| Error::Io(format!("it isn't a valid zip ({error})"));
+    let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(invalid)?;
+    if zip.len() > MAX_ENTRIES {
+        return Err(refused(archive::Error::TooManyEntries));
+    }
+    // Reading one byte past the budget is what tells an entry that overruns it, so an archive
+    // that unpacks without bound stops there.
+    let mut budget = Budget::new();
+    let mut entries = Vec::new();
+    for index in 0..zip.len() {
+        let entry = zip.by_index(index).map_err(invalid)?;
+        let name = entry.name().map_err(invalid)?.into_owned();
+        if archive::skipped(&name) {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        entry
+            .take(budget.limit())
+            .read_to_end(&mut bytes)
+            .map_err(|error| Error::Io(format!("{name} can't be unpacked ({error})")))?;
+        budget.spend(bytes.len() as u64).map_err(refused)?;
+        entries.push((name, bytes));
+    }
+
+    let imported = archive::import(entries).map_err(refused)?;
+    let item = store_folder(stem(&picked.file_name()), imported.files, imported.dirs).await?;
+    Ok(Some((item, imported.notices)))
+}
+
+/// Imports a directory the user picks as a new folder of the same name. Returns the folder and
+/// what the import left out, or `None` when the user cancels.
+async fn import_directory() -> Result<Option<(Item, Vec<String>)>, Error> {
+    let Some(files) = pick_directory().await? else {
+        return Ok(None);
+    };
+    if files.len() > MAX_ENTRIES {
+        return Err(refused(archive::Error::TooManyEntries));
+    }
+    if files.iter().map(|file| file.size()).sum::<f64>() > MAX_COMPRESSED as f64 {
+        return Err(refused(archive::Error::TooLarge));
+    }
+
+    // Each file's path starts with the picked directory's name, which names the folder.
+    let mut name = None;
+    let mut budget = Budget::new();
+    let mut entries = Vec::new();
+    for file in files {
+        let relative = Reflect::get(&file, &JsValue::from_str("webkitRelativePath"))
+            .ok()
+            .and_then(|path| path.as_string())
+            .unwrap_or_else(|| file.name());
+        let Some((dir, path)) = relative.split_once('/') else {
+            continue;
+        };
+        name.get_or_insert_with(|| dir.to_owned());
+        if archive::skipped(path) {
+            continue;
+        }
+        let buffer = JsFuture::from(file.array_buffer())
+            .await
+            .map_err(|_| Error::Io(format!("{path} can't be read")))?;
+        let bytes = Uint8Array::new(&buffer).to_vec();
+        budget.spend(bytes.len() as u64).map_err(refused)?;
+        entries.push((path.to_owned(), bytes));
+    }
+    let name = name.ok_or_else(|| Error::Io("the directory holds no files".to_owned()))?;
+
+    let imported = archive::import(entries).map_err(refused)?;
+    let item = store_folder(name, imported.files, imported.dirs).await?;
+    Ok(Some((item, imported.notices)))
+}
+
+/// The files under a directory the user picks, or `None` when they cancel.
+///
+/// The picker is a hidden directory input, which reports a pick through `change` and a dismissal
+/// through `cancel`, so waiting for it always ends.
+async fn pick_directory() -> Result<Option<Vec<web_sys::File>>, Error> {
+    let unavailable = || Error::Io("the page can't show a directory picker".to_owned());
+    let document = web_sys::window()
+        .and_then(|window| window.document())
+        .ok_or_else(unavailable)?;
+    let body = document.body().ok_or_else(unavailable)?;
+    let input = document
+        .create_element("input")
+        .ok()
+        .and_then(|element| element.dyn_into::<HtmlInputElement>().ok())
+        .ok_or_else(unavailable)?;
+    input.set_type("file");
+    input.set_webkitdirectory(true);
+    input.set_hidden(true);
+    body.append_with_node_1(&input).map_err(|_| unavailable())?;
+
+    let mut resolve = None;
+    let picked = Promise::new(&mut |done, _| resolve = Some(done));
+    let resolve = resolve.expect("invariant: a promise runs its executor at once");
+    let listeners = [("change", true), ("cancel", false)].map(|(event, picked)| {
+        let resolve = resolve.clone();
+        let listener = Closure::<dyn FnMut()>::new(move || {
+            let _ = resolve.call1(&JsValue::NULL, &JsValue::from_bool(picked));
+        });
+        let added =
+            input.add_event_listener_with_callback(event, listener.as_ref().unchecked_ref());
+        (added, listener)
+    });
+    let result = if listeners.iter().all(|(added, _)| added.is_ok()) {
+        input.click();
+        let picked = JsFuture::from(picked).await;
+        Ok(picked.ok().and_then(|picked| picked.as_bool()) == Some(true))
+    } else {
+        Err(unavailable())
+    };
+    input.remove();
+    drop(listeners);
+
+    if !result? {
+        return Ok(None);
+    }
+    let Some(list) = input.files() else {
+        return Ok(None);
+    };
+    Ok(Some(
+        (0..list.length())
+            .filter_map(|index| list.get(index))
+            .collect(),
+    ))
+}
+
+/// Imports a project file the user picks as a new library project, named after the file.
+/// Returns the project and its text, or `None` when the user cancels.
+async fn import_project() -> Result<Option<(Item, Arc<String>)>, Error> {
+    let Some(picked) = rfd::AsyncFileDialog::new()
+        .set_title("Import a project")
+        .add_filter("bulin project", &["bulin"])
+        .pick_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    if picked.inner().size() > MAX_COMPRESSED as f64 {
+        return Err(refused(archive::Error::TooLarge));
+    }
+    let text = String::from_utf8(picked.read().await)
+        .map_err(|_| Error::Io("it isn't UTF-8 text".to_owned()))?;
+    Project::from_json(&text).map_err(|error| Error::Io(error.to_string()))?;
+
+    let name = stem(&picked.file_name());
+    let id = store_project(None, name.clone(), text.clone()).await?;
+    let item = Item {
+        id,
+        name,
+        kind: Kind::Project,
+    };
+    Ok(Some((item, Arc::new(text))))
+}
+
+/// Downloads the folder `id`, as stored, as the zip archive `<name>.zip`, without the files
+/// bulin regenerates.
+async fn export_folder(id: Id, name: String) -> Result<(), Error> {
+    let range = range(id, None)?;
+    let database = open().await?;
+    let transaction = database
+        .0
+        .transaction(&[FILES], TransactionMode::ReadOnly)
+        .map_err(error)?;
+    let files = transaction.object_store(FILES).map_err(error)?;
+    let keys = files
+        .get_all_keys(Some(Query::KeyRange(range.clone())), None)
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+    let values = files
+        .get_all(Some(Query::KeyRange(range)), None)
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+
+    let invalid =
+        |error: zip::result::ZipError| Error::Io(format!("the zip can't be written ({error})"));
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    // Both lists follow the keys' order. Markers end in `/`, which no file path does.
+    for (key, value) in keys.into_iter().zip(values) {
+        let Some(path) = path_of(key).filter(|path| !archive::skipped(path)) else {
+            continue;
+        };
+        if path.ends_with('/') {
+            zip.add_directory(path, options).map_err(invalid)?;
+        } else {
+            zip.start_file(&path, options).map_err(invalid)?;
+            zip.write_all(value.as_string().unwrap_or_default().as_bytes())
+                .map_err(|error| Error::Io(format!("{path} can't be packed ({error})")))?;
+        }
+    }
+    let bytes = zip.finish().map_err(invalid)?.into_inner();
+
+    downloaded(file::save_bytes(&format!("{name}.zip"), bytes).await)
+}
+
+/// Downloads the project `id`, as stored, as the file `<name>.bulin`.
+async fn export_project(id: Id, name: String) -> Result<(), Error> {
+    let path = Path::new(PROJECT).expect("invariant: the project's path is valid");
+    let json = read(
+        Handle {
+            id,
+            name: name.clone(),
+        },
+        path,
+    )
+    .await?;
+    let saved = file::save_file(None, &format!("{name}.bulin"), json).await;
+    downloaded(saved.map(|_| ()))
 }
 
 /// Stores the project `json` named `name` under the library entry `id`, or under a new entry when
@@ -953,6 +1354,27 @@ async fn open() -> Result<Connection, Error> {
         }
     });
     request.await.map(Connection).map_err(error)
+}
+
+/// Why an import was refused, for the user.
+fn refused(error: archive::Error) -> Error {
+    Error::Io(error.to_string())
+}
+
+/// The outcome of a download: done also when the user dismissed it.
+fn downloaded(result: Result<(), file::Error>) -> Result<(), Error> {
+    match result {
+        Ok(()) | Err(file::Error::DialogClosed) => Ok(()),
+        Err(error) => Err(Error::Io(error.to_string())),
+    }
+}
+
+/// The name of the library entry an imported file becomes: its name without the extension.
+fn stem(file_name: &str) -> String {
+    match file_name.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem.to_owned(),
+        Some(_) | None => file_name.to_owned(),
+    }
 }
 
 /// Whether the transaction that ended with `result` stored its changes.

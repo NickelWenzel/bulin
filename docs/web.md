@@ -27,3 +27,23 @@ npm integrity hash. `index.html` then copies it into the output as `wgsl-analyze
 - **Updating the server.** Set `VERSION` and `INTEGRITY` in `web/fetch-wgsl-analyzer.sh`. The
   integrity hash is the `dist.integrity` field that `npm view wgsl-analyzer-web@<version>` prints.
   The native build links the `wgsl-analyzer` crate pinned in `Cargo.toml`, so keep the two close.
+
+## Library
+
+On the web, bulin keeps folders and projects in the browser, in the IndexedDB database `bulin`.
+Open Folder and Open Project show this library.
+
+- **Eviction.** bulin asks the browser to keep the library (`navigator.storage.persist()`), but a
+  browser may still clear it, Safari in particular. Export what you want to keep.
+- **Several tabs.** Tabs don't see each other's changes. When two tabs save the same file, the
+  last write wins.
+- **Export.** The open folder downloads as a zip, the open project as a `.bulin` file. Both are
+  exported as last saved, without unsaved edits. A folder's zip keeps `.bulin/settings.json`, so
+  importing it restores the main file, the uniforms and the clock.
+- **Import.** A zip, a directory or a `.bulin` file becomes a new library entry and opens.
+  - An import may be at most 64 MiB before unpacking and 64 MiB unpacked, in at most 10,000
+    entries. Larger imports are refused.
+  - `.git/`, `.bulin/bulin/`, `.bulin/uniforms/` and `.bulin/tmp/` are skipped, since bulin
+    regenerates its own and doesn't use git's.
+  - Entries whose path leaves the folder or isn't valid, files that aren't UTF-8 text, and a
+    `settings.json` bulin can't read are left out, and the library lists them.

@@ -700,21 +700,7 @@ impl Application {
                 if self.refuse() || !matches!(self.mode, Mode::Project { .. }) {
                     return Task::none();
                 }
-                self.is_loading = true;
-                self.notice = None;
-                let shader = self.document.content();
-                let uniforms = self.uniforms.uniforms().clone();
-                let json =
-                    core::Project::new(shader.clone(), uniforms.clone(), self.uniforms.clock())
-                        .to_json();
-
-                Task::perform(
-                    async move {
-                        let name = file::save_file(None, "project.bulin", json).await?;
-                        Ok((name, shader, uniforms))
-                    },
-                    Message::ProjectSaved,
-                )
+                self.save_project(None)
             }
             Message::ProjectSaved(result) => {
                 self.is_loading = false;
