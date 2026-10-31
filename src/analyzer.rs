@@ -199,9 +199,17 @@ impl Analyzer {
             log_refusal(editor.save_lsp(&mut self.client));
             self.link.flush();
         } else {
-            self.detach(editor);
-            self.attach(editor, after);
+            self.moved(editor, before, after);
         }
+    }
+
+    /// Reopens `editor`, analyzed at `before`, under the name of `after`. A location that isn't
+    /// analyzed, such as a file that isn't a shader, leaves it closed.
+    pub fn moved(&mut self, editor: &mut CodeEditor, before: &Location, after: &Location) {
+        if document_uri(&self.root, before).is_some() {
+            self.detach(editor);
+        }
+        self.attach(editor, after);
     }
 
     /// Applies one server event to `editor`; its edits mark the editor dirty like typing does.
@@ -424,6 +432,29 @@ mod tests {
         settle(&mut analyzer, &mut events, &mut editor, |_, errors| {
             errors.len() >= 2
         });
+    }
+
+    #[test]
+    fn moving_a_document_reopens_it_under_the_new_uri() {
+        let main = BROKEN_MAIN.replace("lib::a::f", "lib::f");
+        let dir = folder(&[("main.wgsl", &main), ("lib.wesl", F)]);
+        let workspace = Workspace::Folder(Handle::new(dir.path().to_owned()));
+        let (mut analyzer, mut events) = Analyzer::start(workspace);
+        let mut editor = CodeEditor::new(&main);
+        let before = Location::Folder(path("main.wgsl"));
+        analyzer.attach(&mut editor, &before);
+        // The server flags a `.wgsl` file's imports, on top of its own error.
+        settle(&mut analyzer, &mut events, &mut editor, |_, errors| {
+            errors.len() >= 2
+        });
+
+        fs::rename(dir.path().join("main.wgsl"), dir.path().join("main.wesl")).unwrap();
+        analyzer.moved(&mut editor, &before, &Location::Folder(path("main.wesl")));
+
+        let errors = settle(&mut analyzer, &mut events, &mut editor, |_, errors| {
+            errors.len() == 1
+        });
+        assert!(!errors[0].contains("import"), "{errors:?}");
     }
 
     #[test]

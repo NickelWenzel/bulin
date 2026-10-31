@@ -461,7 +461,11 @@ impl Application {
                     (Prompt::Unsaved { then }, Answer::Discard) => self.start(then, now),
                     (
                         Prompt::Unsaved { .. },
-                        Answer::Cancel | Answer::Reload | Answer::KeepMine | Answer::Overwrite,
+                        Answer::Cancel
+                        | Answer::Reload
+                        | Answer::KeepMine
+                        | Answer::Overwrite
+                        | Answer::Delete,
                     ) => Task::none(),
                     (
                         Prompt::ChangedOnDisk { path, .. } | Prompt::Conflict { path, .. },
@@ -481,7 +485,7 @@ impl Application {
                     }
                     (
                         Prompt::ChangedOnDisk { .. },
-                        Answer::Save | Answer::Discard | Answer::Overwrite,
+                        Answer::Save | Answer::Discard | Answer::Overwrite | Answer::Delete,
                     ) => Task::none(),
                     // What the editor holds now, typed after the question too.
                     (Prompt::Conflict { path, .. }, Answer::Overwrite) => match &mut self.mode {
@@ -496,7 +500,24 @@ impl Application {
                     },
                     (
                         Prompt::Conflict { .. },
-                        Answer::Cancel | Answer::Save | Answer::Discard | Answer::KeepMine,
+                        Answer::Cancel
+                        | Answer::Save
+                        | Answer::Discard
+                        | Answer::KeepMine
+                        | Answer::Delete,
+                    ) => Task::none(),
+                    (Prompt::Delete { path }, Answer::Delete) => match &mut self.mode {
+                        Mode::Folder(state) => state.delete(path).map(Message::Folder),
+                        Mode::Project { .. } => Task::none(),
+                    },
+                    (
+                        Prompt::Delete { .. },
+                        Answer::Cancel
+                        | Answer::Save
+                        | Answer::Discard
+                        | Answer::Reload
+                        | Answer::KeepMine
+                        | Answer::Overwrite,
                     ) => Task::none(),
                 };
 
@@ -1269,7 +1290,7 @@ mod tests {
         explorer, folder, uniforms,
     };
     use crate::core;
-    use crate::core::folder::{Change, Path, SETTINGS, Settings};
+    use crate::core::folder::{Change, Entry, Expect, Kind, Path, SETTINGS, Settings};
     use crate::core::uniform::Type;
     use crate::core::{Project, Uniforms};
     use crate::file;
@@ -1360,29 +1381,69 @@ mod tests {
             });
         }
 
-        /// Runs the folder's writes until none is left, returning the paths written.
+        /// Runs the folder's ops until none is left, returning the path each one wrote, created,
+        /// moved or removed.
         fn pump(&mut self) -> Vec<String> {
-            let mut written = Vec::new();
+            let mut done = Vec::new();
             loop {
                 let Mode::Folder(state) = &self.app.mode else {
-                    return written;
+                    return done;
                 };
-                let Some(write) = state.in_flight().cloned() else {
-                    return written;
+                let Some(op) = state.in_flight().cloned() else {
+                    return done;
                 };
-                written.push(write.path.as_str().to_owned());
-                let result = self.runtime.block_on(folder::write(
-                    write.handle,
-                    write.path.clone(),
-                    write.text.clone(),
-                    write.expect,
-                ));
-                self.update(Message::Folder(folder::Message::Wrote {
-                    session: self.app.sessions,
-                    path: write.path,
-                    text: write.text,
-                    result,
-                }));
+                let session = self.app.sessions;
+                let message = match op {
+                    folder::Op::Write(write) => {
+                        done.push(write.path.as_str().to_owned());
+                        let result = self.runtime.block_on(folder::write(
+                            write.handle,
+                            write.path.clone(),
+                            write.text.clone(),
+                            write.expect.clone(),
+                        ));
+                        folder::Message::Wrote {
+                            session,
+                            path: write.path,
+                            text: write.text,
+                            expect: write.expect,
+                            result,
+                        }
+                    }
+                    folder::Op::CreateDir { handle, path } => {
+                        done.push(path.as_str().to_owned());
+                        let result = self
+                            .runtime
+                            .block_on(folder::create_dir(handle, path.clone()));
+                        folder::Message::DirCreated {
+                            session,
+                            path,
+                            result,
+                        }
+                    }
+                    folder::Op::Rename { handle, from, to } => {
+                        done.push(from.as_str().to_owned());
+                        let result =
+                            self.runtime
+                                .block_on(folder::rename(handle, from.clone(), to.clone()));
+                        folder::Message::Renamed {
+                            session,
+                            from,
+                            to,
+                            result,
+                        }
+                    }
+                    folder::Op::Remove { handle, path } => {
+                        done.push(path.as_str().to_owned());
+                        let result = self.runtime.block_on(folder::remove(handle, path.clone()));
+                        folder::Message::Removed {
+                            session,
+                            path,
+                            result,
+                        }
+                    }
+                };
+                self.update(Message::Folder(message));
             }
         }
 
@@ -1721,6 +1782,7 @@ mod tests {
             session: 2,
             path: path("main.wesl"),
             text: "late".to_owned(),
+            expect: Expect::Anything,
             result: Ok(vec![changed("main.wesl", "late")]),
         }));
         let Mode::Folder(state) = &driver.app.mode else {
@@ -1856,7 +1918,12 @@ mod tests {
         let Mode::Folder(state) = &driver.app.mode else {
             return None;
         };
-        state.in_flight().cloned()
+        match state.in_flight()? {
+            folder::Op::Write(write) => Some(write.clone()),
+            folder::Op::CreateDir { .. }
+            | folder::Op::Rename { .. }
+            | folder::Op::Remove { .. } => None,
+        }
     }
 
     /// A project saved in a file of `dir`, whose shader has unsaved changes.
@@ -2171,7 +2238,9 @@ mod tests {
                         assert!(!(case.happened)(&mut driver), "{name}");
                         assert!(driver.app.document.is_dirty(), "{name}");
                     }
-                    Answer::Reload | Answer::KeepMine | Answer::Overwrite => unreachable!(),
+                    Answer::Reload | Answer::KeepMine | Answer::Overwrite | Answer::Delete => {
+                        unreachable!()
+                    }
                 }
             }
         }
@@ -2244,6 +2313,7 @@ mod tests {
             session: driver.app.sessions,
             path: write.path,
             text: write.text,
+            expect: write.expect,
             result: Err(folder::Error::Conflict {
                 disk: Some("// theirs\n".to_owned()),
             }),
@@ -2451,12 +2521,13 @@ mod tests {
 
             driver.update(exit.clone());
             assert!(driver.app.draining.is_some(), "{exit:?}");
-            let Mode::Folder(state) = &driver.app.mode else {
-                panic!("the folder stays open until its writes are done: {exit:?}");
-            };
+            assert!(
+                driver.is_folder(),
+                "the folder stays open until its writes are done: {exit:?}"
+            );
             assert_eq!(
-                state.in_flight().map(|write| write.path.as_str()),
-                Some(SETTINGS),
+                in_flight(&driver).map(|write| write.path),
+                Some(path(SETTINGS)),
                 "{exit:?}"
             );
 
@@ -2548,5 +2619,246 @@ mod tests {
                 None => thread::sleep(Duration::from_millis(10)),
             }
         }
+    }
+
+    /// Renames the folder entry `from` to `name`, in the same directory, through the explorer.
+    fn rename(driver: &mut Driver, from: &str, name: &str) {
+        driver.explore(explorer::Message::Rename(path(from)));
+        driver.explore(explorer::Message::Edited(name.to_owned()));
+        driver.explore(explorer::Message::Submit);
+    }
+
+    /// Deletes the folder entry `file` through the explorer, answering the question with `answer`.
+    fn delete(driver: &mut Driver, file: &str, answer: Answer) {
+        driver.explore(explorer::Message::Delete(path(file)));
+        assert!(
+            matches!(&driver.app.prompt, Some(Prompt::Delete { path: asked }) if *asked == path(file))
+        );
+        driver.answer(answer);
+    }
+
+    /// Lists the folder's root at `dir` for the explorer, as opening the folder does.
+    fn list_root(driver: &mut Driver, dir: &TempDir) {
+        let handle = folder::Handle::new(dir.path().to_owned());
+        let result = driver.runtime.block_on(folder::scan_dir(handle, None));
+        driver.update(Message::Folder(folder::Message::Listed {
+            session: driver.app.sessions,
+            dir: None,
+            result,
+        }));
+    }
+
+    fn state(driver: &Driver) -> &folder::State {
+        let Mode::Folder(state) = &driver.app.mode else {
+            panic!("a folder is open");
+        };
+        state
+    }
+
+    fn is_at(driver: &Driver, file: &str) -> bool {
+        matches!(driver.app.document.location(), document::Location::Folder(at) if *at == path(file))
+    }
+
+    #[test]
+    fn renaming_the_document_moves_it() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        driver.explore(explorer::Message::Open(path("other.wesl")));
+        driver.type_text("x");
+
+        rename(&mut driver, "other.wesl", "moved.wesl");
+        assert!(matches!(
+            state(&driver).in_flight(),
+            Some(folder::Op::Rename { .. })
+        ));
+        // A save of the old path, queued behind the rename, finds the file gone.
+        driver.save();
+        driver.pump();
+
+        assert!(is_at(&driver, "moved.wesl"));
+        assert_eq!(driver.app.document.content(), format!("x{OTHER}"));
+        assert!(driver.app.document.is_dirty());
+        assert_eq!(driver.app.document.label(), "moved.wesl");
+        assert!(!dir.path().join("other.wesl").exists());
+        assert_eq!(
+            fs::read_to_string(dir.path().join("moved.wesl")).unwrap(),
+            OTHER
+        );
+        assert!(driver.app.prompt.is_none());
+        assert!(driver.app.notice.is_some());
+    }
+
+    #[test]
+    fn a_rename_echo_before_its_completion_doesnt_touch_the_document() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        driver.explore(explorer::Message::Open(path("other.wesl")));
+
+        rename(&mut driver, "other.wesl", "moved.wesl");
+        driver.changes(vec![
+            Change::Removed(path("other.wesl")),
+            changed("moved.wesl", OTHER),
+        ]);
+        assert!(driver.app.prompt.is_none());
+        assert_eq!(driver.app.notice, None);
+        assert!(is_at(&driver, "other.wesl"));
+        assert!(!driver.app.document.is_dirty());
+
+        driver.pump();
+        assert!(is_at(&driver, "moved.wesl"));
+        assert!(driver.app.prompt.is_none());
+        assert_eq!(driver.app.notice, None);
+    }
+
+    #[test]
+    fn renaming_the_main_file_updates_settings() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+
+        rename(&mut driver, "main.wesl", "start.wesl");
+        assert!(driver.pump().contains(&SETTINGS.to_owned()));
+
+        let settings = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
+        assert_eq!(
+            Settings::from_json(&settings).unwrap().main,
+            Some(path("start.wesl"))
+        );
+        assert!(is_at(&driver, "start.wesl"));
+        assert!(state(&driver).files().contains_key(&path("start.wesl")));
+        assert_eq!(driver.app.viewer.error(), None);
+    }
+
+    #[test]
+    fn renaming_a_directory_moves_the_document_inside_it() {
+        let dir = folder();
+        fs::create_dir(dir.path().join("shaders")).unwrap();
+        fs::write(dir.path().join("shaders/noise.wesl"), OTHER).unwrap();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        driver.changes(vec![changed("shaders/noise.wesl", OTHER)]);
+        driver.explore(explorer::Message::Open(path("shaders/noise.wesl")));
+        assert_eq!(driver.app.document.content(), OTHER);
+
+        rename(&mut driver, "shaders", "effects");
+        driver.pump();
+
+        assert!(is_at(&driver, "effects/noise.wesl"));
+        assert_eq!(driver.app.document.content(), OTHER);
+        assert!(dir.path().join("effects/noise.wesl").exists());
+        assert!(!dir.path().join("shaders").exists());
+        assert!(driver.app.prompt.is_none());
+        assert_eq!(driver.app.notice, None);
+    }
+
+    #[test]
+    fn delete_asks_first() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        list_root(&mut driver, &dir);
+        let other = Entry {
+            kind: Kind::File,
+            path: path("other.wesl"),
+        };
+        assert!(state(&driver).listing(None).unwrap().contains(&other));
+
+        delete(&mut driver, "other.wesl", Answer::Cancel);
+        assert!(driver.app.prompt.is_none());
+        assert!(driver.pump().is_empty());
+        assert!(dir.path().join("other.wesl").exists());
+
+        delete(&mut driver, "other.wesl", Answer::Delete);
+        assert_eq!(driver.pump(), ["other.wesl"]);
+        assert!(!dir.path().join("other.wesl").exists());
+        assert!(!state(&driver).files().contains_key(&path("other.wesl")));
+        assert!(!state(&driver).listing(None).unwrap().contains(&other));
+        assert_eq!(driver.app.notice, None);
+    }
+
+    #[test]
+    fn deleting_the_main_file_clears_it() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+
+        delete(&mut driver, "main.wesl", Answer::Delete);
+        driver.pump();
+
+        let settings = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
+        assert_eq!(Settings::from_json(&settings).unwrap().main, None);
+        assert_eq!(
+            driver.app.viewer.error(),
+            Some("This folder has no main file. Set one in the explorer.")
+        );
+        assert!(matches!(
+            driver.app.document.location(),
+            document::Location::Untitled
+        ));
+        assert!(driver.app.prompt.is_none());
+    }
+
+    #[test]
+    fn deleting_the_open_document_closes_it() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        driver.explore(explorer::Message::Open(path("other.wesl")));
+        driver.type_text("x");
+
+        delete(&mut driver, "other.wesl", Answer::Delete);
+        driver.pump();
+
+        assert!(matches!(
+            driver.app.document.location(),
+            document::Location::Untitled
+        ));
+        assert_eq!(driver.app.document.content(), "");
+        assert!(!driver.app.is_dirty());
+        assert!(driver.app.prompt.is_none());
+        assert_eq!(driver.app.viewer.error(), None, "the main file still runs");
+    }
+
+    #[test]
+    fn creating_an_existing_file_reports_it() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        list_root(&mut driver, &dir);
+
+        driver.explore(explorer::Message::NewFile(None));
+        driver.explore(explorer::Message::Edited("other.wesl".to_owned()));
+        driver.explore(explorer::Message::Submit);
+        driver.pump();
+        let notice = driver.app.notice.take().unwrap();
+        assert!(notice.contains("other.wesl already exists"), "{notice}");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("other.wesl")).unwrap(),
+            OTHER
+        );
+
+        driver.explore(explorer::Message::NewFile(None));
+        driver.explore(explorer::Message::Submit);
+        driver.explore(explorer::Message::NewFolder(None));
+        driver.explore(explorer::Message::Edited("shaders".to_owned()));
+        driver.explore(explorer::Message::Submit);
+        assert_eq!(driver.pump(), ["untitled.wesl", "shaders"]);
+
+        assert_eq!(
+            fs::read_to_string(dir.path().join("untitled.wesl")).unwrap(),
+            ""
+        );
+        assert!(dir.path().join("shaders").is_dir());
+        let listing = state(&driver).listing(None).unwrap();
+        for (kind, file) in [(Kind::File, "untitled.wesl"), (Kind::Dir, "shaders")] {
+            let entry = Entry {
+                kind,
+                path: path(file),
+            };
+            assert!(listing.contains(&entry), "{listing:?}");
+        }
+        assert_eq!(driver.app.notice, None);
     }
 }

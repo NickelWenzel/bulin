@@ -21,17 +21,17 @@ use iced::{Element, Subscription, Task};
 #[cfg(not(target_arch = "wasm32"))]
 use native::stream;
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{Handle, read, scan_dir, write};
+pub use native::{Handle, create_dir, read, remove, rename, scan_dir, write};
 #[cfg(target_arch = "wasm32")]
 use web::stream;
 #[cfg(target_arch = "wasm32")]
-pub use web::{Handle, read, scan, scan_dir, write};
+pub use web::{Handle, create_dir, read, remove, rename, scan, scan_dir, write};
 
 use crate::action::Action;
 use crate::analyzer::Analyzer;
 use crate::core::folder::{
-    Change, DEPENDENCY_LINES, Effect, Entry, Expect, MANIFEST, Mirror, Path, SETTINGS, Settings,
-    declares_dependencies, generated, is_shader, is_skipped, package_root, root_manifest,
+    Change, DEPENDENCY_LINES, Effect, Entry, Expect, Kind, MANIFEST, Mirror, Path, SETTINGS,
+    Settings, declares_dependencies, generated, is_shader, is_skipped, package_root, root_manifest,
     same_text,
 };
 use crate::core::program::{self, Module, Program};
@@ -81,11 +81,30 @@ pub struct Write {
     pub expect: Expect,
 }
 
-/// The folder's writes, in order, one at a time: the head is in flight until its completion
-/// arrives, so later writes can expect what it leaves on disk.
+/// One change to the folder's storage, run in order with the others, carrying its folder.
+#[derive(Debug, Clone)]
+pub enum Op {
+    Write(Write),
+    CreateDir {
+        handle: Handle,
+        path: Path,
+    },
+    Rename {
+        handle: Handle,
+        from: Path,
+        to: Path,
+    },
+    Remove {
+        handle: Handle,
+        path: Path,
+    },
+}
+
+/// The folder's ops, in order, one at a time: the head is in flight until its completion arrives,
+/// so later ops can expect what it leaves on disk.
 #[derive(Debug, Default)]
 pub struct Queue {
-    writes: VecDeque<Write>,
+    ops: VecDeque<Op>,
 }
 
 /// An open folder: its storage, the texts the preview compiles, its settings and its writes.
@@ -133,6 +152,23 @@ pub enum Message {
         session: u64,
         path: Path,
         text: String,
+        expect: Expect,
+        result: Result<Vec<Change>, Error>,
+    },
+    DirCreated {
+        session: u64,
+        path: Path,
+        result: Result<(), Error>,
+    },
+    Renamed {
+        session: u64,
+        from: Path,
+        to: Path,
+        result: Result<Vec<Change>, Error>,
+    },
+    Removed {
+        session: u64,
+        path: Path,
         result: Result<Vec<Change>, Error>,
     },
     Read {
@@ -188,76 +224,123 @@ pub mod opener {
     }
 }
 
-impl Queue {
-    /// Queues `write`, returning the write to start now, if any. A queued write to the same path
-    /// that hasn't started takes `write`'s text instead, and keeps its expectation, which is what
-    /// the writes before it leave on disk.
-    pub fn push(&mut self, write: Write) -> Option<Write> {
-        if let Some(queued) = self
-            .writes
-            .iter_mut()
-            .skip(1)
-            .rev()
-            .find(|queued| queued.path == write.path)
-        {
-            queued.text = write.text;
-            return None;
+impl Op {
+    /// Whether this op writes or creates `path`, or moves or removes it or a directory holding it.
+    fn touches(&self, path: &Path) -> bool {
+        match self {
+            Op::Write(write) => write.path == *path,
+            Op::CreateDir { path: created, .. } => created == path,
+            Op::Rename { .. } | Op::Remove { .. } => self.displaces(path),
         }
-        self.writes.push_back(write);
-        (self.writes.len() == 1).then(|| self.writes[0].clone())
     }
 
-    /// Queues the user's save of `path`, returning the write to start now, if any. It expects
-    /// the newest queued text for the path, or else `base`, the text last loaded or saved, with
-    /// `None` meaning no file.
+    /// Whether this op moves `path` away or onto it, or removes it, itself or through a directory
+    /// holding it.
+    fn displaces(&self, path: &Path) -> bool {
+        match self {
+            Op::Rename { from, to, .. } => within(path, from) || within(path, to),
+            Op::Remove { path: removed, .. } => within(path, removed),
+            Op::Write(_) | Op::CreateDir { .. } => false,
+        }
+    }
+}
+
+impl Queue {
+    /// Queues `op`, returning the op to start now, if any. A write replaces a queued write to the
+    /// same path that hasn't started, keeping its expectation, which is what the ops before it
+    /// leave on disk, unless a rename or removal of the path comes between them: the write then
+    /// queues after it, so the rename doesn't carry text saved after it was asked for.
+    pub fn push(&mut self, op: Op) -> Option<Op> {
+        if let Op::Write(write) = &op {
+            let queued = self
+                .ops
+                .iter_mut()
+                .skip(1)
+                .rev()
+                .take_while(|queued| !queued.displaces(&write.path))
+                .find_map(|queued| match queued {
+                    Op::Write(queued) if queued.path == write.path => Some(queued),
+                    Op::Write(_) | Op::CreateDir { .. } | Op::Rename { .. } | Op::Remove { .. } => {
+                        None
+                    }
+                });
+            if let Some(queued) = queued {
+                queued.text.clone_from(&write.text);
+                return None;
+            }
+        }
+        self.ops.push_back(op);
+        (self.ops.len() == 1).then(|| self.ops[0].clone())
+    }
+
+    /// Queues the user's save of `path`, returning the op to start now, if any. It expects the
+    /// newest queued text for the path, or else `base`, the text last loaded or saved, with `None`
+    /// meaning no file.
     pub fn save(
         &mut self,
         handle: Handle,
         path: Path,
         text: String,
         base: Option<String>,
-    ) -> Option<Write> {
+    ) -> Option<Op> {
         let expect = match self.newest(&path) {
             Some(newest) => Expect::Text(newest.to_owned()),
             None => base.map_or(Expect::Missing, Expect::Text),
         };
-        self.push(Write {
+        self.push(Op::Write(Write {
             handle,
             path,
             text,
             expect,
-        })
+        }))
     }
 
-    /// Finishes the write in flight, returning the next one to start. A failed write takes the
-    /// queued writes to its path with it, since they expect what it would have written.
-    pub fn complete(&mut self, ok: bool) -> Option<Write> {
-        if let Some(done) = self.writes.pop_front()
+    /// Finishes the op in flight, returning the next one to start. A failed write takes the queued
+    /// writes to its path with it, since they expect what it would have written; a failed creation,
+    /// rename or removal takes nothing.
+    pub fn complete(&mut self, ok: bool) -> Option<Op> {
+        if let Some(Op::Write(done)) = self.ops.pop_front()
             && !ok
         {
-            self.writes.retain(|write| write.path != done.path);
+            self.ops
+                .retain(|op| !matches!(op, Op::Write(write) if write.path == done.path));
         }
-        self.writes.front().cloned()
+        self.ops.front().cloned()
     }
 
-    /// The newest text queued or in flight for `path`.
+    /// The newest text queued or in flight for `path`, unless a later op moves, removes or creates
+    /// it, after which only storage knows.
     pub fn newest(&self, path: &Path) -> Option<&str> {
-        self.writes
-            .iter()
-            .rev()
-            .find(|write| write.path == *path)
-            .map(|write| write.text.as_str())
+        match self.ops.iter().rev().find(|op| op.touches(path))? {
+            Op::Write(write) => Some(&write.text),
+            Op::CreateDir { .. } | Op::Rename { .. } | Op::Remove { .. } => None,
+        }
     }
 
-    /// Whether a change of `path` to `text` is one of the writes queued or in flight.
-    pub fn is_echo(&self, path: &Path, text: &str) -> bool {
-        self.writes
-            .iter()
-            .any(|write| write.path == *path && same_text(&write.text, text))
+    /// Whether storage reporting `change` is bulin's own doing: a file changed to the text of a
+    /// queued or in-flight write, or a path the op in flight moves away, onto or removes. An op
+    /// still queued hasn't touched storage, so what changes there is someone else's.
+    pub fn is_echo(&self, change: &Change) -> bool {
+        let in_flight = self.ops.front();
+        match change {
+            Change::Changed { path, text } => {
+                let written = text.as_deref().is_some_and(|text| {
+                    self.ops.iter().any(|op| {
+                        matches!(op, Op::Write(write) if write.path == *path && same_text(&write.text, text))
+                    })
+                });
+                written || matches!(in_flight, Some(Op::Rename { to, .. }) if within(path, to))
+            }
+            Change::Removed(path) => matches!(
+                in_flight,
+                Some(Op::Rename { from: gone, .. } | Op::Remove { path: gone, .. }) if within(path, gone)
+            ),
+        }
     }
 
+    /// Whether no op is queued or in flight.
     pub fn is_empty(&self) -> bool {
-        self.writes.is_empty()
+        self.ops.is_empty()
     }
 }
 
@@ -314,6 +397,9 @@ impl State {
         match message {
             Message::Watched(session, _)
             | Message::Wrote { session, .. }
+            | Message::DirCreated { session, .. }
+            | Message::Renamed { session, .. }
+            | Message::Removed { session, .. }
             | Message::Read { session, .. }
             | Message::Listed { session, .. }
             | Message::Opened { session, .. }
@@ -375,7 +461,11 @@ impl State {
                 Action::none()
             }
             Message::Wrote {
-                path, text, result, ..
+                path,
+                text,
+                expect,
+                result,
+                ..
             } => {
                 let next = self.queue.complete(result.is_ok());
                 let mut task = next.map_or_else(Task::none, |next| self.start(next));
@@ -415,6 +505,10 @@ impl State {
                         // is checked against storage once they have.
                         prompt = self.ask(Prompt::Conflict { path, deleted });
                     }
+                    // Only a new file expects none, so this one was made in the meantime.
+                    Err(Error::Conflict { disk: Some(_) }) if expect == Expect::Missing => {
+                        *notice = Some(format!("{path} already exists."));
+                    }
                     Err(Error::Conflict { disk }) => {
                         let what = if disk.is_none() {
                             "was deleted"
@@ -435,14 +529,10 @@ impl State {
                     Err(error) => *notice = Some(format!("Could not save {path}: {error}")),
                 }
 
-                let instruction = if let Some(prompt) = prompt {
-                    Some(Instruction::Ask(prompt))
-                } else if relevant {
-                    Some(Instruction::ProgramChanged)
-                } else {
-                    self.queue.is_empty().then_some(Instruction::Drained)
-                };
-                Action { instruction, task }
+                Action {
+                    instruction: self.settled(prompt, relevant),
+                    task,
+                }
             }
             Message::Read { path, result, .. } => {
                 if !is_open(document, &path) {
@@ -461,34 +551,180 @@ impl State {
                     task: Task::none(),
                 }
             }
-            Message::Explorer(message) => match self.explorer.update(message) {
-                Some(explorer::Instruction::Expand(dir)) => Action::task(self.list(Some(dir))),
-                Some(explorer::Instruction::Open(path)) => {
-                    if is_open(document, &path) {
-                        return Action::none();
+            Message::Explorer(message) => {
+                let action = self.explorer.update(message);
+                let task = action.task.map(Message::Explorer);
+                let reaction = match action.instruction {
+                    Some(explorer::Instruction::Expand(dir)) => Action::task(self.list(Some(dir))),
+                    Some(explorer::Instruction::Open(path)) => {
+                        if is_open(document, &path) {
+                            Action::none()
+                        } else if unsaved(document) {
+                            let then = Pending::OpenDocument(path);
+                            Action {
+                                instruction: self
+                                    .ask(Prompt::Unsaved { then })
+                                    .map(Instruction::Ask),
+                                task: Task::none(),
+                            }
+                        } else {
+                            Action::task(self.open(path, document, analyzer, settings))
+                        }
                     }
-                    if unsaved(document) {
-                        let then = Pending::OpenDocument(path);
-                        return Action {
-                            instruction: self.ask(Prompt::Unsaved { then }).map(Instruction::Ask),
-                            task: Task::none(),
+                    Some(explorer::Instruction::SetMain(path)) => {
+                        if let Err(error) = Module::of(self.root.as_ref(), &path) {
+                            *notice = Some(format!("{path} can't be the main file: {error}"));
+                            Action::none()
+                        } else {
+                            self.settings.main = Some(path);
+                            // Choosing a main file is a deliberate change, so it may replace
+                            // settings that couldn't be read.
+                            self.settings_locked = false;
+                            Action::task(self.persist())
+                                .with_instruction(Instruction::ProgramChanged)
+                        }
+                    }
+                    Some(
+                        explorer::Instruction::Create { path, .. }
+                        | explorer::Instruction::Rename { from: path, .. }
+                        | explorer::Instruction::Delete(path),
+                    ) if self.gone => {
+                        *notice = Some(format!("{path} stays as it is: the folder is gone."));
+                        Action::none()
+                    }
+                    Some(explorer::Instruction::Create { path, kind }) => {
+                        let handle = self.handle.clone();
+                        let op = match kind {
+                            Kind::File => Op::Write(Write {
+                                handle,
+                                path,
+                                text: String::new(),
+                                expect: Expect::Missing,
+                            }),
+                            Kind::Dir => Op::CreateDir { handle, path },
                         };
+                        Action::task(self.push(op))
                     }
-                    Action::task(self.open(path, document, analyzer, settings))
-                }
-                Some(explorer::Instruction::SetMain(path)) => {
-                    if let Err(error) = Module::of(self.root.as_ref(), &path) {
-                        *notice = Some(format!("{path} can't be the main file: {error}"));
-                        return Action::none();
+                    Some(explorer::Instruction::Rename { from, to }) => {
+                        let handle = self.handle.clone();
+                        Action::task(self.push(Op::Rename { handle, from, to }))
                     }
-                    self.settings.main = Some(path);
-                    // Choosing a main file is a deliberate change, so it may replace settings
-                    // that couldn't be read.
-                    self.settings_locked = false;
-                    Action::task(self.persist()).with_instruction(Instruction::ProgramChanged)
+                    Some(explorer::Instruction::Delete(path)) => Action {
+                        instruction: self.ask(Prompt::Delete { path }).map(Instruction::Ask),
+                        task: Task::none(),
+                    },
+                    None => Action::none(),
+                };
+                Action {
+                    instruction: reaction.instruction,
+                    task: Task::batch([task, reaction.task]),
                 }
-                None => Action::none(),
-            },
+            }
+            Message::DirCreated { path, result, .. } => {
+                let next = self.queue.complete(result.is_ok());
+                let task = next.map_or_else(Task::none, |next| self.start(next));
+                match result {
+                    Ok(()) => self.explorer.created(path, Kind::Dir),
+                    Err(error) => *notice = Some(format!("Could not create {path}: {error}")),
+                }
+                Action {
+                    instruction: self.queue.is_empty().then_some(Instruction::Drained),
+                    task,
+                }
+            }
+            Message::Renamed {
+                from, to, result, ..
+            } => {
+                let next = self.queue.complete(result.is_ok());
+                let mut tasks = vec![next.map_or_else(Task::none, |next| self.start(next))];
+                let mut relevant = false;
+                let mut prompt = None;
+
+                match result {
+                    Ok(changes) => {
+                        // The document moves first, so the path it leaves doesn't read as its
+                        // file deleted under it.
+                        document.moved(&from, &to, analyzer);
+                        if let Some((at, _)) = &mut self.disk
+                            && let Some(moved) = moved(at, &from, &to)
+                        {
+                            *at = moved;
+                        }
+                        changes
+                            .iter()
+                            .for_each(|change| self.explorer.changed(change));
+                        // A directory without files reports none, so its listing tells of it.
+                        tasks.push(self.list(to.parent()));
+                        if self.scanned {
+                            let applied = self.apply(&changes, document, analyzer, notice);
+                            relevant = applied.0;
+                            tasks.push(applied.1);
+                            prompt = applied.2;
+                        }
+                        if let Some(main) = self
+                            .settings
+                            .main
+                            .as_ref()
+                            .and_then(|main| moved(main, &from, &to))
+                        {
+                            self.settings.main = Some(main);
+                            tasks.push(self.persist());
+                            relevant = true;
+                        }
+                    }
+                    Err(error) => *notice = Some(format!("Could not rename {from}: {error}")),
+                }
+
+                Action {
+                    instruction: self.settled(prompt, relevant),
+                    task: Task::batch(tasks),
+                }
+            }
+            Message::Removed { path, result, .. } => {
+                let next = self.queue.complete(result.is_ok());
+                let mut tasks = vec![next.map_or_else(Task::none, |next| self.start(next))];
+                let mut relevant = false;
+                let mut prompt = None;
+
+                match result {
+                    Ok(changes) => {
+                        // The user confirmed the delete, so the document goes with its file,
+                        // unsaved changes included.
+                        if let document::Location::Folder(open) = document.location()
+                            && within(open, &path)
+                        {
+                            document.detach(analyzer);
+                            *document = document::State::new("", settings);
+                            self.disk = None;
+                        }
+                        changes
+                            .iter()
+                            .for_each(|change| self.explorer.changed(change));
+                        if self.scanned {
+                            let applied = self.apply(&changes, document, analyzer, notice);
+                            relevant = applied.0;
+                            tasks.push(applied.1);
+                            prompt = applied.2;
+                        }
+                        if self
+                            .settings
+                            .main
+                            .as_ref()
+                            .is_some_and(|main| within(main, &path))
+                        {
+                            self.settings.main = None;
+                            tasks.push(self.persist());
+                            relevant = true;
+                        }
+                    }
+                    Err(error) => *notice = Some(format!("Could not delete {path}: {error}")),
+                }
+
+                Action {
+                    instruction: self.settled(prompt, relevant),
+                    task: Task::batch(tasks),
+                }
+            }
             Message::Listed { dir, result, .. } => {
                 let entries = result.unwrap_or_else(|error| {
                     let name = dir
@@ -576,6 +812,16 @@ impl State {
         self.queue
             .save(self.handle.clone(), path, text, base)
             .map_or_else(Task::none, |next| self.start(next))
+    }
+
+    /// Deletes the folder file or directory `path`, which the user confirmed, unless the folder is
+    /// gone.
+    pub fn delete(&mut self, path: Path) -> Task<Message> {
+        if self.gone {
+            return Task::none();
+        }
+        let handle = self.handle.clone();
+        self.push(Op::Remove { handle, path })
     }
 
     /// Makes the folder file `path` the document, reading it first unless its text is known.
@@ -737,10 +983,22 @@ impl State {
             .then_some("The folder is gone, so bulin saves nothing. Close it to go on.")
     }
 
-    /// The write in flight.
+    /// The op in flight.
     #[cfg(test)]
-    pub fn in_flight(&self) -> Option<&Write> {
-        self.queue.writes.front()
+    pub fn in_flight(&self) -> Option<&Op> {
+        self.queue.ops.front()
+    }
+
+    /// The texts of the folder's files the program may read.
+    #[cfg(test)]
+    pub fn files(&self) -> &BTreeMap<Path, String> {
+        self.mirror.files()
+    }
+
+    /// The listing the explorer shows for `dir`, `None` being the folder itself, when expanded.
+    #[cfg(test)]
+    pub fn listing(&self, dir: Option<&Path>) -> Option<&[Entry]> {
+        self.explorer.listing(dir)
     }
 
     /// Applies `changes` to the mirror, the root manifest, the document and the analyzer, returning
@@ -769,7 +1027,12 @@ impl State {
                 };
                 files.push((path, effect, text));
             }
+            regenerate |= matches!(change, Change::Removed(path) if generated.contains(path));
 
+            // bulin's own changes reach the document through their completions.
+            if self.queue.is_echo(change) {
+                continue;
+            }
             let document::Location::Folder(open) = document.location().clone() else {
                 continue;
             };
@@ -800,8 +1063,6 @@ impl State {
                 }
                 Change::Changed { .. } | Change::Removed(_) => {}
             }
-
-            regenerate |= matches!(change, Change::Removed(path) if generated.contains(path));
         }
         analyzer.changed(&files);
 
@@ -858,8 +1119,11 @@ impl State {
         };
 
         // An echo's completion updates the document, and a base equal to `text` is up to date.
-        if self.queue.is_echo(path, text)
-            || document.base().is_some_and(|base| same_text(base, text))
+        let change = Change::Changed {
+            path: path.clone(),
+            text: Some(text.to_owned()),
+        };
+        if self.queue.is_echo(&change) || document.base().is_some_and(|base| same_text(base, text))
         {
             return None;
         }
@@ -874,6 +1138,18 @@ impl State {
                 path: path.clone(),
                 deleted: false,
             })
+        }
+    }
+
+    /// What a completion tells the App: the question it raises, else whether the program may read
+    /// a changed file, else whether every op finished.
+    fn settled(&self, prompt: Option<Prompt>, relevant: bool) -> Option<Instruction> {
+        if let Some(prompt) = prompt {
+            Some(Instruction::Ask(prompt))
+        } else if relevant {
+            Some(Instruction::ProgramChanged)
+        } else {
+            self.queue.is_empty().then_some(Instruction::Drained)
         }
     }
 
@@ -951,14 +1227,18 @@ impl State {
 
     /// Queues a write of `text` to `path`, starting it when nothing else is in flight.
     fn enqueue(&mut self, path: Path, text: String, expect: Expect) -> Task<Message> {
-        let write = Write {
+        self.push(Op::Write(Write {
             handle: self.handle.clone(),
             path,
             text,
             expect,
-        };
+        }))
+    }
+
+    /// Queues `op`, starting it when nothing else is in flight.
+    fn push(&mut self, op: Op) -> Task<Message> {
         self.queue
-            .push(write)
+            .push(op)
             .map_or_else(Task::none, |next| self.start(next))
     }
 
@@ -974,25 +1254,54 @@ impl State {
         })
     }
 
-    /// Runs `next`, the write the queue just put in flight.
-    fn start(&self, next: Write) -> Task<Message> {
+    /// Runs `next`, the op the queue just put in flight.
+    fn start(&self, next: Op) -> Task<Message> {
         let session = self.session;
-        let Write {
-            handle,
-            path,
-            text,
-            expect,
-        } = next;
-
-        Task::perform(
-            write(handle, path.clone(), text.clone(), expect),
-            move |result| Message::Wrote {
-                session,
+        match next {
+            Op::Write(Write {
+                handle,
                 path,
                 text,
-                result,
-            },
-        )
+                expect,
+            }) => Task::perform(
+                write(handle, path.clone(), text.clone(), expect.clone()),
+                move |result| Message::Wrote {
+                    session,
+                    path,
+                    text,
+                    expect,
+                    result,
+                },
+            ),
+            Op::CreateDir { handle, path } => {
+                Task::perform(create_dir(handle, path.clone()), move |result| {
+                    Message::DirCreated {
+                        session,
+                        path,
+                        result,
+                    }
+                })
+            }
+            Op::Rename { handle, from, to } => {
+                Task::perform(rename(handle, from.clone(), to.clone()), move |result| {
+                    Message::Renamed {
+                        session,
+                        from,
+                        to,
+                        result,
+                    }
+                })
+            }
+            Op::Remove { handle, path } => {
+                Task::perform(remove(handle, path.clone()), move |result| {
+                    Message::Removed {
+                        session,
+                        path,
+                        result,
+                    }
+                })
+            }
+        }
     }
 }
 
@@ -1014,6 +1323,23 @@ pub fn unsaved(document: &document::State) -> bool {
 /// Whether `document` is the folder file `path`.
 fn is_open(document: &document::State, path: &Path) -> bool {
     matches!(document.location(), document::Location::Folder(open) if open == path)
+}
+
+/// Whether `path` is `dir` or lies in it.
+fn within(path: &Path, dir: &Path) -> bool {
+    path == dir || path.strip_prefix(dir).is_some()
+}
+
+/// Where `path` is once `from` moved to `to`, when it is `from` or lies in it.
+fn moved(path: &Path, from: &Path, to: &Path) -> Option<Path> {
+    if path == from {
+        return Some(to.clone());
+    }
+    let rest = path.strip_prefix(from)?;
+    Some(
+        Path::in_dir(Some(to), rest)
+            .expect("invariant: a path's segments stay valid under another directory"),
+    )
 }
 
 /// How long the settings stay unwritten after the last edit.
@@ -1044,12 +1370,35 @@ mod tests {
         Handle::new(PathBuf::from("/folder"))
     }
 
-    fn write(file: &str, text: &str) -> Write {
-        Write {
+    fn write(file: &str, text: &str) -> Op {
+        Op::Write(Write {
             handle: handle(),
             path: path(file),
             text: text.to_owned(),
             expect: Expect::Anything,
+        })
+    }
+
+    fn rename(from: &str, to: &str) -> Op {
+        Op::Rename {
+            handle: handle(),
+            from: path(from),
+            to: path(to),
+        }
+    }
+
+    fn remove(file: &str) -> Op {
+        Op::Remove {
+            handle: handle(),
+            path: path(file),
+        }
+    }
+
+    /// The write `op` is.
+    fn written(op: Option<Op>) -> Write {
+        match op {
+            Some(Op::Write(write)) => write,
+            other => panic!("not a write: {other:?}"),
         }
     }
 
@@ -1161,6 +1510,7 @@ mod tests {
                 session: 1,
                 path: path(file),
                 text: text.to_owned(),
+                expect: Expect::Anything,
                 result,
             });
         }
@@ -1173,9 +1523,7 @@ mod tests {
     #[test]
     fn two_quick_saves_dont_conflict() {
         let mut queue = Queue::default();
-        let a = queue
-            .save(handle(), path("main.wesl"), "a".into(), Some("base".into()))
-            .unwrap();
+        let a = written(queue.save(handle(), path("main.wesl"), "a".into(), Some("base".into())));
         assert_eq!(a.expect, Expect::Text("base".into()));
 
         assert!(
@@ -1183,7 +1531,7 @@ mod tests {
                 .save(handle(), path("main.wesl"), "b".into(), Some("base".into()))
                 .is_none()
         );
-        let b = queue.complete(true).unwrap();
+        let b = written(queue.complete(true));
         assert_eq!(b.text, "b");
         assert_eq!(b.expect, Expect::Text("a".into()));
     }
@@ -1195,7 +1543,7 @@ mod tests {
         let _ = queue.save(handle(), path("main.wesl"), "b".into(), None);
         let _ = queue.save(handle(), path("main.wesl"), "c".into(), None);
 
-        let next = queue.complete(true).unwrap();
+        let next = written(queue.complete(true));
         assert_eq!(next.text, "c");
         assert_eq!(next.expect, Expect::Text("a".into()));
         assert!(queue.complete(true).is_none());
@@ -1206,9 +1554,9 @@ mod tests {
         let mut queue = Queue::default();
         let _ = queue.save(handle(), path("main.wesl"), "a\nb".into(), None);
 
-        assert!(queue.is_echo(&path("main.wesl"), "a\r\nb"));
-        assert!(!queue.is_echo(&path("main.wesl"), "a\nbc"));
-        assert!(!queue.is_echo(&path("other.wesl"), "a\nb"));
+        assert!(queue.is_echo(&changed("main.wesl", Some("a\r\nb"))));
+        assert!(!queue.is_echo(&changed("main.wesl", Some("a\nbc"))));
+        assert!(!queue.is_echo(&changed("other.wesl", Some("a\nb"))));
     }
 
     #[test]
@@ -1218,7 +1566,7 @@ mod tests {
         let _ = queue.push(write("other.wesl", "x"));
         let _ = queue.push(write("main.wesl", "b"));
 
-        let next = queue.complete(false).unwrap();
+        let next = written(queue.complete(false));
         assert_eq!(next.path, path("other.wesl"));
         assert_eq!(queue.newest(&path("main.wesl")), None);
         assert!(queue.complete(true).is_none());
@@ -1228,13 +1576,13 @@ mod tests {
     #[test]
     fn writes_start_in_order() {
         let mut queue = Queue::default();
-        let first = queue.push(write("b.wesl", "1")).unwrap();
+        let first = written(queue.push(write("b.wesl", "1")));
         assert_eq!(first.path, path("b.wesl"));
         assert!(queue.push(write("a.wesl", "2")).is_none());
         assert!(queue.push(write("c.wesl", "3")).is_none());
 
         let order = std::iter::from_fn(|| queue.complete(true))
-            .map(|write| write.path.as_str().to_owned())
+            .map(|op| written(Some(op)).path.as_str().to_owned())
             .collect::<Vec<_>>();
         assert_eq!(order, ["a.wesl", "c.wesl"]);
     }
@@ -1251,6 +1599,7 @@ mod tests {
             session: 1,
             path: path("main.wesl"),
             text,
+            expect: Expect::Anything,
             result: Ok(changes),
         });
 
@@ -1401,6 +1750,7 @@ mod tests {
             session: 1,
             path: path("main.wesl"),
             text,
+            expect: Expect::Text("a".to_owned()),
             result: Err(Error::Conflict { disk }),
         });
 
@@ -1452,7 +1802,7 @@ mod tests {
     fn a_refused_write_stops_generated_writes_but_not_saves() {
         let mut open = Open::new(&[("main.wesl", "a")]);
         let _ = open.state.layout_changed(&Uniforms::default(), None);
-        let refused = open.state.in_flight().unwrap().clone();
+        let refused = written(open.state.in_flight().cloned());
         open.wrote(
             refused.path.as_str(),
             &refused.text,
@@ -1508,7 +1858,7 @@ mod tests {
     #[test]
     fn a_stale_session_is_dropped() {
         let mut open = Open::new(&[("main.wesl", "a")]);
-        let in_flight = open.state.queue.writes.len();
+        let in_flight = open.state.queue.ops.len();
         open.type_text("x");
         let _ = open.save();
 
@@ -1522,12 +1872,13 @@ mod tests {
                 session: 0,
                 path: path("main.wesl"),
                 text: "stale".to_owned(),
+                expect: Expect::Anything,
                 result: Ok(stale),
             })
             .is_none()
         );
 
-        assert_eq!(open.state.queue.writes.len(), in_flight + 1);
+        assert_eq!(open.state.queue.ops.len(), in_flight + 1);
         assert_eq!(open.state.mirror.files()[&path("main.wesl")], "a");
         assert_eq!(open.document.content(), "xa");
     }
@@ -1555,7 +1906,7 @@ mod tests {
         let instruction = open.explore(explorer::Message::SetMain(path("other.wesl")));
 
         assert!(matches!(instruction, Some(Instruction::ProgramChanged)));
-        let write = open.state.in_flight().unwrap();
+        let write = written(open.state.in_flight().cloned());
         assert_eq!(write.path, path(SETTINGS));
         assert_eq!(
             Settings::from_json(&write.text).unwrap().main,
@@ -1713,7 +2064,9 @@ mod tests {
 
     /// The settings the write in flight carries, when it writes them.
     fn written_settings(state: &State) -> Option<Settings> {
-        let write = state.in_flight()?;
+        let Op::Write(write) = state.in_flight()? else {
+            return None;
+        };
         (write.path == path(SETTINGS)).then(|| Settings::from_json(&write.text).unwrap())
     }
 
@@ -1733,7 +2086,7 @@ mod tests {
 
         let _ = open.update_at(Message::SettingsDue, at(1.9));
         assert_eq!(written_settings(&open.state).unwrap().uniforms, radius(0.7));
-        assert_eq!(open.state.queue.writes.len(), 1);
+        assert_eq!(open.state.queue.ops.len(), 1);
         assert_eq!(open.state.settings_dirty_since, None);
     }
 
@@ -1764,9 +2117,12 @@ mod tests {
         let queued = open
             .state
             .queue
-            .writes
+            .ops
             .iter()
-            .map(|write| write.path.as_str())
+            .filter_map(|op| match op {
+                Op::Write(write) => Some(write.path.as_str()),
+                Op::CreateDir { .. } | Op::Rename { .. } | Op::Remove { .. } => None,
+            })
             .collect::<Vec<_>>();
         assert!(queued.contains(&SETTINGS), "{queued:?}");
         let settings = open.state.queue.newest(&path(SETTINGS)).unwrap();
@@ -1821,5 +2177,100 @@ mod tests {
         assert_eq!(open.notice, None);
         assert_eq!(open.document.content(), "x\nya\nb");
         assert_eq!(open.document.base(), Some("a\nb"));
+    }
+
+    #[test]
+    fn a_rename_doesnt_overtake_a_queued_write() {
+        let mut queue = Queue::default();
+        let first = written(queue.push(write("a.wesl", "a")));
+        assert_eq!(first.path, path("a.wesl"));
+
+        assert!(queue.push(rename("a.wesl", "b.wesl")).is_none());
+        assert!(matches!(
+            queue.complete(true),
+            Some(Op::Rename { from, .. }) if from == path("a.wesl")
+        ));
+    }
+
+    #[test]
+    fn a_write_isnt_coalesced_across_a_rename() {
+        let mut queue = Queue::default();
+        let _ = queue.push(write("x.wesl", "x"));
+        let _ = queue.push(write("a.wesl", "A"));
+        let _ = queue.push(rename("a.wesl", "b.wesl"));
+        assert!(queue.push(write("a.wesl", "A'")).is_none());
+
+        assert_eq!(written(queue.complete(true)).text, "A");
+        assert!(matches!(queue.complete(true), Some(Op::Rename { .. })));
+        assert_eq!(written(queue.complete(true)).text, "A'");
+        assert!(queue.complete(true).is_none());
+    }
+
+    #[test]
+    fn newest_is_none_after_a_queued_rename_or_remove() {
+        let mut queue = Queue::default();
+        let _ = queue.push(write("a.wesl", "a"));
+        let _ = queue.push(write("dir/c.wesl", "c"));
+        assert_eq!(queue.newest(&path("a.wesl")), Some("a"));
+
+        let _ = queue.push(rename("a.wesl", "b.wesl"));
+        assert_eq!(queue.newest(&path("a.wesl")), None);
+        assert_eq!(queue.newest(&path("b.wesl")), None);
+
+        let _ = queue.push(remove("dir"));
+        assert_eq!(queue.newest(&path("dir/c.wesl")), None);
+
+        let _ = queue.push(write("a.wesl", "again"));
+        assert_eq!(queue.newest(&path("a.wesl")), Some("again"));
+        let base = Some("base".to_owned());
+        let save = queue.save(handle(), path("b.wesl"), "b".into(), base);
+        assert!(save.is_none());
+        let saved = queue.ops.back().cloned();
+        assert_eq!(written(saved).expect, Expect::Text("base".to_owned()));
+    }
+
+    #[test]
+    fn removals_under_an_in_flight_rename_are_echoes() {
+        let mut queue = Queue::default();
+        let _ = queue.push(write("x.wesl", "x"));
+        let _ = queue.push(rename("dir", "moved"));
+        let removed = Change::Removed(path("dir/a.wesl"));
+        assert!(!queue.is_echo(&removed), "a queued rename hasn't run");
+
+        assert!(queue.complete(true).is_some());
+        assert!(queue.is_echo(&removed));
+        assert!(queue.is_echo(&Change::Removed(path("dir"))));
+        assert!(queue.is_echo(&changed("moved/a.wesl", Some("a"))));
+        assert!(queue.is_echo(&changed("moved/notes.md", None)));
+        assert!(!queue.is_echo(&Change::Removed(path("other.wesl"))));
+        assert!(!queue.is_echo(&changed("dir/a.wesl", Some("a"))));
+
+        let _ = queue.complete(true);
+        let _ = queue.push(remove("gone"));
+        assert!(queue.is_echo(&Change::Removed(path("gone/a.wesl"))));
+        assert!(!queue.is_echo(&changed("gone/a.wesl", Some("a"))));
+    }
+
+    #[test]
+    fn a_failed_rename_drops_nothing() {
+        let mut queue = Queue::default();
+        let _ = queue.push(rename("a.wesl", "b.wesl"));
+        let _ = queue.push(write("a.wesl", "a"));
+        let _ = queue.push(write("b.wesl", "b"));
+
+        assert_eq!(written(queue.complete(false)).path, path("a.wesl"));
+        assert_eq!(written(queue.complete(true)).path, path("b.wesl"));
+    }
+
+    #[test]
+    fn the_queue_isnt_empty_while_a_remove_is_in_flight() {
+        let mut queue = Queue::default();
+        assert!(matches!(
+            queue.push(remove("a.wesl")),
+            Some(Op::Remove { .. })
+        ));
+        assert!(!queue.is_empty());
+        assert!(queue.complete(true).is_none());
+        assert!(queue.is_empty());
     }
 }

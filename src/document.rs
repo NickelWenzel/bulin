@@ -375,6 +375,26 @@ impl State {
         self.check_dirty();
     }
 
+    /// Follows the folder file or directory `from` moving to `to`, when this document is `from` or
+    /// lies in it: it takes the new path and is analyzed under it, keeping its text, its unsaved
+    /// changes and what Undo brings back.
+    pub fn moved(&mut self, from: &Path, to: &Path, analyzer: &mut Analyzer) {
+        let Location::Folder(path) = &self.location else {
+            return;
+        };
+        let after = if path == from {
+            to.clone()
+        } else if let Some(rest) = path.strip_prefix(from) {
+            Path::in_dir(Some(to), rest)
+                .expect("invariant: a path's segments stay valid under another directory")
+        } else {
+            return;
+        };
+        let before = std::mem::replace(&mut self.location, Location::Folder(after.clone()));
+        self.label = Some(shorten(after.as_str()));
+        analyzer.moved(&mut self.editor, &before, &self.location);
+    }
+
     pub fn location(&self) -> &Location {
         &self.location
     }
