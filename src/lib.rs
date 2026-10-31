@@ -4,6 +4,7 @@ mod action;
 mod analyzer;
 mod control;
 mod document;
+mod explorer;
 mod file;
 mod folder;
 mod layout;
@@ -583,16 +584,7 @@ impl Application {
     /// Whether the folder's open file has unsaved changes, which leaving the folder would lose,
     /// telling the user so.
     fn unsaved(&mut self) -> bool {
-        let (Mode::Folder(_), document::Location::Folder(path)) =
-            (&self.mode, self.document.location())
-        else {
-            return false;
-        };
-        if !self.document.is_dirty() {
-            return false;
-        }
-        self.notice = Some(format!("Save {path} or undo its changes first."));
-        true
+        matches!(self.mode, Mode::Folder(_)) && folder::unsaved(&self.document, &mut self.notice)
     }
 
     /// Runs what waits for the folder's writes, once they are done.
@@ -660,7 +652,9 @@ impl Application {
                     state.compiled(read);
                 }
                 Some(Err(error)) => self.viewer.fail(error.to_string()),
-                None => self.viewer.fail("This folder has no main file".to_owned()),
+                None => self
+                    .viewer
+                    .fail("This folder has no main file. Set one in the explorer.".to_owned()),
             },
         }
         self.analyzer
@@ -720,10 +714,14 @@ impl Application {
         .align_y(Center)
         .padding([0, 10]);
 
-        let content = column![
-            header,
-            container(panes).width(Length::Fill).height(Length::Fill),
-        ];
+        let panes = container(panes).width(Length::Fill).height(Length::Fill);
+        let body: Element<'_, Message> = match &self.mode {
+            Mode::Project { .. } => panes.into(),
+            Mode::Folder(state) => {
+                row![state.view(&self.document).map(Message::Folder), panes].into()
+            }
+        };
+        let content = column![header, body];
 
         // The content keeps its place in the widget tree whether a modal is open or not, so
         // opening one doesn't reset the editor's document, the combo box or the panes.
@@ -830,7 +828,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{Application, DRAINING, Message, Modal, Mode, document, folder};
+    use super::{Application, DRAINING, Message, Modal, Mode, document, explorer, folder};
     use crate::core;
     use crate::core::folder::{Change, Path, SETTINGS, Settings};
     use crate::core::{Project, Uniforms};
@@ -970,6 +968,10 @@ mod tests {
             self.open(dir);
             self.pump();
             self.scan(dir, self.app.sessions);
+        }
+
+        fn explore(&mut self, message: explorer::Message) {
+            self.update(Message::Folder(folder::Message::Explorer(message)));
         }
 
         fn type_text(&mut self, text: &str) {
@@ -1387,6 +1389,48 @@ mod tests {
         assert!(driver.app.draining.is_none());
         assert_eq!(driver.app.sessions, 1);
         assert!(driver.is_folder());
+    }
+
+    #[test]
+    fn open_a_type_save_open_b_undo_leaves_b_unchanged() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+
+        driver.type_text("// a\n");
+        driver.save();
+        driver.pump();
+        driver.explore(explorer::Message::Open(path("other.wesl")));
+        assert_eq!(driver.app.document.content(), OTHER);
+
+        driver.update(Message::Document(document::Message::Undo));
+        assert_eq!(driver.app.document.content(), OTHER);
+        assert!(!driver.app.document.is_dirty());
+    }
+
+    #[test]
+    fn set_main_from_the_explorer_recompiles() {
+        let dir = folder();
+        let mut driver = Driver::new();
+        driver.enter(&dir);
+        assert_eq!(driver.app.viewer.error(), None);
+
+        driver.explore(explorer::Message::SetMain(path("other.wesl")));
+        let error = driver
+            .app
+            .viewer
+            .error()
+            .expect("other.wesl has no mainBulin");
+        assert!(error.contains("mainBulin"), "{error}");
+        driver.pump();
+        let settings = fs::read_to_string(dir.path().join(SETTINGS)).unwrap();
+        assert_eq!(
+            Settings::from_json(&settings).unwrap().main,
+            Some(path("other.wesl"))
+        );
+
+        driver.explore(explorer::Message::SetMain(path("main.wesl")));
+        assert_eq!(driver.app.viewer.error(), None);
     }
 
     #[test]

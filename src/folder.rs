@@ -14,26 +14,26 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use iced::futures::StreamExt;
-use iced::{Subscription, Task};
+use iced::{Element, Subscription, Task};
 
 #[cfg(not(target_arch = "wasm32"))]
 use native::stream;
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{Handle, read, write};
+pub use native::{Handle, read, scan_dir, write};
 #[cfg(target_arch = "wasm32")]
 use web::stream;
 #[cfg(target_arch = "wasm32")]
-pub use web::{Handle, read, write};
+pub use web::{Handle, read, scan_dir, write};
 
 use crate::action::Action;
 use crate::analyzer::Analyzer;
 use crate::core::folder::{
-    Change, DEPENDENCY_LINES, Expect, MANIFEST, Mirror, Path, SETTINGS, Settings,
+    Change, DEPENDENCY_LINES, Entry, Expect, MANIFEST, Mirror, Path, SETTINGS, Settings,
     declares_dependencies, generated, is_shader, package_root, root_manifest, same_text,
 };
 use crate::core::program::{self, Module, Program};
 use crate::core::{self, Clock, Uniforms};
-use crate::document;
+use crate::{document, explorer};
 
 /// Why storage couldn't read or write a file. It holds only text, so the messages carrying it can
 /// cross threads.
@@ -108,6 +108,9 @@ pub struct State {
     root: Option<Path>,
     /// The modules the last compile read, `None` when it failed before telling.
     read: Option<BTreeSet<Module>>,
+    explorer: explorer::State,
+    /// The file being read to become the document, until a later open supersedes it.
+    opening: Option<Path>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +123,19 @@ pub enum Message {
         result: Result<Vec<Change>, Error>,
     },
     Read {
+        session: u64,
+        path: Path,
+        result: Result<String, Error>,
+    },
+    Explorer(explorer::Message),
+    /// The listing of the directory `dir`, `None` being the folder itself.
+    Listed {
+        session: u64,
+        dir: Option<Path>,
+        result: Result<Vec<Entry>, Error>,
+    },
+    /// The text of the file `path`, read to open it as the document.
+    Opened {
         session: u64,
         path: Path,
         result: Result<String, Error>,
@@ -251,17 +267,20 @@ impl State {
             manifest: None,
             root: None,
             read: None,
+            explorer: explorer::State::new(),
+            opening: None,
         };
         let generate = state.generate();
         let settings = state.persist();
         // A conflict means the folder has its own manifest, which stays as it is.
         let manifest = state.enqueue(manifest(), root_manifest(), Expect::Missing);
+        let listing = state.list(None);
 
-        (state, Task::batch([generate, settings, manifest]))
+        (state, Task::batch([generate, settings, manifest, listing]))
     }
 
-    /// Applies `message`. Opening the main file replaces `document`, and changes on disk reach it
-    /// by the rules for unsaved changes. `notice` receives what the user should know.
+    /// Applies `message`. Opening a file replaces `document`, and changes on disk reach it by the
+    /// rules for unsaved changes. `notice` receives what the user should know.
     pub fn update(
         &mut self,
         message: Message,
@@ -274,12 +293,17 @@ impl State {
             Message::Watched(session, _)
             | Message::Wrote { session, .. }
             | Message::Read { session, .. }
+            | Message::Listed { session, .. }
+            | Message::Opened { session, .. }
                 if session != self.session =>
             {
                 Action::none()
             }
             Message::Watched(_, Watched::Scan(scan)) => {
                 let changes = self.mirror.replace(&scan);
+                changes
+                    .iter()
+                    .for_each(|change| self.explorer.changed(change));
                 let (relevant, task) = self.apply(&changes, document, analyzer, notice);
                 let first = !self.scanned;
                 self.scanned = true;
@@ -288,9 +312,7 @@ impl State {
                     && let Some(main) = &self.settings.main
                     && let Some(text) = self.mirror.files().get(main)
                 {
-                    document.detach(analyzer);
-                    *document = document::State::folder(main.clone(), text, settings);
-                    document.attach(analyzer);
+                    show(document, main.clone(), text, analyzer, settings);
                 }
 
                 Action {
@@ -300,6 +322,10 @@ impl State {
             }
             #[cfg(not(target_arch = "wasm32"))]
             Message::Watched(_, Watched::Changes(changes)) => {
+                // The explorer lists directories itself, so it follows changes the mirror drops.
+                changes
+                    .iter()
+                    .for_each(|change| self.explorer.changed(change));
                 if !self.scanned {
                     return Action::none();
                 }
@@ -332,6 +358,9 @@ impl State {
                 match result {
                     Ok(changes) => {
                         document.saved(&path, &Ok(text));
+                        changes
+                            .iter()
+                            .for_each(|change| self.explorer.changed(change));
                         if self.scanned {
                             let applied = self.apply(&changes, document, analyzer, notice);
                             relevant = applied.0;
@@ -383,7 +412,88 @@ impl State {
                 }
                 Action::none()
             }
+            Message::Explorer(message) => match self.explorer.update(message) {
+                Some(explorer::Instruction::Expand(dir)) => Action::task(self.list(Some(dir))),
+                Some(explorer::Instruction::Open(path)) => {
+                    let is_open = matches!(
+                        document.location(),
+                        document::Location::Folder(open) if *open == path
+                    );
+                    if is_open || unsaved(document, notice) {
+                        return Action::none();
+                    }
+                    // A queued write holds newer text than storage does.
+                    let text = self
+                        .queue
+                        .newest(&path)
+                        .or_else(|| self.mirror.files().get(&path).map(String::as_str))
+                        .map(str::to_owned);
+                    if let Some(text) = text {
+                        self.opening = None;
+                        show(document, path, &text, analyzer, settings);
+                        return Action::none();
+                    }
+
+                    self.opening = Some(path.clone());
+                    let session = self.session;
+                    Action::task(Task::perform(
+                        read(self.handle.clone(), path.clone()),
+                        move |result| Message::Opened {
+                            session,
+                            path,
+                            result,
+                        },
+                    ))
+                }
+                Some(explorer::Instruction::SetMain(path)) => {
+                    if let Err(error) = Module::of(self.root.as_ref(), &path) {
+                        *notice = Some(format!("{path} can't be the main file: {error}"));
+                        return Action::none();
+                    }
+                    self.settings.main = Some(path);
+                    // Choosing a main file is a deliberate change, so it may replace settings
+                    // that couldn't be read.
+                    self.settings_locked = false;
+                    Action::task(self.persist()).with_instruction(Instruction::ProgramChanged)
+                }
+                None => Action::none(),
+            },
+            Message::Listed { dir, result, .. } => {
+                let entries = result.unwrap_or_else(|error| {
+                    let name = dir
+                        .as_ref()
+                        .map_or_else(|| "the folder".to_owned(), Path::to_string);
+                    *notice = Some(format!("Could not list {name}: {error}"));
+                    Vec::new()
+                });
+                self.explorer.listed(dir, entries);
+                Action::none()
+            }
+            Message::Opened { path, result, .. } => {
+                if self.opening.as_ref() != Some(&path) {
+                    return Action::none();
+                }
+                self.opening = None;
+                match result {
+                    // The window stays usable while the file is read.
+                    Ok(_) if unsaved(document, notice) => {}
+                    Ok(text) => show(document, path, &text, analyzer, settings),
+                    Err(error) => *notice = Some(format!("Could not open {path}: {error}")),
+                }
+                Action::none()
+            }
         }
+    }
+
+    /// The explorer, marking `document`'s file and the main file.
+    pub fn view(&self, document: &document::State) -> Element<'_, Message> {
+        let open = match document.location() {
+            document::Location::Folder(path) => Some(path),
+            document::Location::Untitled | document::Location::File(_) => None,
+        };
+        self.explorer
+            .view(open, self.settings.main.as_ref())
+            .map(Message::Explorer)
     }
 
     /// Watches the folder for changes, starting with a scan of its files.
@@ -633,6 +743,18 @@ impl State {
             .map_or_else(Task::none, |next| self.start(next))
     }
 
+    /// Lists the directory `dir`, `None` being the folder itself, for the explorer.
+    fn list(&self, dir: Option<Path>) -> Task<Message> {
+        let session = self.session;
+        Task::perform(scan_dir(self.handle.clone(), dir.clone()), move |result| {
+            Message::Listed {
+                session,
+                dir,
+                result,
+            }
+        })
+    }
+
     /// Runs `next`, the write the queue just put in flight.
     fn start(&self, next: Write) -> Task<Message> {
         let session = self.session;
@@ -664,6 +786,34 @@ pub fn watch(session: u64, handle: &Handle) -> Subscription<(u64, Watched)> {
     })
 }
 
+/// Whether `document` is a folder file with unsaved changes, which opening another file or leaving
+/// the folder would lose, telling the user so in `notice`.
+pub fn unsaved(document: &document::State, notice: &mut Option<String>) -> bool {
+    let document::Location::Folder(path) = document.location() else {
+        return false;
+    };
+    if !document.is_dirty() {
+        return false;
+    }
+    *notice = Some(format!("Save {path} or undo its changes first."));
+    true
+}
+
+/// Replaces `document` with the folder file `path` holding `text`. A new editor, unlike loading
+/// the text into the old one, leaves nothing for Undo to bring back from the previous file. The
+/// editor follows `settings`.
+fn show(
+    document: &mut document::State,
+    path: Path,
+    text: &str,
+    analyzer: &mut Analyzer,
+    settings: &core::Settings,
+) {
+    document.detach(analyzer);
+    *document = document::State::folder(path, text, settings);
+    document.attach(analyzer);
+}
+
 /// The root `wesl.toml`.
 fn manifest() -> Path {
     Path::new(MANIFEST).expect("invariant: the manifest path is valid")
@@ -677,6 +827,7 @@ mod tests {
     use matcha_iced::lsp::client::Events;
 
     use super::*;
+    use crate::core::folder::MAX_TEXT;
 
     fn path(text: &str) -> Path {
         Path::new(text).unwrap()
@@ -748,6 +899,20 @@ mod tests {
 
         fn changes(&mut self, changes: Vec<Change>) -> Option<Instruction> {
             self.update(Message::Watched(1, Watched::Changes(changes)))
+        }
+
+        fn explore(&mut self, message: explorer::Message) -> Option<Instruction> {
+            self.update(Message::Explorer(message))
+        }
+
+        /// Opens `file`, which isn't in the mirror, with `result` as what reading it gave.
+        fn open_read(&mut self, file: &str, result: Result<String, Error>) {
+            let _ = self.explore(explorer::Message::Open(path(file)));
+            let _ = self.update(Message::Opened {
+                session: 1,
+                path: path(file),
+                result,
+            });
         }
 
         /// Types `text` at the caret, which starts at the start of the document.
@@ -1068,6 +1233,132 @@ mod tests {
         assert_eq!(open.state.queue.writes.len(), in_flight + 1);
         assert_eq!(open.state.mirror.files()[&path("main.wesl")], "a");
         assert_eq!(open.document.content(), "xa");
+    }
+
+    #[test]
+    fn set_main_rejects_an_invalid_module_name() {
+        let mut open = Open::new(&[("main.wesl", "a"), ("my-shader.wesl", "m")]);
+
+        let instruction = open.explore(explorer::Message::SetMain(path("my-shader.wesl")));
+
+        assert!(instruction.is_none());
+        assert!(
+            open.notice.as_deref().unwrap().contains("`my-shader`"),
+            "{:?}",
+            open.notice
+        );
+        assert_eq!(open.state.settings.main, Some(path("main.wesl")));
+        assert!(open.state.is_idle());
+    }
+
+    #[test]
+    fn set_main_writes_settings_and_recompiles() {
+        let mut open = Open::new(&[("main.wesl", "a"), ("other.wesl", "o")]);
+
+        let instruction = open.explore(explorer::Message::SetMain(path("other.wesl")));
+
+        assert!(matches!(instruction, Some(Instruction::ProgramChanged)));
+        let write = open.state.in_flight().unwrap();
+        assert_eq!(write.path, path(SETTINGS));
+        assert_eq!(
+            Settings::from_json(&write.text).unwrap().main,
+            Some(path("other.wesl"))
+        );
+    }
+
+    #[test]
+    fn opening_while_dirty_is_refused() {
+        let mut open = Open::new(&[("main.wesl", "a"), ("other.wesl", "o")]);
+        open.type_text("x");
+
+        let _ = open.explore(explorer::Message::Open(path("other.wesl")));
+        assert_eq!(open.document.content(), "xa");
+        assert!(open.notice.take().unwrap().contains("main.wesl"));
+
+        open.open_read("notes.md", Ok("notes".to_owned()));
+        assert_eq!(open.document.content(), "xa");
+        assert!(open.notice.is_some());
+    }
+
+    #[test]
+    fn opening_a_file_replaces_the_document() {
+        let mut open = Open::new(&[("main.wesl", "a"), ("other.wesl", "o")]);
+
+        let _ = open.explore(explorer::Message::Open(path("other.wesl")));
+        assert_eq!(open.document.content(), "o");
+
+        open.open_read("notes.md", Ok("notes".to_owned()));
+        assert_eq!(open.document.content(), "notes");
+        assert!(matches!(
+            open.document.location(),
+            document::Location::Folder(file) if *file == path("notes.md")
+        ));
+
+        let _ = open.explore(explorer::Message::Open(path("late.md")));
+        let _ = open.explore(explorer::Message::Open(path("other.wesl")));
+        let _ = open.update(Message::Opened {
+            session: 1,
+            path: path("late.md"),
+            result: Ok("late".to_owned()),
+        });
+        assert_eq!(
+            open.document.content(),
+            "o",
+            "a later open supersedes a read"
+        );
+        assert_eq!(open.notice, None);
+    }
+
+    #[test]
+    fn a_large_or_binary_file_doesnt_open() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("big.wesl"), vec![b'a'; MAX_TEXT + 1]).unwrap();
+        std::fs::write(dir.path().join("binary.wesl"), [0xff, 0xfe]).unwrap();
+        let disk = Handle::new(dir.path().to_owned());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let mut open = Open::new(&[("main.wesl", "a")]);
+
+        for (file, why) in [("big.wesl", "1 MiB"), ("binary.wesl", "UTF-8")] {
+            let result = runtime.block_on(read(disk.clone(), path(file)));
+            open.open_read(file, result);
+
+            assert_eq!(open.document.content(), "a");
+            let notice = open.notice.take().unwrap();
+            assert!(
+                notice.starts_with(&format!("Could not open {file}")),
+                "{notice}"
+            );
+            assert!(notice.contains(why), "{notice}");
+        }
+    }
+
+    #[test]
+    fn bulin_documents_are_read_only() {
+        let mut open = Open::new(&[("main.wesl", "a")]);
+        let [_, (bulin, source), _, (uniforms, _)] = generated("old");
+
+        open.open_read(bulin.as_str(), Ok(source.clone()));
+        open.type_text("x");
+        assert_eq!(open.document.content(), source);
+        assert!(!open.document.is_dirty());
+        let action = open.document.update(
+            document::Message::SaveFile,
+            Instant::now(),
+            &mut open.analyzer,
+            &core::Settings::default(),
+        );
+        assert!(action.instruction.is_none());
+
+        open.open_read(uniforms.as_str(), Ok("old".to_owned()));
+        open.wrote(
+            uniforms.as_str(),
+            "new",
+            Ok(vec![changed(uniforms.as_str(), Some("new"))]),
+        );
+        assert_eq!(open.document.content(), "new", "bulin's writes reach it");
+        assert!(!open.document.is_dirty());
     }
 
     #[test]

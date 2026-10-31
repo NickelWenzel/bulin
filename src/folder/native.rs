@@ -19,7 +19,9 @@ use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, ne
 use super::opener::Instruction;
 use super::{Error, Watched};
 use crate::action::Action;
-use crate::core::folder::{self, Change, Expect, MAX_TEXT, Path, SKIP, TMP, reads_text};
+use crate::core::folder::{
+    self, Change, Entry, Expect, Kind, MAX_TEXT, Path, SKIP, TMP, reads_text,
+};
 use crate::file;
 
 /// How long the watcher waits for a file's events to settle before reporting it.
@@ -125,6 +127,35 @@ pub async fn read(handle: Handle, path: Path) -> Result<String, Error> {
         return Err(Error::Io(format!("{path} is larger than 1 MiB")));
     }
     String::from_utf8(bytes).map_err(|_| Error::Io(format!("{path} is not UTF-8 text")))
+}
+
+/// The entries of the directory `dir` in the folder at `handle`, `None` being the folder itself,
+/// sorted with directories first. Names that aren't valid paths are left out, and a symlink to a
+/// directory lists as a directory.
+pub async fn scan_dir(handle: Handle, dir: Option<Path>) -> Result<Vec<Entry>, Error> {
+    let directory = match &dir {
+        Some(dir) => handle.root.join(dir.as_str()),
+        None => handle.root,
+    };
+    let mut listing = tokio::fs::read_dir(directory).await.map_err(error)?;
+    let mut entries = Vec::new();
+
+    while let Some(entry) = listing.next_entry().await.map_err(error)? {
+        let Some(path) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| Path::in_dir(dir.as_ref(), name).ok())
+        else {
+            continue;
+        };
+        let kind = match tokio::fs::metadata(entry.path()).await {
+            Ok(metadata) if metadata.is_dir() => Kind::Dir,
+            Ok(_) | Err(_) => Kind::File,
+        };
+        entries.push(Entry { kind, path });
+    }
+    entries.sort();
+    Ok(entries)
 }
 
 /// Writes `text` to the file `path` in the folder at `handle`, if the file is what `expect` says.
@@ -643,6 +674,41 @@ mod tests {
         assert!(matches!(read("big.wesl"), Err(Error::Io(message)) if message.contains("1 MiB")));
         assert!(
             matches!(read("binary.wesl"), Err(Error::Io(message)) if message.contains("UTF-8"))
+        );
+    }
+
+    #[test]
+    fn scan_dir_lists_one_level_including_skip_list_dirs() {
+        let runtime = runtime();
+        let (_dir, handle) = folder(&[
+            ("main.wesl", "main"),
+            ("sub/lib.wesl", "lib"),
+            (".git/HEAD", "ref"),
+            ("target/y.wesl", "target"),
+        ]);
+        let entry = |kind, file| Entry {
+            kind,
+            path: path(file),
+        };
+        let scan = |dir: Option<&str>| {
+            runtime
+                .block_on(scan_dir(handle.clone(), dir.map(path)))
+                .unwrap()
+        };
+
+        assert_eq!(
+            scan(None),
+            [
+                entry(Kind::Dir, ".git"),
+                entry(Kind::Dir, "sub"),
+                entry(Kind::Dir, "target"),
+                entry(Kind::File, "main.wesl"),
+            ]
+        );
+        assert_eq!(scan(Some("sub")), [entry(Kind::File, "sub/lib.wesl")]);
+        assert_eq!(
+            runtime.block_on(scan_dir(handle.clone(), Some(path("missing")))),
+            Err(Error::Missing)
         );
     }
 
