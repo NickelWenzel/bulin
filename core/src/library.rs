@@ -110,6 +110,35 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_range_covers_every_key_of_the_entry() {
+        // IndexedDB orders array keys part by part, and an array after any string.
+        #[derive(PartialEq, Eq, PartialOrd, Ord)]
+        enum Part {
+            String(String),
+            Array,
+        }
+        let id = Id::new(7);
+        let (lower, upper) = range(None);
+        let lower = (id, Part::String(lower));
+        let upper = match upper {
+            Upper::Before(path) => (id, Part::String(path)),
+            Upper::AfterStrings => (id, Part::Array),
+        };
+        let inside = |key: (Id, &str)| {
+            let key = (key.0, Part::String(key.1.to_owned()));
+            lower <= key && key < upper
+        };
+
+        assert!(inside((id, "project.bulin")));
+        assert!(inside((id, "dir/sub/x.wesl")));
+        assert!(inside((id, &marker_key(&Path::new("empty").unwrap()))));
+        assert!(inside((id, ".bulin/settings.json")));
+        assert!(!inside((Id::new(6), "project.bulin")));
+        assert!(!inside((Id::new(8), "")));
+        assert!(!inside((Id::new(8), "project.bulin")));
+    }
+
+    #[test]
     fn markers_list_as_directories() {
         let empty = Path::new("empty").unwrap();
         assert_eq!(marker_key(&empty), "empty/");

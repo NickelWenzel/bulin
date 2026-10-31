@@ -22,6 +22,7 @@ use crate::action::Action;
 use crate::core::folder::{
     self, Change, Entry, Expect, Kind, MAX_TEXT, Path, SKIP, TMP, reads_text,
 };
+use crate::core::library;
 use crate::file;
 
 /// How long the watcher waits for a file's events to settle before reporting it.
@@ -68,6 +69,11 @@ impl Handle {
             .and_then(OsStr::to_str)
             .unwrap_or("folder")
     }
+
+    /// Nothing: a directory isn't in the browser's library.
+    pub fn library_id(&self) -> Option<library::Id> {
+        None
+    }
 }
 
 impl Opener {
@@ -109,8 +115,8 @@ impl Opener {
         }
     }
 
-    /// Nothing: the system's dialogs show themselves.
-    pub fn view(&self) -> Option<Element<'_, Message>> {
+    /// Nothing: the system's dialogs show themselves, and no library entry is open.
+    pub fn view(&self, _current: Option<library::Id>) -> Option<Element<'_, Message>> {
         None
     }
 
@@ -1018,5 +1024,14 @@ mod tests {
         for (path, _) in &generated {
             assert!(removed.contains(path), "{path} isn't reported: {removed:?}");
         }
+    }
+
+    #[test]
+    fn library_ids_are_none_natively() {
+        let handle = Handle::new(PathBuf::from("/folders/sky"));
+        let name = file::Name::from("/projects/sky.bulin");
+
+        assert_eq!(handle.library_id(), None);
+        assert_eq!(name.library_id(), None);
     }
 }
