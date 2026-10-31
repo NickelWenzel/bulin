@@ -1,9 +1,11 @@
 //! How the web keeps a library's folders in IndexedDB: each file is a record keyed by its entry's
 //! id and its path, so a directory is a range of keys.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
-use crate::folder::Path;
+use crate::folder::{Entry, Kind, Path};
 
 /// A library entry, as IndexedDB numbers it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -46,6 +48,26 @@ pub fn range(dir: Option<&Path>) -> (String, Upper) {
     }
 }
 
+/// The listing of the directory `dir`, `None` being the entry's root, from the paths of the keys
+/// in its [`range`]: the next segment of each, a directory when more follow or when the key is a
+/// directory marker ending in `/`. Sorted, directories first.
+pub fn collapse<'a>(dir: Option<&Path>, keys: impl IntoIterator<Item = &'a str>) -> Vec<Entry> {
+    let prefix = dir.map_or_else(String::new, |dir| format!("{dir}/"));
+    keys.into_iter()
+        .filter_map(|key| {
+            let rest = key.strip_prefix(prefix.as_str())?;
+            let (name, kind) = match rest.split_once('/') {
+                Some((name, _)) => (name, Kind::Dir),
+                None => (rest, Kind::File),
+            };
+            let path = Path::in_dir(dir, name).ok()?;
+            Some(Entry { kind, path })
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +101,27 @@ mod tests {
         assert!(!inside(&dir, "dir0"));
         assert!(!inside(&dir, "dir.x"));
         assert!(!inside(&dir, "dir"));
+    }
+
+    #[test]
+    fn collapse_lists_one_level() {
+        let keys = ["a.wesl", "dir/b.wesl", "dir/sub/c.wesl", "empty/"];
+        let entry = |kind, path| Entry {
+            kind,
+            path: Path::new(path).unwrap(),
+        };
+
+        assert_eq!(
+            collapse(None, keys),
+            [
+                entry(Kind::Dir, "dir"),
+                entry(Kind::Dir, "empty"),
+                entry(Kind::File, "a.wesl"),
+            ]
+        );
+        assert_eq!(
+            collapse(Some(&Path::new("dir").unwrap()), keys),
+            [entry(Kind::Dir, "dir/sub"), entry(Kind::File, "dir/b.wesl")]
+        );
     }
 }

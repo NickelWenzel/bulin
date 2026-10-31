@@ -121,6 +121,21 @@ pub enum Change {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Mirror(Arc<BTreeMap<Path, String>>);
 
+/// Whether a folder entry is a directory or a file. Directories order first, so a sorted listing
+/// shows them above the files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Kind {
+    Dir,
+    File,
+}
+
+/// One entry of a directory listing. Entries order by kind, then by path.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Entry {
+    pub kind: Kind,
+    pub path: Path,
+}
+
 /// What a change did to one file of a [`Mirror`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
@@ -179,15 +194,35 @@ impl Path {
         Ok(Self(text.to_owned()))
     }
 
+    /// The entry `name` of the directory `dir`, `None` being the folder itself.
+    pub fn in_dir(dir: Option<&Path>, name: &str) -> Result<Self, PathError> {
+        match dir {
+            Some(dir) => Self::new(&format!("{dir}/{name}")),
+            None => Self::new(name),
+        }
+    }
+
     /// The path as written, with `/` between its segments.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    /// The last segment: the name of the file or directory.
+    pub fn name(&self) -> &str {
+        self.0.rsplit('/').next().unwrap_or(&self.0)
+    }
+
+    /// The directory holding this path, `None` when that is the folder itself.
+    pub fn parent(&self) -> Option<Path> {
+        self.0
+            .rsplit_once('/')
+            .map(|(parent, _)| Self(parent.to_owned()))
+    }
+
     /// The file name's extension, without the dot.
     pub fn extension(&self) -> Option<&str> {
-        let name = self.0.rsplit('/').next().unwrap_or(&self.0);
-        name.rsplit_once('.')
+        self.name()
+            .rsplit_once('.')
             .and_then(|(stem, extension)| (!stem.is_empty()).then_some(extension))
     }
 
@@ -484,6 +519,12 @@ mod tests {
         assert_eq!(Path::new(".hidden").unwrap().extension(), None);
         assert_eq!(Path::new("a.b/c").unwrap().extension(), None);
         assert_eq!(path.strip_prefix(&shaders), Some("noise.wesl"));
+        assert_eq!(path.name(), "noise.wesl");
+        assert_eq!(path.parent(), Some(shaders.clone()));
+        assert_eq!(shaders.parent(), None);
+        assert_eq!(Path::in_dir(Some(&shaders), "noise.wesl"), Ok(path.clone()));
+        assert_eq!(Path::in_dir(None, "shaders"), Ok(shaders.clone()));
+        assert!(Path::in_dir(None, "..").is_err());
         assert_eq!(
             path.strip_prefix(&Path::new("shade").unwrap()),
             None,

@@ -27,6 +27,8 @@ pub struct State {
     base: Option<String>,
     /// Whether the editor's text differs from `base`, kept current after every change to either.
     dirty: bool,
+    /// Whether edits and saves are refused, for the files bulin generates.
+    read_only: bool,
     problems: Problems,
     /// Why the last file action failed, until the next one starts.
     failure: Option<String>,
@@ -113,6 +115,7 @@ impl State {
             is_loading: false,
             base: Some(shader.to_owned()),
             dirty: false,
+            read_only: false,
             problems: Problems::default(),
             failure: None,
         }
@@ -141,10 +144,12 @@ impl State {
         close
     }
 
-    /// The folder file `path`, holding `text` as storage does, edited with `settings`.
+    /// The folder file `path`, holding `text` as storage does, edited with `settings`. bulin's own
+    /// files under `.bulin/` are read-only, since bulin rewrites them.
     pub fn folder(path: Path, text: &str, settings: &core::Settings) -> Self {
         Self {
             label: Some(shorten(path.as_str())),
+            read_only: path.as_str().starts_with(".bulin/"),
             location: Location::Folder(path),
             ..Self::new(text, settings)
         }
@@ -196,6 +201,7 @@ impl State {
         settings: &core::Settings,
     ) -> Action<Instruction, Message> {
         match message {
+            Message::Editor(event) if self.read_only && edits(&event) => Action::none(),
             Message::Editor(event) => {
                 let action = Action::task(self.editor.update(event, now).map(Message::Editor));
                 analyzer.sync(&mut self.editor);
@@ -266,7 +272,7 @@ impl State {
                 }
             }
             Message::SaveFile => {
-                if self.is_loading {
+                if self.is_loading || self.read_only {
                     return Action::none();
                 }
                 self.failure = None;
@@ -331,7 +337,9 @@ impl State {
     /// text on success, or on a conflict what storage holds instead, so the next save overwrites
     /// it.
     pub fn saved(&mut self, path: &Path, result: &Result<String, folder::Error>) {
-        if !self.is_at(path) {
+        // A read-only document saves nothing, so a write to its file is bulin's and reaches it as
+        // a change on disk.
+        if !self.is_at(path) || self.read_only {
             return;
         }
         match result {
@@ -472,6 +480,94 @@ impl State {
             Location::Folder(_) => action,
             Location::Untitled | Location::File(_) => action.with_instruction(Instruction::Changed),
         }
+    }
+}
+
+/// Whether `event` changes the text, which a read-only document refuses.
+fn edits(event: &Event) -> bool {
+    use matcha_iced::Action;
+
+    match event {
+        Event::Editor(action) => match action {
+            Action::Type(_)
+            | Action::Backspace
+            | Action::Delete
+            | Action::DeleteWordBack
+            | Action::DeleteWordForward
+            | Action::Enter
+            | Action::Tab
+            | Action::Outdent
+            | Action::ToggleComment
+            | Action::DeleteLine
+            | Action::InsertLine { .. }
+            | Action::Cut
+            | Action::Paste { .. }
+            | Action::Undo
+            | Action::Redo
+            | Action::MoveLine { .. }
+            | Action::CopyLine { .. }
+            | Action::PopupAccept
+            | Action::PopupClickAccept(_)
+            | Action::Rename
+            | Action::Format
+            | Action::InlayInsert { .. } => true,
+            Action::Move { .. }
+            | Action::PlaceCaret(_)
+            | Action::DragSelect { .. }
+            | Action::AddCaret(_)
+            | Action::AddNextOccurrence
+            | Action::RemoveNewestCaret
+            | Action::SelectAllOccurrences
+            | Action::AddCaretVertical { .. }
+            | Action::JumpToBracket
+            | Action::ExpandSelection
+            | Action::ShrinkSelection
+            | Action::Collapse
+            | Action::SelectAll
+            | Action::ColumnSelect(_)
+            | Action::ColumnDrag { .. }
+            | Action::ViewportChanged(_)
+            | Action::PopupUp
+            | Action::PopupDown
+            | Action::PopupDismiss
+            | Action::TriggerCompletion
+            | Action::SnippetTab
+            | Action::SnippetTabPrev
+            | Action::SnippetCancel
+            | Action::SignatureClose
+            | Action::NextDiagnostic { .. }
+            | Action::GotoDefinition
+            | Action::HoverQuery(_)
+            | Action::HoverDismiss
+            | Action::ToggleFold { .. }
+            | Action::FoldAtCarets { .. }
+            | Action::Wake(_)
+            | Action::InlayHover { .. }
+            | Action::InlayJump { .. } => false,
+        },
+        Event::ReplaceOne | Event::ReplaceAll | Event::SubmitRename => true,
+        Event::HighlightSweep
+        | Event::OpenFind
+        | Event::OpenReplace
+        | Event::CloseFind
+        | Event::FindQuery(_)
+        | Event::ToggleCase
+        | Event::ToggleWholeWord
+        | Event::ToggleRegex
+        | Event::ToggleFindInSelection
+        | Event::FindNext
+        | Event::FindPrev
+        | Event::FindSelectAll
+        | Event::ToggleReplace
+        | Event::ReplaceText(_)
+        | Event::TogglePreserveCase
+        | Event::RenameText(_)
+        | Event::CycleFocus { .. }
+        | Event::PointerDown
+        | Event::Focused { .. } => false,
+        // `Event` is non-exhaustive, so an event matcha adds later can't be told apart and is
+        // refused, in case it edits.
+        _ => true,
     }
 }
 

@@ -20,7 +20,9 @@ use super::opener::Instruction;
 use super::{Error, Watched};
 use crate::action::Action;
 use crate::core::Uniforms;
-use crate::core::folder::{self, Change, Expect, MAX_TEXT, Path, SETTINGS, Settings, reads_text};
+use crate::core::folder::{
+    self, Change, Entry, Expect, MAX_TEXT, Path, SETTINGS, Settings, reads_text,
+};
 use crate::core::library::{self, Id, Upper};
 use crate::core::program::DEFAULT_SOURCE;
 use crate::file;
@@ -235,9 +237,37 @@ pub async fn read(handle: Handle, path: Path) -> Result<String, Error> {
         .map_err(error)?
         .await
         .map_err(error)?;
-    value
+    let text = value
         .and_then(|value| value.as_string())
-        .ok_or(Error::Missing)
+        .ok_or(Error::Missing)?;
+    if text.len() > MAX_TEXT {
+        return Err(Error::Io(format!("{path} is larger than 1 MiB")));
+    }
+    Ok(text)
+}
+
+/// The entries of the directory `dir` in the folder at `handle`, `None` being the folder itself,
+/// sorted with directories first.
+pub async fn scan_dir(handle: Handle, dir: Option<Path>) -> Result<Vec<Entry>, Error> {
+    let range = range(handle.id, dir.as_ref())?;
+    let database = open().await?;
+    let transaction = database
+        .0
+        .transaction(&[FILES], TransactionMode::ReadOnly)
+        .map_err(error)?;
+    let keys = transaction
+        .object_store(FILES)
+        .map_err(error)?
+        .get_all_keys(Some(Query::KeyRange(range)), None)
+        .map_err(error)?
+        .await
+        .map_err(error)?;
+
+    let paths = keys.into_iter().filter_map(path_of).collect::<Vec<_>>();
+    Ok(library::collapse(
+        dir.as_ref(),
+        paths.iter().map(String::as_str),
+    ))
 }
 
 /// Writes `text` to the file `path` in the folder at `handle`, if the file is what `expect` says.
@@ -312,13 +342,7 @@ async fn scan(handle: &Handle) -> Result<Watched, Error> {
         return Ok(Watched::Gone);
     }
 
-    let (lower, upper) = library::range(None);
-    let upper = match upper {
-        Upper::Before(path) => key(handle.id, &path),
-        Upper::AfterStrings => Array::of2(&entry(handle.id), &Array::new()).into(),
-    };
-    let range =
-        KeyRange::bound(&key(handle.id, &lower), &upper, Some(false), Some(true)).map_err(error)?;
+    let range = range(handle.id, None)?;
     let files = transaction.object_store(FILES).map_err(error)?;
     let keys = files
         .get_all_keys(Some(Query::KeyRange(range.clone())), None)
@@ -336,8 +360,7 @@ async fn scan(handle: &Handle) -> Result<Watched, Error> {
         .into_iter()
         .zip(texts)
         .filter_map(|(key, text)| {
-            let path = key.dyn_into::<Array>().ok()?.get(1).as_string()?;
-            let path = Path::new(&path)
+            let path = Path::new(&path_of(key)?)
                 .ok()
                 .filter(|path| !folder::is_skipped(path) && reads_text(path))?;
             let text = text.as_string().filter(|text| text.len() <= MAX_TEXT);
@@ -462,6 +485,21 @@ fn committed(result: Result<TransactionResult, idb::Error>) -> Result<(), Error>
         }
         Err(error) => Err(self::error(error)),
     }
+}
+
+/// The keys of the files under the directory `dir` of the entry `id`, `None` being its root.
+fn range(id: Id, dir: Option<&Path>) -> Result<KeyRange, Error> {
+    let (lower, upper) = library::range(dir);
+    let upper = match upper {
+        Upper::Before(path) => key(id, &path),
+        Upper::AfterStrings => Array::of2(&entry(id), &Array::new()).into(),
+    };
+    KeyRange::bound(&key(id, &lower), &upper, Some(false), Some(true)).map_err(error)
+}
+
+/// The path part of the file key `key`.
+fn path_of(key: JsValue) -> Option<String> {
+    key.dyn_into::<Array>().ok()?.get(1).as_string()
 }
 
 /// The key of the file `path` in the entry `id`.
