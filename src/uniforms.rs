@@ -40,8 +40,10 @@ pub enum Message {
 }
 
 pub enum Instruction {
-    /// Uniform values or the clock changed; the layout is the same.
-    Values,
+    /// The user moved a slider or paused, started or reset the clock; the layout is the same.
+    Edited,
+    /// Time passed on the running clock; nothing else changed.
+    Ticked,
     /// Uniforms or time were added or removed.
     Layout,
 }
@@ -80,10 +82,10 @@ impl State {
     pub fn update(&mut self, message: Message) -> Action<Instruction, Message> {
         let action = match message {
             Message::Clock(message) => match self.clock.as_mut() {
-                Some(clock) => {
-                    clock.update(message);
-                    Action::instruction(Instruction::Values)
-                }
+                Some(clock) => Action::instruction(match clock.update(message) {
+                    clock::Instruction::Edited => Instruction::Edited,
+                    clock::Instruction::Ticked => Instruction::Ticked,
+                }),
                 None => Action::none(),
             },
             Message::Uniform {
@@ -124,7 +126,7 @@ impl State {
                     }
                     _ => {}
                 }
-                Action::instruction(Instruction::Values)
+                Action::instruction(Instruction::Edited)
             }
             Message::Uniform {
                 name,
@@ -235,7 +237,7 @@ impl State {
                 };
                 let value = Type::VecFloat2((radius * angle.cos(), radius * angle.sin()));
                 if self.uniforms.set(&name, value) {
-                    Action::instruction(Instruction::Values)
+                    Action::instruction(Instruction::Edited)
                 } else {
                     Action::none()
                 }
@@ -318,7 +320,7 @@ impl State {
                 };
                 match changed {
                     Some(changed) if self.uniforms.set(&name, changed) => {
-                        Action::instruction(Instruction::Values)
+                        Action::instruction(Instruction::Edited)
                     }
                     _ => Action::none(),
                 }
@@ -371,7 +373,7 @@ impl State {
                     .uniforms
                     .set(&name, Type::VecFloat3(join(length, direction)))
                 {
-                    Action::instruction(Instruction::Values)
+                    Action::instruction(Instruction::Edited)
                 } else {
                     Action::none()
                 }
@@ -396,7 +398,7 @@ impl State {
                 match typing.value(uniform.value) {
                     Some(value) => {
                         if self.uniforms.set(&typing.name, value) {
-                            Action::instruction(Instruction::Values)
+                            Action::instruction(Instruction::Edited)
                         } else {
                             Action::none()
                         }
@@ -577,6 +579,18 @@ fn follow(value: Type, hue: &mut f32, saturation: &mut f32) {
     }
 }
 
+/// Messages the App's tests send, since the modules they come from are private.
+#[cfg(test)]
+impl Message {
+    /// Sets the uniform `name` to `value`, as its controls do.
+    pub fn set(name: &str, value: Type) -> Self {
+        Message::Uniform {
+            name: name.to_owned(),
+            message: uniform::Message::Set(value),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,16 +676,35 @@ mod tests {
     }
 
     #[test]
-    fn setting_a_value_changes_only_values() {
+    fn setting_a_value_is_an_edit() {
         let mut uniforms = Uniforms::default();
         uniforms.add("radius", Type::Float(0.5)).unwrap();
         let mut state = State::new(uniforms, None);
 
         let instruction = state.update(set("radius", Type::Float(0.7))).instruction;
 
-        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert!(matches!(instruction, Some(Instruction::Edited)));
         let radius = state.uniforms().iter().next().unwrap();
         assert_eq!(radius.value, Type::Float(0.7));
+    }
+
+    #[test]
+    fn clock_ticks_are_ticks_and_toggles_are_edits() {
+        let mut state = State::new(Uniforms::default(), Some(Clock::started()));
+        let now = iced::time::Instant::now();
+
+        for message in [clock::Message::Tick(now), clock::Message::Tick(now)] {
+            assert!(matches!(
+                state.update(Message::Clock(message)).instruction,
+                Some(Instruction::Ticked)
+            ));
+        }
+        for message in [clock::Message::Toggle, clock::Message::Reset] {
+            assert!(matches!(
+                state.update(Message::Clock(message)).instruction,
+                Some(Instruction::Edited)
+            ));
+        }
     }
 
     #[test]
@@ -715,7 +748,7 @@ mod tests {
 
         let instruction = state.update(Message::Submit).instruction;
 
-        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert!(matches!(instruction, Some(Instruction::Edited)));
         assert_eq!(value(&state), Type::VecFloat2((0.5, -2.25)));
         assert!(state.typing.is_none());
     }
@@ -836,7 +869,7 @@ mod tests {
             ))
             .instruction;
 
-        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert!(matches!(instruction, Some(Instruction::Edited)));
         let Type::VecFloat2((x, y)) = value(&state) else {
             panic!("not a vec2");
         };
@@ -935,7 +968,7 @@ mod tests {
             .update(uniform("tint", uniform::Message::HexSubmitted))
             .instruction;
 
-        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert!(matches!(instruction, Some(Instruction::Edited)));
         assert_eq!(value(&state), Type::Col4((1.0, 0.0, 0.0, 0.25)));
         assert!(matches!(
             state.editor,
@@ -1037,7 +1070,7 @@ mod tests {
             ))
             .instruction;
 
-        assert!(matches!(instruction, Some(Instruction::Values)));
+        assert!(matches!(instruction, Some(Instruction::Edited)));
         assert_near(&state, (2.0, 0.0, 0.0));
     }
 
